@@ -7,7 +7,10 @@ DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 
-.PHONY: build dist vet test tidy install clean release
+INSTALL_DIR := $(shell go env GOBIN)
+INSTALL_DIR := $(if $(INSTALL_DIR),$(INSTALL_DIR),$(shell go env GOPATH)/bin)
+
+.PHONY: build dist vet test tidy install uninstall clean release
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) .
@@ -26,7 +29,11 @@ tidy:
 
 install:
 	go install -ldflags "$(LDFLAGS)" .
-	@echo "installed $(BINARY)"
+	@echo "installed $(INSTALL_DIR)/$(BINARY)"
+
+uninstall:
+	rm -f $(INSTALL_DIR)/$(BINARY)
+	@echo "removed $(INSTALL_DIR)/$(BINARY)"
 
 clean:
 	rm -rf bin
