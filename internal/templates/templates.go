@@ -19,16 +19,16 @@ type Template struct {
 	Dir  string
 }
 
-func (p Template) File() string { return filepath.Join(p.Dir, "template.yaml") }
+func (t Template) File() string { return filepath.Join(t.Dir, "template.yaml") }
 
-func (p Template) FetchExternals() string { return filepath.Join(p.Dir, "fetch-externals.sh") }
+func (t Template) FetchExternals() string { return filepath.Join(t.Dir, "fetch-externals.sh") }
 
-func (p Template) ApplyExternals() string {
-	return filepath.Join(p.Dir, "provision", "apply-externals.sh")
+func (t Template) ApplyExternals() string {
+	return filepath.Join(t.Dir, "provision", "apply-externals.sh")
 }
 
-func (p Template) Scalar(key string) string {
-	f, err := os.Open(p.File())
+func (t Template) Scalar(key string) string {
+	f, err := os.Open(t.File())
 	if err != nil {
 		return ""
 	}
@@ -79,7 +79,7 @@ func All(root string) ([]Template, error) {
 func Find(root, name string) (Template, error) {
 	dir := filepath.Join(root, name)
 	if _, err := os.Stat(filepath.Join(dir, "template.yaml")); err != nil {
-		return Template{}, fmt.Errorf("no such vm: %s", name)
+		return Template{}, fmt.Errorf("no such template: %s", name)
 	}
 	return Template{Name: name, Dir: dir}, nil
 }
@@ -110,23 +110,23 @@ func Add(root, url, name string) (Template, error) {
 	return tmpl, nil
 }
 
-func (p Template) Update() error {
-	return run.Stream("git", "-C", p.Dir, "pull", "--ff-only")
+func (t Template) Update() error {
+	return run.Stream("git", "-C", t.Dir, "pull", "--ff-only")
 }
 
-func (p Template) Remove() error {
-	return os.RemoveAll(p.Dir)
+func (t Template) Remove() error {
+	return os.RemoveAll(t.Dir)
 }
 
-func (p Template) Origin() string {
-	url, err := run.Output("git", "-C", p.Dir, "config", "--get", "remote.origin.url")
+func (t Template) Origin() string {
+	url, err := run.Output("git", "-C", t.Dir, "config", "--get", "remote.origin.url")
 	if err != nil {
 		return ""
 	}
 	return url
 }
 
-func (p Template) Dirty() bool {
-	out, err := run.Output("git", "-C", p.Dir, "status", "--porcelain")
+func (t Template) Dirty() bool {
+	out, err := run.Output("git", "-C", t.Dir, "status", "--porcelain")
 	return err == nil && out != ""
 }
