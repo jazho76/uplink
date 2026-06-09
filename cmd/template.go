@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/jazho76/vmm/internal/lima"
 	"github.com/jazho76/vmm/internal/templates"
 	"github.com/jazho76/vmm/internal/ui"
 	"github.com/spf13/cobra"
@@ -84,6 +85,9 @@ var templateRemoveCmd = &cobra.Command{
 		tmpl, err := findTemplate(args[0])
 		if err != nil {
 			return err
+		}
+		if _, exists := lima.Get(tmpl.Name); exists {
+			return fmt.Errorf("VM %q still exists; delete it first (dashboard Ctrl-X or `limactl delete %s`)", tmpl.Name, tmpl.Name)
 		}
 		if !templateRemoveForce && !ui.Confirm("Delete template "+tmpl.Name+" at "+tmpl.Dir+"?") {
 			return nil

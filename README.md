@@ -62,6 +62,10 @@ vmm template update <name>          # pull the latest version (fast-forward only
 vmm template remove <name>          # delete it (use --force to skip the prompt)
 ```
 
+`remove` refuses while a VM of the same name still exists, so you never orphan a
+running environment. Delete the VM first (dashboard `Ctrl-X` or
+`limactl delete <name>`).
+
 ## Managing VMs
 
 ```sh
