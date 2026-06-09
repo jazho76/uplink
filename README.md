@@ -58,7 +58,7 @@ vmm dashboard
 ```sh
 vmm template add <git-url> <name>   # clone a template into the templates dir
 vmm template list                   # show installed templates, origins, dirty state
-vmm template update <name>          # pull the latest version (fast-forward only)
+vmm template update [name]          # pull the latest version, fast-forward only (all if no name)
 vmm template remove <name>          # delete it (use --force to skip the prompt)
 ```
 

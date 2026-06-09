@@ -34,16 +34,44 @@ var templateAddCmd = &cobra.Command{
 }
 
 var templateUpdateCmd = &cobra.Command{
-	Use:   "update <name>",
-	Short: "Pull the latest version of a template",
-	Args:  cobra.ExactArgs(1),
+	Use:   "update [name]",
+	Short: "Pull the latest version of a template (all templates if no name given)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		tmpl, err := findTemplate(args[0])
+		if len(args) == 1 {
+			tmpl, err := findTemplate(args[0])
+			if err != nil {
+				return err
+			}
+			ui.Step("Updating template " + tmpl.Name)
+			return tmpl.Update()
+		}
+
+		root, err := templates.Root()
 		if err != nil {
 			return err
 		}
-		ui.Step("Updating template " + tmpl.Name)
-		return tmpl.Update()
+		tmpls, err := templates.All(root)
+		if err != nil {
+			return err
+		}
+		if len(tmpls) == 0 {
+			ui.Info("no templates installed")
+			return nil
+		}
+
+		var failed int
+		for _, t := range tmpls {
+			ui.Step("Updating template " + t.Name)
+			if err := t.Update(); err != nil {
+				ui.Error("%s: %s", t.Name, err)
+				failed++
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d templates failed to update", failed, len(tmpls))
+		}
+		return nil
 	},
 }
 
