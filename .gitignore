@@ -1,0 +1,5 @@
+# Locally-installed launcher binary (make install)
+/vms
+
+# Build output
+/bin/
