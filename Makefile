@@ -25,8 +25,8 @@ tidy:
 	go mod tidy
 
 install:
-	go build -ldflags "$(LDFLAGS)" -o $(CURDIR)/$(BINARY) .
-	@echo "installed $(CURDIR)/$(BINARY)"
+	go install -ldflags "$(LDFLAGS)" .
+	@echo "installed $(BINARY)"
 
 clean:
 	rm -rf bin

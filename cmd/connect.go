@@ -15,11 +15,11 @@ var connectCmd = &cobra.Command{
 
 		inst, exists := lima.Get(name)
 		if !exists {
-			prof, err := findProfile(name)
+			tmpl, err := findTemplate(name)
 			if err != nil {
 				return err
 			}
-			if err := createVM(prof); err != nil {
+			if err := createVM(tmpl); err != nil {
 				return err
 			}
 		}

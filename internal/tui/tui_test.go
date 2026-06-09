@@ -9,13 +9,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/profiles"
+	"github.com/jazho76/vmm/internal/templates"
 )
 
 func newTestModel() model {
 	m := model{
 		self:     "/tmp/vmm",
-		profiles: []profiles.Profile{{Name: "forge"}, {Name: "tokyo"}},
+		templates: []templates.Template{{Name: "forge"}, {Name: "tokyo"}},
 		spinner:  spinner.New(),
 		input:    textinput.New(),
 		host:     hostInfo{name: "testhost", os: "Linux", uptime: "up 1 hour"},

@@ -153,14 +153,14 @@ func (m model) renderPreview(width, height int) string {
 			m.renderGuest(&b, it.name)
 		}
 	case creating:
-		kv(&b, "cpus", it.prof.Scalar("cpus"))
-		kv(&b, "mem", it.prof.Scalar("memory"))
-		kv(&b, "disk", it.prof.Scalar("disk"))
+		kv(&b, "cpus", it.tmpl.Scalar("cpus"))
+		kv(&b, "mem", it.tmpl.Scalar("memory"))
+		kv(&b, "disk", it.tmpl.Scalar("disk"))
 	default:
 		b.WriteString(labelStyle.Render("not created, enter to provision") + "\n\n")
-		kv(&b, "cpus", it.prof.Scalar("cpus"))
-		kv(&b, "mem", it.prof.Scalar("memory"))
-		kv(&b, "disk", it.prof.Scalar("disk"))
+		kv(&b, "cpus", it.tmpl.Scalar("cpus"))
+		kv(&b, "mem", it.tmpl.Scalar("memory"))
+		kv(&b, "disk", it.tmpl.Scalar("disk"))
 		kv(&b, "auto", autostartLabel(it))
 		return clampBlock(b.String(), cw, height)
 	}

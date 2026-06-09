@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jazho76/vmm/internal/host"
 	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/profiles"
+	"github.com/jazho76/vmm/internal/templates"
 	"github.com/jazho76/vmm/internal/run"
 )
 
@@ -28,7 +28,7 @@ type item struct {
 	status    string
 	autostart bool
 	inst      lima.Instance
-	prof      profiles.Profile
+	tmpl      templates.Template
 }
 
 func (i item) created() bool { return i.kind == kindVM && i.status != "" }
@@ -44,7 +44,7 @@ const (
 
 type model struct {
 	self      string
-	profiles  []profiles.Profile
+	templates  []templates.Template
 	items     []item
 	cursor    int
 	width     int
@@ -98,11 +98,11 @@ func gatherHost() hostInfo {
 }
 
 func Run() error {
-	root, err := profiles.Root()
+	root, err := templates.Root()
 	if err != nil {
 		return err
 	}
-	profs, err := profiles.All(root)
+	tmpls, err := templates.All(root)
 	if err != nil {
 		return err
 	}
@@ -121,7 +121,7 @@ func Run() error {
 
 	m := model{
 		self:     exe,
-		profiles: profs,
+		templates: tmpls,
 		spinner:  sp,
 		input:    in,
 		host:     gatherHost(),
@@ -140,8 +140,8 @@ func (m model) Init() tea.Cmd {
 
 func (m *model) rebuild(instances map[string]lima.Instance) {
 	items := []item{{kind: kindHost, name: "host"}}
-	for _, p := range m.profiles {
-		it := item{kind: kindVM, name: p.Name, prof: p, autostart: lima.AutostartEnabled(p.Name)}
+	for _, p := range m.templates {
+		it := item{kind: kindVM, name: p.Name, tmpl: p, autostart: lima.AutostartEnabled(p.Name)}
 		if inst, ok := instances[p.Name]; ok {
 			it.inst = inst
 			it.status = inst.Status
