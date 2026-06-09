@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/run"
 )
 
 type GuestStats struct {

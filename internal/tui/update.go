@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/vms/internal/lima"
+	"github.com/jazho76/vmm/internal/lima"
 )
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

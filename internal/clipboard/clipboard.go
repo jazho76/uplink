@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/jazho76/vms/internal/lima"
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/lima"
+	"github.com/jazho76/vmm/internal/run"
 )
 
 func Push(name string) (string, error) {
@@ -32,7 +32,7 @@ func Push(name string) (string, error) {
 		return "", err
 	}
 
-	tmp, err := os.CreateTemp("", "vms-clipboard-*")
+	tmp, err := os.CreateTemp("", "vmm-clipboard-*")
 	if err != nil {
 		return "", err
 	}

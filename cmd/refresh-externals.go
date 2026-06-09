@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/run"
 	"github.com/spf13/cobra"
 )
 

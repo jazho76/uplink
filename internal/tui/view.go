@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/vms/internal/ui"
+	"github.com/jazho76/vmm/internal/ui"
 )
 
 const (
@@ -90,7 +90,7 @@ func (m model) View() string {
 
 func (m model) renderList() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("vms") + "\n\n")
+	b.WriteString(titleStyle.Render("vmm") + "\n\n")
 	for i, it := range m.items {
 		marker := "  "
 		name := dimRow.Render(it.name)

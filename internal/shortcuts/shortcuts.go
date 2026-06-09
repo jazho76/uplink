@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/run"
 )
 
 const (
@@ -24,8 +24,8 @@ type shortcut struct {
 
 func defaults(exe string) []shortcut {
 	return []shortcut{
-		{"vms-launcher", "<Control><Alt>t", "VMs launcher", "alacritty -e " + exe},
-		{"vms-clipboard", "<Control><Alt>p", "VMs push clipboard", exe + " push-clipboard"},
+		{"vmm-launcher", "<Control><Alt>t", "VMs launcher", "alacritty -e " + exe},
+		{"vmm-clipboard", "<Control><Alt>p", "VMs push clipboard", exe + " push-clipboard"},
 	}
 }
 

@@ -3,14 +3,14 @@ package cmd
 import (
 	"os"
 
-	"github.com/jazho76/vms/internal/tui"
-	"github.com/jazho76/vms/internal/ui"
-	"github.com/jazho76/vms/internal/version"
+	"github.com/jazho76/vmm/internal/tui"
+	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/vmm/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "vms",
+	Use:           "vmm",
 	Short:         "Lima VM control plane",
 	Version:       version.Version,
 	SilenceUsage:  true,

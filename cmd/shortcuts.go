@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/jazho76/vms/internal/shortcuts"
-	"github.com/jazho76/vms/internal/ui"
+	"github.com/jazho76/vmm/internal/shortcuts"
+	"github.com/jazho76/vmm/internal/ui"
 	"github.com/spf13/cobra"
 )
 

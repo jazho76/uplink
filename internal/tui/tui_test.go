@@ -8,13 +8,13 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jazho76/vms/internal/lima"
-	"github.com/jazho76/vms/internal/profiles"
+	"github.com/jazho76/vmm/internal/lima"
+	"github.com/jazho76/vmm/internal/profiles"
 )
 
 func newTestModel() model {
 	m := model{
-		self:     "/tmp/vms",
+		self:     "/tmp/vmm",
 		profiles: []profiles.Profile{{Name: "forge"}, {Name: "tokyo"}},
 		spinner:  spinner.New(),
 		input:    textinput.New(),

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/run"
 )
 
 const bin = "limactl"

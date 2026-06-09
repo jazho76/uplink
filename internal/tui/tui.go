@@ -7,10 +7,10 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/vms/internal/host"
-	"github.com/jazho76/vms/internal/lima"
-	"github.com/jazho76/vms/internal/profiles"
-	"github.com/jazho76/vms/internal/run"
+	"github.com/jazho76/vmm/internal/host"
+	"github.com/jazho76/vmm/internal/lima"
+	"github.com/jazho76/vmm/internal/profiles"
+	"github.com/jazho76/vmm/internal/run"
 )
 
 const pollInterval = 2 * time.Second

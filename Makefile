@@ -1,5 +1,5 @@
-BINARY  := vms
-PKG     := github.com/jazho76/vms/internal/version
+BINARY  := vmm
+PKG     := github.com/jazho76/vmm/internal/version
 
 VERSION := $(shell git describe --tags --match 'v*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
@@ -24,8 +24,6 @@ test:
 tidy:
 	go mod tidy
 
-# Build the launcher at the repo root. Profile repos live as siblings of this
-# repo, which the binary discovers via its parent directory.
 install:
 	go build -ldflags "$(LDFLAGS)" -o $(CURDIR)/$(BINARY) .
 	@echo "installed $(CURDIR)/$(BINARY)"

@@ -3,10 +3,10 @@ package cmd
 import (
 	"os"
 
-	"github.com/jazho76/vms/internal/lima"
-	"github.com/jazho76/vms/internal/profiles"
-	"github.com/jazho76/vms/internal/run"
-	"github.com/jazho76/vms/internal/ui"
+	"github.com/jazho76/vmm/internal/lima"
+	"github.com/jazho76/vmm/internal/profiles"
+	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/vmm/internal/ui"
 	"github.com/spf13/cobra"
 )
 

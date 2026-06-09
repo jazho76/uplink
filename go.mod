@@ -1,4 +1,4 @@
-module github.com/jazho76/vms
+module github.com/jazho76/vmm
 
 go 1.26
 
