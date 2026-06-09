@@ -24,7 +24,7 @@ type shortcut struct {
 
 func defaults(exe string) []shortcut {
 	return []shortcut{
-		{"vmm-launcher", "<Control><Alt>t", "VMs launcher", "alacritty -e " + exe},
+		{"vmm-launcher", "<Control><Alt>t", "VMs launcher", "alacritty -e " + exe + " dashboard"},
 		{"vmm-clipboard", "<Control><Alt>p", "VMs push clipboard", exe + " push-clipboard"},
 	}
 }
