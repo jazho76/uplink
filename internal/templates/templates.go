@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/jazho76/vmm/internal/run"
 )
+
+var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type Template struct {
 	Name string
@@ -77,4 +82,51 @@ func Find(root, name string) (Template, error) {
 		return Template{}, fmt.Errorf("no such vm: %s", name)
 	}
 	return Template{Name: name, Dir: dir}, nil
+}
+
+func ValidName(name string) error {
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("invalid name %q: use letters, digits, '.', '_', '-' and no leading dot", name)
+	}
+	return nil
+}
+
+func Add(root, url, name string) (Template, error) {
+	if err := ValidName(name); err != nil {
+		return Template{}, err
+	}
+	dir := filepath.Join(root, name)
+	if _, err := os.Stat(dir); err == nil {
+		return Template{}, fmt.Errorf("template %q already exists", name)
+	}
+	if err := run.Stream("git", "clone", url, dir); err != nil {
+		return Template{}, err
+	}
+	tmpl := Template{Name: name, Dir: dir}
+	if _, err := os.Stat(tmpl.File()); err != nil {
+		os.RemoveAll(dir)
+		return Template{}, fmt.Errorf("%s is not a template: no template.yaml", url)
+	}
+	return tmpl, nil
+}
+
+func (p Template) Update() error {
+	return run.Stream("git", "-C", p.Dir, "pull", "--ff-only")
+}
+
+func (p Template) Remove() error {
+	return os.RemoveAll(p.Dir)
+}
+
+func (p Template) Origin() string {
+	url, err := run.Output("git", "-C", p.Dir, "config", "--get", "remote.origin.url")
+	if err != nil {
+		return ""
+	}
+	return url
+}
+
+func (p Template) Dirty() bool {
+	out, err := run.Output("git", "-C", p.Dir, "status", "--porcelain")
+	return err == nil && out != ""
 }
