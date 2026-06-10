@@ -92,6 +92,10 @@ func (m model) renderList() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("vmm") + "\n\n")
 	for i, it := range m.items {
+		label := " "
+		if i < 9 {
+			label = keyStyle.Render(strconv.Itoa(i + 1))
+		}
 		marker := "  "
 		name := dimRow.Render(it.name)
 		if i == m.cursor {
@@ -105,7 +109,7 @@ func (m model) renderList() string {
 		if verb := m.tasks[it.name]; verb != "" {
 			trailing += " " + m.spinner.View() + " " + labelStyle.Render(verb)
 		}
-		fmt.Fprintf(&b, "%s%s %s%s\n", marker, glyph(it), name, trailing)
+		fmt.Fprintf(&b, "%s %s%s %s%s\n", label, marker, glyph(it), name, trailing)
 	}
 	return b.String()
 }

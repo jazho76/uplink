@@ -98,6 +98,12 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		return m.connect()
 
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+		if idx := int(msg.String()[0] - '1'); idx < len(m.items) {
+			m.cursor = idx
+			return m.connect()
+		}
+
 	case "ctrl+l":
 		if it := m.selected(); m.hasLogs(it) {
 			m.mode = modeLogs
