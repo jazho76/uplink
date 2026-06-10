@@ -1,13 +1,8 @@
 # vmm
 
-Isolated development environments on top of [Lima](https://lima-vm.io/), built
-to be effortless to start and maintain. Each environment is a full Linux VM
-defined by a **template** (a git repo with its config, dotfiles, and
-provisioning), so a clean, sandboxed workspace is one command away and just as
-easy to recreate. Version your environments in git, update them with a pull,
-and rebuild from scratch whenever you want a fresh slate. The dashboard ties it
-together as the launcher of your workflow: browse your VMs, drop into a shell,
-start and stop them, and tail logs from one interactive view.
+A tool for managing and launching isolated development environments on top of
+[Lima](https://lima-vm.io/). Each environment is a full Linux VM defined by a
+template.
 
 ## Requirements
 
