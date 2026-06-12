@@ -50,7 +50,7 @@ var (
 func glyph(it item) string {
 	switch {
 	case it.kind == kindHost:
-		return lipgloss.NewStyle().Foreground(ui.Cyan).Render("◆")
+		return lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
 	case it.running():
 		return lipgloss.NewStyle().Foreground(ui.Green).Render("●")
 	default:
@@ -103,7 +103,7 @@ func (m model) renderList() string {
 		}
 		trailing := ""
 		if it.autostart {
-			trailing += " " + autoMarker.Render("⏻")
+			trailing += " " + autoMarker.Render("↻")
 		}
 		if verb := m.tasks[it.name]; verb != "" {
 			trailing += " " + m.spinner.View() + " " + labelStyle.Render(verb)
@@ -190,7 +190,7 @@ func (m model) renderGuest(b *strings.Builder, name string) {
 
 func autostartLabel(it item) string {
 	if it.autostart {
-		return autoMarker.Render("⏻ on")
+		return autoMarker.Render("↻ on")
 	}
 	return "off"
 }
