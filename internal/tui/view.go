@@ -52,8 +52,6 @@ func glyph(it item) string {
 		return lipgloss.NewStyle().Foreground(ui.Cyan).Render("◆")
 	case it.running():
 		return lipgloss.NewStyle().Foreground(ui.Green).Render("●")
-	case it.status == "":
-		return lipgloss.NewStyle().Foreground(ui.Yellow).Render("◎")
 	default:
 		return lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
 	}
@@ -124,49 +122,29 @@ func (m model) renderPreview(width, height int) string {
 	if it.kind == kindHost {
 		return clampBlock(m.renderHost(), cw, height)
 	}
-	creating := m.provisioning(it.name)
-
 	var b strings.Builder
-	statusWord := strings.ToLower(statusText(it))
-	if creating {
-		statusWord = statusStyle.Render("provisioning")
-	}
-	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name), glyph(it), statusWord)
+	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name), glyph(it), strings.ToLower(it.status))
 
-	switch {
-	case it.created():
-		kv(&b, "cpus", it.inst.CPUs)
-		kv(&b, "mem", ui.Bytes(it.inst.Memory))
-		kv(&b, "disk", ui.Bytes(it.inst.Disk))
-		if it.inst.SSHAddress != "" {
-			kv(&b, "ssh", it.inst.SSHAddress+":"+it.inst.SSHLocalPort)
-		}
-		if it.inst.VMType != "" {
-			kv(&b, "type", it.inst.VMType)
-		}
-		if it.inst.Arch != "" {
-			kv(&b, "arch", it.inst.Arch)
-		}
-		if it.inst.Hostname != "" {
-			kv(&b, "host", it.inst.Hostname)
-		}
-		kv(&b, "dir", it.inst.Dir)
-		kv(&b, "auto", autostartLabel(it))
-		if it.running() {
-			b.WriteString("\n" + section("live", cw))
-			m.renderGuest(&b, it.name)
-		}
-	case creating:
-		kv(&b, "cpus", it.tmpl.Scalar("cpus"))
-		kv(&b, "mem", it.tmpl.Scalar("memory"))
-		kv(&b, "disk", it.tmpl.Scalar("disk"))
-	default:
-		b.WriteString(labelStyle.Render("not created, enter to provision") + "\n\n")
-		kv(&b, "cpus", it.tmpl.Scalar("cpus"))
-		kv(&b, "mem", it.tmpl.Scalar("memory"))
-		kv(&b, "disk", it.tmpl.Scalar("disk"))
-		kv(&b, "auto", autostartLabel(it))
-		return clampBlock(b.String(), cw, height)
+	kv(&b, "cpus", it.inst.CPUs)
+	kv(&b, "mem", ui.Bytes(it.inst.Memory))
+	kv(&b, "disk", ui.Bytes(it.inst.Disk))
+	if it.inst.SSHAddress != "" {
+		kv(&b, "ssh", it.inst.SSHAddress+":"+it.inst.SSHLocalPort)
+	}
+	if it.inst.VMType != "" {
+		kv(&b, "type", it.inst.VMType)
+	}
+	if it.inst.Arch != "" {
+		kv(&b, "arch", it.inst.Arch)
+	}
+	if it.inst.Hostname != "" {
+		kv(&b, "host", it.inst.Hostname)
+	}
+	kv(&b, "dir", it.inst.Dir)
+	kv(&b, "auto", autostartLabel(it))
+	if it.running() {
+		b.WriteString("\n" + section("live", cw))
+		m.renderGuest(&b, it.name)
 	}
 
 	if m.logPeek != "" {
@@ -222,22 +200,12 @@ func (m model) renderHost() string {
 	return b.String()
 }
 
-func statusText(it item) string {
-	if it.status == "" {
-		return "not created"
-	}
-	return it.status
-}
-
 func kv(b *strings.Builder, key, value string) {
 	fmt.Fprintf(b, "%s %s\n", labelStyle.Render(fmt.Sprintf("%-6s", key)), value)
 }
 
 func (m model) renderLogs() string {
 	header := titleStyle.Render("logs: " + m.logName)
-	if m.provisioning(m.logName) {
-		header += " " + statusStyle.Render("provisioning…")
-	}
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
 	bodyH := m.height - 2
@@ -265,15 +233,11 @@ func (m model) renderFooter() string {
 	it := m.selected()
 	var pairs [][2]string
 	switch {
-	case it.created():
+	case it.kind == kindVM:
 		pairs = [][2]string{
 			{"↵", "connect"}, {"^l", "logs"}, {"^s", "stop"},
 			{"^r", "restart"}, {"^a", "auto"}, {"^x", "del"},
 		}
-	case m.provisioning(it.name):
-		pairs = [][2]string{{"^l", "logs"}}
-	case it.kind == kindVM:
-		pairs = [][2]string{{"↵", "create"}}
 	default:
 		pairs = [][2]string{{"↵", "connect"}}
 	}

@@ -42,15 +42,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.guest[msg.name] = guestEntry{stats: msg.stats, at: time.Now(), err: msg.err}
 		return m, nil
 
-	case createDoneMsg:
-		delete(m.tasks, msg.name)
-		if msg.err != nil {
-			m.status = fmt.Sprintf("create %s failed: %v", msg.name, msg.err)
-		} else {
-			m.status = "created " + msg.name
-		}
-		return m, loadCmd
-
 	case actionMsg:
 		delete(m.tasks, msg.name)
 		m.status = msg.status
@@ -113,22 +104,22 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, logTickCmd()
 		}
 	case "ctrl+s":
-		if it := m.selected(); it.created() && !m.hasTask(it.name) {
+		if it := m.selected(); it.kind == kindVM && !m.hasTask(it.name) {
 			m.tasks[it.name], m.status = verbStop, ""
 			return m, stopCmd(it.name)
 		}
 	case "ctrl+r":
-		if it := m.selected(); it.created() && !m.hasTask(it.name) {
+		if it := m.selected(); it.kind == kindVM && !m.hasTask(it.name) {
 			m.tasks[it.name], m.status = verbRestart, ""
 			return m, restartCmd(it.name)
 		}
 	case "ctrl+a":
-		if it := m.selected(); it.created() && !m.hasTask(it.name) {
+		if it := m.selected(); it.kind == kindVM && !m.hasTask(it.name) {
 			m.tasks[it.name], m.status = verbAuto, ""
 			return m, autostartCmd(it.name, !it.autostart)
 		}
 	case "ctrl+x":
-		if it := m.selected(); it.created() && !m.hasTask(it.name) {
+		if it := m.selected(); it.kind == kindVM && !m.hasTask(it.name) {
 			m.mode = modeConfirmDelete
 			m.input.SetValue("")
 			m.input.Placeholder = ""
@@ -166,14 +157,6 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) connect() (tea.Model, tea.Cmd) {
 	it := m.selected()
 
-	if it.kind == kindVM && !it.created() {
-		if m.hasTask(it.name) {
-			return m, nil
-		}
-		m.tasks[it.name], m.status = verbProvision, ""
-		return m, tea.Batch(createVMCmd(m.self, it.name), m.onSelectionChange())
-	}
-
 	var cmd *exec.Cmd
 	if it.kind == kindHost {
 		cmd = hostShellCmd()
@@ -186,14 +169,6 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 		}
 		return execDoneMsg{quit: true}
 	})
-}
-
-func createVMCmd(self, name string) tea.Cmd {
-	return func() tea.Msg {
-
-		err := exec.Command(self, "create", name).Run()
-		return createDoneMsg{name: name, err: err}
-	}
 }
 
 func (m model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

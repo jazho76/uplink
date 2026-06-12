@@ -22,14 +22,16 @@ type Instance struct {
 	VMType       string
 	Arch         string
 	Hostname     string
+	TemplateDir  string
 }
 
 func (i Instance) Running() bool { return i.Status == "Running" }
 
-const listFields = 11
+const listFields = 12
 
 const listFormat = "{{.Name}}\t{{.Status}}\t{{.CPUs}}\t{{.Memory}}\t{{.Disk}}\t" +
-	"{{.SSHAddress}}\t{{.SSHLocalPort}}\t{{.Dir}}\t{{.VMType}}\t{{.Arch}}\t{{.Hostname}}"
+	"{{.SSHAddress}}\t{{.SSHLocalPort}}\t{{.Dir}}\t{{.VMType}}\t{{.Arch}}\t{{.Hostname}}\t" +
+	"{{.Param.TemplateDir}}"
 
 func List() ([]Instance, error) {
 	out, err := run.Output(bin, "list", "--format", listFormat)
@@ -48,7 +50,7 @@ func List() ([]Instance, error) {
 		instances = append(instances, Instance{
 			Name: f[0], Status: f[1], CPUs: f[2], Memory: f[3], Disk: f[4],
 			SSHAddress: f[5], SSHLocalPort: f[6], Dir: f[7],
-			VMType: f[8], Arch: f[9], Hostname: f[10],
+			VMType: f[8], Arch: f[9], Hostname: f[10], TemplateDir: f[11],
 		})
 	}
 	return instances, nil

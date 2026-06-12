@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jazho76/vmm/internal/lima"
 	"github.com/jazho76/vmm/internal/templates"
@@ -15,16 +16,17 @@ var templateCmd = &cobra.Command{
 }
 
 var templateAddCmd = &cobra.Command{
-	Use:   "add <git-url> <name>",
+	Use:   "add <git-url>",
 	Short: "Clone a template repo into the templates directory",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		root, err := templates.Root()
 		if err != nil {
 			return err
 		}
-		ui.Step("Adding template " + args[1])
-		tmpl, err := templates.Add(root, args[0], args[1])
+		name := templates.NameFromURL(args[0])
+		ui.Step("Adding template " + name)
+		tmpl, err := templates.Add(root, args[0], name)
 		if err != nil {
 			return err
 		}
@@ -114,8 +116,15 @@ var templateRemoveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if _, exists := lima.Get(tmpl.Name); exists {
-			return fmt.Errorf("VM %q still exists; delete it first (dashboard Ctrl-X or `limactl delete %s`)", tmpl.Name, tmpl.Name)
+		instances, _ := lima.List()
+		var users []string
+		for _, inst := range instances {
+			if inst.TemplateDir == tmpl.Dir {
+				users = append(users, inst.Name)
+			}
+		}
+		if len(users) > 0 {
+			return fmt.Errorf("instances still use this template: %s; delete them first (dashboard Ctrl-X or `limactl delete <name>`)", strings.Join(users, ", "))
 		}
 		if !templateRemoveForce && !ui.Confirm("Delete template "+tmpl.Name+" at "+tmpl.Dir+"?") {
 			return nil

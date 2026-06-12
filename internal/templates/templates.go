@@ -91,6 +91,15 @@ func ValidName(name string) error {
 	return nil
 }
 
+func NameFromURL(url string) string {
+	url = strings.TrimRight(url, "/")
+	url = strings.TrimSuffix(url, ".git")
+	if i := strings.LastIndexAny(url, "/:"); i >= 0 {
+		url = url[i+1:]
+	}
+	return url
+}
+
 func Add(root, url, name string) (Template, error) {
 	if err := ValidName(name); err != nil {
 		return Template{}, err

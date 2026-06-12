@@ -4,20 +4,29 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
+	"github.com/jazho76/vmm/internal/lima"
 	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/vmm/internal/templates"
 	"github.com/spf13/cobra"
 )
 
 var refreshExternalsCmd = &cobra.Command{
-	Use:   "refresh-externals <vm>",
-	Short: "Re-fetch a VM's externals and re-apply them into the running VM",
+	Use:   "refresh-externals <instance>",
+	Short: "Re-fetch an instance's externals and re-apply them into the running instance",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		tmpl, err := findTemplate(args[0])
-		if err != nil {
-			return err
+		name := args[0]
+		inst, exists := lima.Get(name)
+		if !exists {
+			return fmt.Errorf("no such instance %q", name)
 		}
+		if inst.TemplateDir == "" {
+			return fmt.Errorf("instance %q was not created by vmm", name)
+		}
+		tmpl := templates.Template{Name: filepath.Base(inst.TemplateDir), Dir: inst.TemplateDir}
+
 		if info, err := os.Stat(tmpl.FetchExternals()); err != nil || info.Mode()&0o111 == 0 {
 			return fmt.Errorf("%s has no executable fetch-externals.sh", tmpl.Name)
 		}
@@ -32,7 +41,7 @@ var refreshExternalsCmd = &cobra.Command{
 		}
 		defer script.Close()
 
-		shell := exec.Command("limactl", "shell", tmpl.Name, "--", "bash")
+		shell := exec.Command("limactl", "shell", name, "--", "bash")
 		shell.Stdin = script
 		shell.Stdout = os.Stdout
 		shell.Stderr = os.Stderr

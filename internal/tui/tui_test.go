@@ -9,19 +9,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/templates"
 )
 
 func newTestModel() model {
 	m := model{
-		self:     "/tmp/vmm",
-		templates: []templates.Template{{Name: "forge"}, {Name: "tokyo"}},
-		spinner:  spinner.New(),
-		input:    textinput.New(),
-		host:     hostInfo{name: "testhost", os: "Linux", uptime: "up 1 hour"},
-		tasks:    map[string]string{},
+		self:    "/tmp/vmm",
+		spinner: spinner.New(),
+		input:   textinput.New(),
+		host:    hostInfo{name: "testhost", os: "Linux", uptime: "up 1 hour"},
+		guest:   map[string]guestEntry{},
+		tasks:   map[string]string{},
 	}
-	m.rebuild(nil)
+	m.rebuild(map[string]lima.Instance{
+		"forge": {Name: "forge", Status: "Stopped"},
+		"tokyo": {Name: "tokyo", Status: "Stopped"},
+	})
 	return m
 }
 
@@ -47,19 +49,19 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 	m := sized(newTestModel())
 	loaded := loadedMsg{instances: map[string]lima.Instance{
 		"forge": {Name: "forge", Status: "Running", CPUs: "6"},
+		"tokyo": {Name: "tokyo", Status: "Stopped"},
 	}}
 	next, _ := m.Update(loaded)
 	m = next.(model)
+
+	if !m.items[1].running() {
+		t.Fatalf("forge should be running, got status %q", m.items[1].status)
+	}
+	if m.items[2].status != "Stopped" {
+		t.Fatalf("tokyo should be stopped, got %q", m.items[2].status)
+	}
+
 	m.cursor = 1
-
-	forge := m.items[1]
-	if !forge.running() {
-		t.Fatalf("forge should be running, got status %q", forge.status)
-	}
-	if m.items[2].status != "" {
-		t.Fatalf("tokyo should be uncreated, got %q", m.items[2].status)
-	}
-
 	view := m.View()
 	for _, want := range []string{"forge", "tokyo", "host", "running"} {
 		if !strings.Contains(view, want) {
@@ -106,15 +108,6 @@ func TestDeleteConfirmFlow(t *testing.T) {
 	}
 }
 
-func TestDeleteRequiresCreated(t *testing.T) {
-	m := sized(newTestModel())
-	m.cursor = 2
-	m = key(m, "ctrl+x")
-	if m.mode != modeNormal {
-		t.Fatalf("ctrl+x on an uncreated vm should be a no-op")
-	}
-}
-
 func TestLogsModeToggle(t *testing.T) {
 	m := sized(newTestModel())
 	m = applyLoaded(m, "forge", "Running")
@@ -131,15 +124,6 @@ func TestLogsModeToggle(t *testing.T) {
 	m = key(m, "esc")
 	if m.mode != modeNormal {
 		t.Fatalf("esc should close the log pager")
-	}
-}
-
-func TestLogsRequiresCreated(t *testing.T) {
-	m := sized(newTestModel())
-	m.cursor = 2
-	m = key(m, "ctrl+l")
-	if m.mode != modeNormal {
-		t.Fatalf("ctrl+l on an uncreated vm should be a no-op")
 	}
 }
 

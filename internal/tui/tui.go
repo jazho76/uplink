@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -9,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jazho76/vmm/internal/host"
 	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/templates"
 	"github.com/jazho76/vmm/internal/run"
 )
 
@@ -28,10 +28,8 @@ type item struct {
 	status    string
 	autostart bool
 	inst      lima.Instance
-	tmpl      templates.Template
 }
 
-func (i item) created() bool { return i.kind == kindVM && i.status != "" }
 func (i item) running() bool { return i.status == "Running" }
 
 type mode int
@@ -44,7 +42,6 @@ const (
 
 type model struct {
 	self      string
-	templates  []templates.Template
 	items     []item
 	cursor    int
 	width     int
@@ -63,15 +60,13 @@ type model struct {
 }
 
 const (
-	verbProvision = "provisioning"
-	verbStop      = "stopping"
-	verbRestart   = "restarting"
-	verbAuto      = "autostart"
-	verbDelete    = "deleting"
+	verbStop    = "stopping"
+	verbRestart = "restarting"
+	verbAuto    = "autostart"
+	verbDelete  = "deleting"
 )
 
-func (m model) hasTask(name string) bool      { return m.tasks[name] != "" }
-func (m model) provisioning(name string) bool { return m.tasks[name] == verbProvision }
+func (m model) hasTask(name string) bool { return m.tasks[name] != "" }
 
 type guestEntry struct {
 	stats lima.GuestStats
@@ -98,14 +93,6 @@ func gatherHost() hostInfo {
 }
 
 func Run() error {
-	root, err := templates.Root()
-	if err != nil {
-		return err
-	}
-	tmpls, err := templates.All(root)
-	if err != nil {
-		return err
-	}
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -120,13 +107,12 @@ func Run() error {
 	in.CharLimit = 32
 
 	m := model{
-		self:     exe,
-		templates: tmpls,
-		spinner:  sp,
-		input:    in,
-		host:     gatherHost(),
-		guest:    map[string]guestEntry{},
-		tasks:    map[string]string{},
+		self:    exe,
+		spinner: sp,
+		input:   in,
+		host:    gatherHost(),
+		guest:   map[string]guestEntry{},
+		tasks:   map[string]string{},
 	}
 	m.rebuild(nil)
 
@@ -140,13 +126,20 @@ func (m model) Init() tea.Cmd {
 
 func (m *model) rebuild(instances map[string]lima.Instance) {
 	items := []item{{kind: kindHost, name: "host"}}
-	for _, p := range m.templates {
-		it := item{kind: kindVM, name: p.Name, tmpl: p, autostart: lima.AutostartEnabled(p.Name)}
-		if inst, ok := instances[p.Name]; ok {
-			it.inst = inst
-			it.status = inst.Status
-		}
-		items = append(items, it)
+	names := make([]string, 0, len(instances))
+	for name := range instances {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		inst := instances[name]
+		items = append(items, item{
+			kind:      kindVM,
+			name:      name,
+			status:    inst.Status,
+			inst:      inst,
+			autostart: lima.AutostartEnabled(name),
+		})
 	}
 	m.items = items
 	if m.cursor >= len(m.items) {
@@ -176,10 +169,6 @@ type loadedMsg struct {
 type actionMsg struct {
 	name   string
 	status string
-}
-type createDoneMsg struct {
-	name string
-	err  error
 }
 type execDoneMsg struct {
 	status string
@@ -237,7 +226,7 @@ func (m *model) onSelectionChange() tea.Cmd {
 }
 
 func (m model) hasLogs(it item) bool {
-	return it.kind == kindVM && (it.created() || m.provisioning(it.name))
+	return it.kind == kindVM
 }
 
 const maxLogPeek = 300
