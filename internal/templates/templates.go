@@ -1,7 +1,6 @@
 package templates
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,29 +24,6 @@ func (t Template) FetchExternals() string { return filepath.Join(t.Dir, "fetch-e
 
 func (t Template) ApplyExternals() string {
 	return filepath.Join(t.Dir, "provision", "apply-externals.sh")
-}
-
-func (t Template) Scalar(key string) string {
-	f, err := os.Open(t.File())
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-
-	prefix := key + ":"
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		val := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		if i := strings.IndexByte(val, '#'); i >= 0 {
-			val = strings.TrimSpace(val[:i])
-		}
-		return strings.Trim(val, `"`)
-	}
-	return ""
 }
 
 func Root() (string, error) {
