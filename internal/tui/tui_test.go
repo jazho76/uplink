@@ -48,7 +48,7 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 func TestLoadedMsgSetsStatus(t *testing.T) {
 	m := sized(newTestModel())
 	loaded := loadedMsg{instances: map[string]lima.Instance{
-		"forge": {Name: "forge", Status: "Running", CPUs: "6"},
+		"forge": {Name: "forge", Status: "Running", CPUs: "6", TemplateDir: "/srv/templates/forge_vm"},
 		"tokyo": {Name: "tokyo", Status: "Stopped"},
 	}}
 	next, _ := m.Update(loaded)
@@ -63,7 +63,7 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 
 	m.cursor = 1
 	view := m.View()
-	for _, want := range []string{"forge", "tokyo", "host", "running"} {
+	for _, want := range []string{"forge", "tokyo", "host", "running", "template", "forge_vm"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}

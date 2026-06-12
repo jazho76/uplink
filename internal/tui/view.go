@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -125,6 +126,9 @@ func (m model) renderPreview(width, height int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name), glyph(it), strings.ToLower(it.status))
 
+	if it.inst.TemplateDir != "" {
+		kv(&b, "template", filepath.Base(it.inst.TemplateDir))
+	}
 	kv(&b, "cpus", it.inst.CPUs)
 	kv(&b, "mem", ui.Bytes(it.inst.Memory))
 	kv(&b, "disk", ui.Bytes(it.inst.Disk))
