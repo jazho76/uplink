@@ -4,6 +4,8 @@ A tool for managing and launching isolated development environments on top of
 [Lima](https://lima-vm.io/). Each environment is a full Linux VM defined by a
 template.
 
+![vmm dashboard](docs/dashboard.png)
+
 ## Requirements
 
 - Linux (the prebuilt binary is `linux/amd64`)
