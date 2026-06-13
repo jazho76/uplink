@@ -61,10 +61,6 @@ vmm template update [name]          # pull the latest version, fast-forward only
 vmm template remove <name>          # delete it (use --force to skip the prompt)
 ```
 
-`remove` refuses while any instance created from the template still exists, so
-you never orphan a running environment. Delete those instances first (dashboard
-`Ctrl-X` or `limactl delete <name>`).
-
 ## Managing instances
 
 ```sh
@@ -76,31 +72,29 @@ vmm refresh-externals <instance>   # re-fetch and re-apply the instance's extern
 
 `vmm create` is how you spin up an instance; the name defaults to the template's,
 and you pass a second argument to run more than one from the same template.
-`vmm connect` is the everyday command: it starts the instance if stopped and
-drops you into a shell. To read an instance's serial log, use the dashboard
-(`Ctrl-L`) or tail `~/.lima/<name>/serial.log` directly.
 
 ## Dashboard
 
-`vmm dashboard` opens an interactive list of your instances. It lists exactly
-what Lima knows about, so instances created outside vmm show up too. Create new
-instances from the CLI with `vmm create`.
+`vmm dashboard` is the interactive hub: a two-pane TUI over everything Lima
+knows about, so instances created outside vmm show up too.
 
-| Key         | Action                            |
-| ----------- | --------------------------------- |
-| `↑` / `k`   | move up                           |
-| `↓` / `j`   | move down                         |
-| `Enter`     | connect (starts it if stopped)    |
-| `Ctrl-L`    | view logs                         |
-| `Ctrl-S`    | stop                              |
-| `Ctrl-R`    | restart                           |
-| `Ctrl-A`    | toggle autostart                  |
-| `Ctrl-X`    | delete (type the name to confirm) |
-| `q` / `Esc` | quit                              |
+| Key             | Action                  |
+| --------------- | ----------------------- |
+| `↑`/`k` `↓`/`j` | move                    |
+| `1`-`9`         | connect to that vm      |
+| `Enter`         | connect the selected vm |
+| `Ctrl-L`        | view logs               |
+| `Ctrl-S`        | stop                    |
+| `Ctrl-R`        | restart                 |
+| `Ctrl-A`        | toggle autostart        |
+| `Ctrl-X`        | delete                  |
+| `q` / `Esc`     | quit                    |
 
-## GNOME shortcuts
+## Launcher
 
-On a GNOME session you can register global keybindings:
+On a GNOME session, register global keybindings so vmm behaves like a native
+app launcher: one hotkey pops the dashboard in an Alacritty window, no terminal
+needed.
 
 ```sh
 vmm install-shortcuts     # Ctrl+Alt+T opens the dashboard, Ctrl+Alt+P pushes the clipboard
@@ -116,13 +110,8 @@ template.yaml        # Lima config; declares `param: TemplateDir` and mounts
                      # host paths as {{.Param.TemplateDir}}/dotfiles, etc.
 dotfiles/            # mounted read-only into the guest
 provision/           # provisioning scripts referenced by template.yaml
-fetch-externals.sh   # optional: host-side step to pull secrets before create
+fetch-externals.sh   # optional: host-side step to pull externals before create
 ```
-
-`vmm` injects the template's directory as `TemplateDir` at create time, so
-mounts and provisioning can reference files that ship with the template. If a
-template defines `fetch-externals.sh`, it runs on the host before the instance
-is created, and `vmm refresh-externals` re-applies it into a running instance.
 
 ## From source
 
