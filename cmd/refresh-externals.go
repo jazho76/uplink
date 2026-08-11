@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/run"
-	"github.com/jazho76/vmm/internal/templates"
+	"github.com/jazho76/uplink/internal/lima"
+	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/templates"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +23,7 @@ var refreshExternalsCmd = &cobra.Command{
 			return fmt.Errorf("no such instance %q", name)
 		}
 		if inst.TemplateDir == "" {
-			return fmt.Errorf("instance %q was not created by vmm", name)
+			return fmt.Errorf("instance %q was not created by uplink", name)
 		}
 		tmpl := templates.Template{Name: filepath.Base(inst.TemplateDir), Dir: inst.TemplateDir}
 
@@ -50,5 +50,5 @@ var refreshExternalsCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(refreshExternalsCmd)
+	vmCmd.AddCommand(refreshExternalsCmd)
 }

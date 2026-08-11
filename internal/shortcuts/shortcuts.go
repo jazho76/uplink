@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/uplink/internal/run"
 )
 
 const (
@@ -22,10 +22,12 @@ type shortcut struct {
 	command string
 }
 
+var legacyIDs = []string{"vmm-launcher", "vmm-clipboard"}
+
 func defaults(exe string) []shortcut {
 	return []shortcut{
-		{"vmm-launcher", "<Control><Alt>t", "VMs launcher", "alacritty -e " + exe + " dashboard"},
-		{"vmm-clipboard", "<Control><Alt>p", "VMs push clipboard", exe + " push-clipboard"},
+		{"uplink-launcher", "<Control><Alt>t", "uplink launcher", "alacritty -e " + exe + " dashboard"},
+		{"uplink-clipboard", "<Control><Alt>p", "uplink push clipboard", exe + " vm push-clipboard"},
 	}
 }
 
@@ -35,6 +37,10 @@ func Install() error {
 	}
 	exe, err := os.Executable()
 	if err != nil {
+		return err
+	}
+
+	if err := purgeLegacy(); err != nil {
 		return err
 	}
 
@@ -50,16 +56,32 @@ func Uninstall() error {
 	if _, err := exec.LookPath("gsettings"); err != nil {
 		return fmt.Errorf("gsettings not found; need a GNOME session")
 	}
+	if err := purgeLegacy(); err != nil {
+		return err
+	}
 	for _, s := range defaults("") {
-		path := fmt.Sprintf("%s/%s/", base, s.id)
-		for _, key := range []string{"name", "command", "binding"} {
-			_ = run.Silent("gsettings", "reset", fmt.Sprintf("%s:%s", item, path), key)
-		}
-		if err := listRemove(path); err != nil {
+		if err := remove(s.id); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func purgeLegacy() error {
+	for _, id := range legacyIDs {
+		if err := remove(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func remove(id string) error {
+	path := fmt.Sprintf("%s/%s/", base, id)
+	for _, key := range []string{"name", "command", "binding"} {
+		_ = run.Silent("gsettings", "reset", fmt.Sprintf("%s:%s", item, path), key)
+	}
+	return listRemove(path)
 }
 
 func set(s shortcut) error {

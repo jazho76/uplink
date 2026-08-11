@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/templates"
-	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/uplink/internal/lima"
+	"github.com/jazho76/uplink/internal/templates"
+	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -137,5 +137,5 @@ var templateRemoveCmd = &cobra.Command{
 func init() {
 	templateRemoveCmd.Flags().BoolVar(&templateRemoveForce, "force", false, "skip confirmation")
 	templateCmd.AddCommand(templateAddCmd, templateListCmd, templateUpdateCmd, templateRemoveCmd)
-	rootCmd.AddCommand(templateCmd)
+	vmCmd.AddCommand(templateCmd)
 }

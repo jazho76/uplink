@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -17,6 +18,26 @@ func Stream(bin string, args ...string) error {
 		return fmt.Errorf("%s: %w", line(bin, args), err)
 	}
 	return nil
+}
+
+func StreamTo(w io.Writer, bin string, args ...string) error {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w", line(bin, args), err)
+	}
+	return nil
+}
+
+func Feed(stdin, bin string, args ...string) (string, error) {
+	cmd := exec.Command(bin, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", line(bin, args), err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func Exec(bin string, args ...string) error {

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/run"
-	"github.com/jazho76/vmm/internal/templates"
-	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/uplink/internal/lima"
+	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/templates"
+	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +35,7 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(createCmd)
+	vmCmd.AddCommand(createCmd)
 }
 
 func findTemplate(name string) (templates.Template, error) {

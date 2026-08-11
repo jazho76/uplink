@@ -10,13 +10,13 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/jazho76/vmm/internal/ui"
-	"github.com/jazho76/vmm/internal/version"
+	"github.com/jazho76/uplink/internal/ui"
+	"github.com/jazho76/uplink/internal/version"
 )
 
 const (
-	repo  = "jazho76/vmm"
-	asset = "vmm-linux-amd64"
+	repo  = "jazho76/uplink"
+	asset = "uplink-linux-amd64"
 )
 
 var client = &http.Client{Timeout: 60 * time.Second}
@@ -46,11 +46,11 @@ func Run() error {
 		return err
 	}
 
-	ui.Info("Updating vmm %s -> %s", version.Version, latest)
+	ui.Info("Updating uplink %s -> %s", version.Version, latest)
 	if err := replace(exe); err != nil {
 		return err
 	}
-	ui.Info("Updated vmm to %s", latest)
+	ui.Info("Updated uplink to %s", latest)
 	return nil
 }
 
@@ -61,7 +61,7 @@ func latestTag() (string, error) {
 		return "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "vmm")
+	req.Header.Set("User-Agent", "uplink")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -95,7 +95,7 @@ func replace(exe string) error {
 		return fmt.Errorf("could not download %s: %s", asset, resp.Status)
 	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(exe), ".vmm-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(exe), ".uplink-*.tmp")
 	if err != nil {
 		return err
 	}

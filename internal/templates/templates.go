@@ -8,8 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/uplink/internal/run"
 )
+
+const dirNameBakedIntoLimaInstances = "vmm"
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -31,7 +33,7 @@ func Root() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	root := filepath.Join(home, ".local", "share", "vmm", "templates")
+	root := filepath.Join(home, ".local", "share", dirNameBakedIntoLimaInstances, "templates")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err
 	}
