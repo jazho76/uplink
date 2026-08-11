@@ -137,5 +137,5 @@ var templateRemoveCmd = &cobra.Command{
 func init() {
 	templateRemoveCmd.Flags().BoolVar(&templateRemoveForce, "force", false, "skip confirmation")
 	templateCmd.AddCommand(templateAddCmd, templateListCmd, templateUpdateCmd, templateRemoveCmd)
-	rootCmd.AddCommand(templateCmd)
+	vmCmd.AddCommand(templateCmd)
 }

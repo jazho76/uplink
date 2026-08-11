@@ -50,5 +50,5 @@ var refreshExternalsCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(refreshExternalsCmd)
+	vmCmd.AddCommand(refreshExternalsCmd)
 }

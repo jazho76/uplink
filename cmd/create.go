@@ -35,7 +35,7 @@ var createCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(createCmd)
+	vmCmd.AddCommand(createCmd)
 }
 
 func findTemplate(name string) (templates.Template, error) {

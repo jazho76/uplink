@@ -27,5 +27,5 @@ var clipboardCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(clipboardCmd)
+	vmCmd.AddCommand(clipboardCmd)
 }

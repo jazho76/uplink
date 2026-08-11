@@ -2,12 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/humanize"
+	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
 )
 
@@ -24,6 +25,7 @@ var (
 	selectedRow  = lipgloss.NewStyle().Foreground(ui.Fg).Bold(true)
 	dimRow       = lipgloss.NewStyle().Foreground(ui.Fg)
 	autoMarker   = lipgloss.NewStyle().Foreground(ui.Magenta)
+	modeMarker   = lipgloss.NewStyle().Foreground(ui.Yellow)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
 	footerStyle    = lipgloss.NewStyle().Foreground(ui.Comment)
@@ -32,6 +34,10 @@ var (
 	sectionStyle   = lipgloss.NewStyle().Foreground(ui.Blue)
 	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
 	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
+
+	hostGlyph    = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
+	runningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
+	idleGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
 
 	listBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -49,12 +55,12 @@ var (
 
 func glyph(it item) string {
 	switch {
-	case it.kind == kindHost:
-		return lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
+	case it.t.Provider == target.ProviderLocal:
+		return hostGlyph
 	case it.running():
-		return lipgloss.NewStyle().Foreground(ui.Green).Render("●")
+		return runningGlyph
 	default:
-		return lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
+		return idleGlyph
 	}
 }
 
@@ -66,7 +72,7 @@ func (m model) View() string {
 		return fmt.Sprintf("terminal too small (min %d×%d)", minWidth, minHeight)
 	}
 
-	if m.mode == modeLogs {
+	if m.screen == screenLogs {
 		return m.renderLogs()
 	}
 
@@ -90,22 +96,35 @@ func (m model) View() string {
 func (m model) renderList() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("uplink") + "\n\n")
+
+	section := ""
 	for i, it := range m.items {
+		if it.t.Section != section {
+			section = it.t.Section
+			if section != "" {
+				fmt.Fprintf(&b, "   %s %s %s\n",
+					footerStyle.Render("──"), sectionStyle.Render(section), footerStyle.Render("──"))
+			}
+		}
+
 		label := " "
 		if i < 9 {
 			label = keyStyle.Render(strconv.Itoa(i + 1))
 		}
 		marker := "  "
-		name := dimRow.Render(it.name)
+		name := dimRow.Render(it.name())
 		if i == m.cursor {
 			marker = pointerStyle.Render("▌ ")
-			name = selectedRow.Render(it.name)
+			name = selectedRow.Render(it.name())
 		}
 		trailing := ""
+		if i == m.cursor && m.modeIdx != 0 {
+			trailing += " " + modeMarker.Render("["+m.mode().Name+"]")
+		}
 		if it.autostart {
 			trailing += " " + autoMarker.Render("↻")
 		}
-		if verb := m.tasks[it.name]; verb != "" {
+		if verb := m.tasks[it.name()]; verb != "" {
 			trailing += " " + m.spinner.View() + " " + labelStyle.Render(verb)
 		}
 		fmt.Fprintf(&b, "%s %s%s %s%s\n", label, marker, glyph(it), name, trailing)
@@ -120,39 +139,30 @@ func (m model) renderPreview(width, height int) string {
 	}
 
 	it := m.selected()
-	if it.kind == kindHost {
-		return clampBlock(m.renderHost(), cw, height)
+	if it.name() == "" {
+		return ""
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name), glyph(it), strings.ToLower(it.status))
 
-	if it.inst.TemplateDir != "" {
-		kv(&b, "template", filepath.Base(it.inst.TemplateDir))
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name()), glyph(it), string(it.t.Status))
+
+	if n := len(it.t.Modes); n > 1 {
+		kv(&b, "mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
+			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n))))
 	}
-	kv(&b, "cpus", it.inst.CPUs)
-	kv(&b, "mem", ui.Bytes(it.inst.Memory))
-	kv(&b, "disk", ui.Bytes(it.inst.Disk))
-	if it.inst.SSHAddress != "" {
-		kv(&b, "ssh", it.inst.SSHAddress+":"+it.inst.SSHLocalPort)
+	for _, f := range it.t.Detail {
+		kv(&b, f.Key, f.Value)
 	}
-	if it.inst.VMType != "" {
-		kv(&b, "type", it.inst.VMType)
+	if it.caps.autostart {
+		kv(&b, "auto", autostartLabel(it))
 	}
-	if it.inst.Arch != "" {
-		kv(&b, "arch", it.inst.Arch)
-	}
-	if it.inst.Hostname != "" {
-		kv(&b, "host", it.inst.Hostname)
-	}
-	kv(&b, "dir", it.inst.Dir)
-	kv(&b, "auto", autostartLabel(it))
-	if it.running() {
-		b.WriteString("\n" + section("live", cw))
-		m.renderGuest(&b, it.name)
+
+	if it.worthProbing() {
+		b.WriteString("\n" + rule("live", cw))
+		m.renderLive(&b, it.name())
 	}
 
 	if m.logPeek != "" {
-
 		used := strings.Count(b.String(), "\n")
 		fit := height - used - 2
 		if fit > 0 {
@@ -160,7 +170,7 @@ func (m model) renderPreview(width, height int) string {
 			if len(lines) > fit {
 				lines = lines[len(lines)-fit:]
 			}
-			b.WriteString("\n" + section("logs", cw))
+			b.WriteString("\n" + rule("logs", cw))
 			for _, line := range lines {
 				b.WriteString(detailLogStyle.Render(clip(line, cw)) + "\n")
 			}
@@ -169,8 +179,8 @@ func (m model) renderPreview(width, height int) string {
 	return clampBlock(b.String(), cw, height)
 }
 
-func (m model) renderGuest(b *strings.Builder, name string) {
-	e, ok := m.guest[name]
+func (m model) renderLive(b *strings.Builder, name string) {
+	e, ok := m.live[name]
 	if !ok {
 		b.WriteString(labelStyle.Render("…") + "\n")
 		return
@@ -181,10 +191,10 @@ func (m model) renderGuest(b *strings.Builder, name string) {
 	}
 	s := e.stats
 	kv(b, "load", s.Load)
-	kv(b, "ram", fmt.Sprintf("%s / %s", ui.Bytes(u64(s.MemUsed)), ui.Bytes(u64(s.MemTotal))))
-	kv(b, "used", fmt.Sprintf("%s / %s", ui.Bytes(u64(s.DiskUsed)), ui.Bytes(u64(s.DiskTotal))))
-	if s.Uptime != "" {
-		kv(b, "up", s.Uptime)
+	kv(b, "ram", fmt.Sprintf("%s / %s", humanize.Bytes(s.MemUsed), humanize.Bytes(s.MemTotal)))
+	kv(b, "used", fmt.Sprintf("%s / %s", humanize.Bytes(s.DiskUsed), humanize.Bytes(s.DiskTotal)))
+	if up := humanize.Duration(s.Uptime); up != "" {
+		kv(b, "up", up)
 	}
 }
 
@@ -193,15 +203,6 @@ func autostartLabel(it item) string {
 		return autoMarker.Render("↻ on")
 	}
 	return "off"
-}
-
-func (m model) renderHost() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render(m.host.name) + "\n\n")
-	kv(&b, "os", m.host.os)
-	kv(&b, "up", m.host.uptime)
-	kv(&b, "shell", "local tmux session")
-	return b.String()
 }
 
 func kv(b *strings.Builder, key, value string) {
@@ -229,21 +230,27 @@ func (m model) renderLogs() string {
 }
 
 func (m model) renderFooter() string {
-	if m.mode == modeConfirmDelete {
-		prompt := statusStyle.Render(fmt.Sprintf("delete %s? type the name: ", m.selected().name))
+	if m.screen == screenConfirm {
+		prompt := statusStyle.Render(fmt.Sprintf("delete %s? type the name: ", m.selected().name()))
 		return prompt + m.input.View() + "\n"
 	}
 
 	it := m.selected()
-	var pairs [][2]string
-	switch {
-	case it.kind == kindVM:
-		pairs = [][2]string{
-			{"↵", "connect"}, {"^l", "logs"}, {"^s", "stop"},
-			{"^r", "restart"}, {"^a", "auto"}, {"^x", "del"},
-		}
-	default:
-		pairs = [][2]string{{"↵", "connect"}}
+	pairs := [][2]string{{"↵", "connect"}}
+	if len(it.t.Modes) > 1 {
+		pairs = append(pairs, [2]string{"tab", "mode"})
+	}
+	if it.caps.tail {
+		pairs = append(pairs, [2]string{"^l", "logs"})
+	}
+	if it.caps.lifecycle {
+		pairs = append(pairs, [2]string{"^s", "stop"}, [2]string{"^r", "restart"})
+	}
+	if it.caps.autostart {
+		pairs = append(pairs, [2]string{"^a", "auto"})
+	}
+	if it.caps.lifecycle {
+		pairs = append(pairs, [2]string{"^x", "del"})
 	}
 	pairs = append(pairs, [2]string{"q", "quit"})
 
@@ -252,7 +259,7 @@ func (m model) renderFooter() string {
 		parts = append(parts, keyStyle.Render(p[0])+" "+footerStyle.Render(p[1]))
 	}
 	keys := truncate(strings.Join(parts, footerStyle.Render("  ")), m.width)
-	return keys + "\n" + truncate(statusStyle.Render(m.status), m.width)
+	return keys + "\n" + truncate(statusStyle.Render(oneLine(m.status)), m.width)
 }
 
 func (m model) renderHostBar() string {
@@ -263,13 +270,12 @@ func (m model) renderHostBar() string {
 		if !it.running() {
 			continue
 		}
+		if it.t.CPUs == 0 && it.t.Memory == 0 {
+			continue
+		}
 		running++
-		if n, err := strconv.Atoi(strings.TrimSpace(it.inst.CPUs)); err == nil {
-			vcpu += n
-		}
-		if n, err := strconv.ParseUint(strings.TrimSpace(it.inst.Memory), 10, 64); err == nil {
-			committedMem += n
-		}
+		vcpu += it.t.CPUs
+		committedMem += it.t.Memory
 	}
 
 	seg := func(label, value string) string {
@@ -278,25 +284,29 @@ func (m model) renderHostBar() string {
 	gap := footerStyle.Render("   ")
 
 	left := strings.Join([]string{
-		titleStyle.Render(m.host.name),
+		titleStyle.Render(m.hostName),
 		seg("cores", strconv.Itoa(h.Cores)),
-		seg("load", firstField(h.Load)),
-		seg("ram", fmt.Sprintf("%s/%s", ui.Bytes(u64(h.MemUsed)), ui.Bytes(u64(h.MemTotal)))),
+		seg("load", h.Load),
+		seg("ram", fmt.Sprintf("%s/%s", humanize.Bytes(h.MemUsed), humanize.Bytes(h.MemTotal))),
 	}, gap)
 
-	committed := seg("committed", fmt.Sprintf("%d vCPU / %s across %d running", vcpu, ui.Bytes(u64(committedMem)), running))
+	committed := seg("committed", fmt.Sprintf("%d vCPU / %s across %d running", vcpu, humanize.Bytes(committedMem), running))
 
 	content := truncate(left+gap+committed, m.width-4)
 	return hostBarBorder.Width(m.width - 2).Render(content)
 }
 
-func section(title string, width int) string {
+func rule(title string, width int) string {
 	head := sectionStyle.Render(title) + " "
-	rule := width - lipgloss.Width(head)
-	if rule < 0 {
-		rule = 0
+	dashes := width - lipgloss.Width(head)
+	if dashes < 0 {
+		dashes = 0
 	}
-	return head + footerStyle.Render(strings.Repeat("─", rule)) + "\n"
+	return head + footerStyle.Render(strings.Repeat("─", dashes)) + "\n"
+}
+
+func oneLine(s string) string {
+	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "; ")
 }
 
 func clip(s string, width int) string {
@@ -316,15 +326,6 @@ func clip(s string, width int) string {
 	}
 	return string(r)
 }
-
-func firstField(s string) string {
-	if f := strings.Fields(s); len(f) > 0 {
-		return f[0]
-	}
-	return s
-}
-
-func u64(n uint64) string { return strconv.FormatUint(n, 10) }
 
 func truncate(s string, width int) string {
 	if width < 0 {

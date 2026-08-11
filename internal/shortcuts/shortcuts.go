@@ -22,15 +22,12 @@ type shortcut struct {
 	command string
 }
 
-// legacyIDs are keybinding ids from earlier names of this tool. They are purged
-// on every install and uninstall so a stale binding cannot keep answering the
-// same hotkey alongside the current one.
 var legacyIDs = []string{"vmm-launcher", "vmm-clipboard"}
 
 func defaults(exe string) []shortcut {
 	return []shortcut{
 		{"uplink-launcher", "<Control><Alt>t", "uplink launcher", "alacritty -e " + exe + " dashboard"},
-		{"uplink-clipboard", "<Control><Alt>p", "uplink push clipboard", exe + " push-clipboard"},
+		{"uplink-clipboard", "<Control><Alt>p", "uplink push clipboard", exe + " vm push-clipboard"},
 	}
 }
 

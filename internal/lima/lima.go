@@ -69,11 +69,8 @@ func Get(name string) (Instance, bool) {
 	return Instance{}, false
 }
 
-func Start(name string) error  { return run.Stream(bin, "start", name) }
 func Stop(name string) error   { return run.Silent(bin, "stop", name) }
 func Delete(name string) error { return run.Silent(bin, "delete", name) }
-
-func StartSilent(name string) error { return run.Silent(bin, "start", name) }
 
 func Create(name, template string, params ...string) error {
 	args := []string{"start", "--tty=false", "--name=" + name}
@@ -85,10 +82,6 @@ func Create(name, template string, params ...string) error {
 		return err
 	}
 	return Stop(name)
-}
-
-func ShellArgv(name string) []string {
-	return []string{bin, "shell", name, "tmux", "new-session", "-A", "-s", "0"}
 }
 
 func Copy(src, name, dst string) error {

@@ -39,5 +39,5 @@ case ":${PATH}:" in
   *) echo "Note: ${INSTALL_DIR} is not on your PATH. Add it: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
-echo "Installed uplink. Add a template with: uplink template add <git-url> <name>"
+echo "Installed uplink. Add a VM template with: uplink vm template add <git-url>"
 echo "On GNOME, register the launcher shortcuts with: uplink install-shortcuts"
