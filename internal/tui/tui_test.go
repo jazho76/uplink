@@ -280,6 +280,43 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 	}
 }
 
+func TestGlyphDistinguishesKindAndState(t *testing.T) {
+	shape := func(provider string, status target.Status) string {
+		return glyph(item{t: target.Target{Provider: provider, Status: status}})
+	}
+
+	host := shape(target.ProviderLocal, target.StatusRunning)
+	vmUp := shape(target.ProviderLima, target.StatusRunning)
+	vmOff := shape(target.ProviderLima, target.StatusStopped)
+	remoteUp := shape(target.ProviderRemote, target.StatusRunning)
+	remoteDown := shape(target.ProviderRemote, target.StatusUnreachable)
+	remoteUnprobed := shape(target.ProviderRemote, target.StatusUnknown)
+
+	distinct := map[string]string{
+		"host vs vm":                  host + vmUp,
+		"remote vs vm, both up":       remoteUp + vmUp,
+		"remote vs vm, both down":     remoteDown + vmOff,
+		"unreachable vs never probed": remoteDown + remoteUnprobed,
+		"reachable vs unreachable":    remoteUp + remoteDown,
+	}
+	for name, pair := range distinct {
+		half := len(pair) / 2
+		if pair[:half] == pair[half:] {
+			t.Errorf("%s should be visually distinct, both render %q", name, pair[:half])
+		}
+	}
+
+	widths := map[string]string{
+		"host": host, "vm up": vmUp, "vm off": vmOff,
+		"remote up": remoteUp, "remote down": remoteDown, "remote unprobed": remoteUnprobed,
+	}
+	for name, g := range widths {
+		if w := lipgloss.Width(g); w != 1 {
+			t.Errorf("%s glyph occupies %d columns, want 1", name, w)
+		}
+	}
+}
+
 func TestUnknownStatusIsStillProbed(t *testing.T) {
 	m, vms := newTestModel()
 	vms.targets = []target.Target{

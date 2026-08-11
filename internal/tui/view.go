@@ -35,9 +35,14 @@ var (
 	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
 	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
 
-	hostGlyph    = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
-	runningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
-	idleGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
+	hostGlyph = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
+
+	vmRunningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
+	vmStoppedGlyph = lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
+
+	remoteReachableGlyph   = lipgloss.NewStyle().Foreground(ui.Green).Render("◆")
+	remoteUnprobedGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("◇")
+	remoteUnreachableGlyph = lipgloss.NewStyle().Foreground(ui.Red).Render("×")
 
 	listBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -54,13 +59,27 @@ var (
 )
 
 func glyph(it item) string {
-	switch {
-	case it.t.Provider == target.ProviderLocal:
+	switch it.t.Provider {
+	case target.ProviderLocal:
 		return hostGlyph
-	case it.running():
-		return runningGlyph
+	case target.ProviderRemote:
+		return remoteGlyph(it.t.Status)
 	default:
-		return idleGlyph
+		if it.running() {
+			return vmRunningGlyph
+		}
+		return vmStoppedGlyph
+	}
+}
+
+func remoteGlyph(status target.Status) string {
+	switch status {
+	case target.StatusRunning:
+		return remoteReachableGlyph
+	case target.StatusUnreachable:
+		return remoteUnreachableGlyph
+	default:
+		return remoteUnprobedGlyph
 	}
 }
 
