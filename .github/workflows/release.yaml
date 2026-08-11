@@ -26,5 +26,5 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: bin/vmm-linux-amd64
+          files: bin/uplink-linux-amd64
           generate_release_notes: true

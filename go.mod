@@ -1,4 +1,4 @@
-module github.com/jazho76/vmm
+module github.com/jazho76/uplink
 
 go 1.26
 

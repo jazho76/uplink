@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/run"
-	"github.com/jazho76/vmm/internal/templates"
-	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/uplink/internal/lima"
+	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/templates"
+	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 

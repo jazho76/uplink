@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/jazho76/vmm/internal/tui"
+	"github.com/jazho76/uplink/internal/tui"
 	"github.com/spf13/cobra"
 )
 

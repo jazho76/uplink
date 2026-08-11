@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/jazho76/vmm/internal/lima"
-	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/uplink/internal/lima"
+	"github.com/jazho76/uplink/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +17,7 @@ var connectCmd = &cobra.Command{
 
 		inst, exists := lima.Get(name)
 		if !exists {
-			return fmt.Errorf("no such instance %q; create it with: vmm create <template> [instance]", name)
+			return fmt.Errorf("no such instance %q; create it with: uplink create <template> [instance]", name)
 		}
 
 		if !inst.Running() {

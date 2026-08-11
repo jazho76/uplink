@@ -3,14 +3,14 @@ package cmd
 import (
 	"os"
 
-	"github.com/jazho76/vmm/internal/ui"
-	"github.com/jazho76/vmm/internal/version"
+	"github.com/jazho76/uplink/internal/ui"
+	"github.com/jazho76/uplink/internal/version"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "vmm",
-	Short:         "Lima VM control plane",
+	Use:           "uplink",
+	Short:         "Launcher for local, virtual, and remote shells",
 	Version:       version.Version,
 	SilenceUsage:  true,
 	SilenceErrors: true,

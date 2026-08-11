@@ -8,12 +8,12 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jazho76/vmm/internal/lima"
+	"github.com/jazho76/uplink/internal/lima"
 )
 
 func newTestModel() model {
 	m := model{
-		self:    "/tmp/vmm",
+		self:    "/tmp/uplink",
 		spinner: spinner.New(),
 		input:   textinput.New(),
 		host:    hostInfo{name: "testhost", os: "Linux", uptime: "up 1 hour"},

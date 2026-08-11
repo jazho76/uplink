@@ -1,6 +1,6 @@
 package main
 
-import "github.com/jazho76/vmm/cmd"
+import "github.com/jazho76/uplink/cmd"
 
 func main() {
 	cmd.Execute()

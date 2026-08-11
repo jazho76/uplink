@@ -9,5 +9,5 @@ var (
 )
 
 func String() string {
-	return fmt.Sprintf("vmm %s (%s, %s)", Version, Commit, Date)
+	return fmt.Sprintf("uplink %s (%s, %s)", Version, Commit, Date)
 }

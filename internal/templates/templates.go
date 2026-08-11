@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jazho76/vmm/internal/run"
+	"github.com/jazho76/uplink/internal/run"
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -31,6 +31,9 @@ func Root() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Still "vmm" after the rename: existing Lima instances bake this absolute
+	// path into their TemplateDir param and mount it, so moving it would break
+	// their next start.
 	root := filepath.Join(home, ".local", "share", "vmm", "templates")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return "", err

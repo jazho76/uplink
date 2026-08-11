@@ -8,7 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/uplink/internal/ui"
 )
 
 const (
@@ -89,7 +89,7 @@ func (m model) View() string {
 
 func (m model) renderList() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("vmm") + "\n\n")
+	b.WriteString(titleStyle.Render("uplink") + "\n\n")
 	for i, it := range m.items {
 		label := " "
 		if i < 9 {

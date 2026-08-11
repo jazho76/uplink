@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"github.com/jazho76/vmm/internal/clipboard"
-	"github.com/jazho76/vmm/internal/ui"
+	"github.com/jazho76/uplink/internal/clipboard"
+	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
