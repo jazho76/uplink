@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,8 @@ const (
 
 	gaugeGap        = 3
 	minGaugeReading = 16
+	hostBarGap      = 3
+	hostBarMeter    = 10
 	liveGutter      = len("memory") + 2
 	minLiveBar      = 8
 	maxLiveBar      = 20
@@ -179,7 +182,15 @@ func gauge(bar, reading string) string {
 }
 
 func amount(used, total uint64) string {
-	return humanize.Bytes(used) + " / " + humanize.Bytes(total)
+	u, t := humanize.Bytes(used), humanize.Bytes(total)
+	if unit := unitOf(t); unit != "" && strings.HasSuffix(u, unit) {
+		return strings.TrimSuffix(u, unit) + "/" + t
+	}
+	return u + "/" + t
+}
+
+func unitOf(size string) string {
+	return strings.TrimLeft(size, "0123456789.")
 }
 
 func liveBarWidth(width int) int {
@@ -299,37 +310,83 @@ func (m model) renderFooter() string {
 }
 
 func (m model) renderHostBar(width int) string {
-	h := m.hostStats
-	var running, vcpu int
-	var committedMem uint64
-	for _, it := range m.items {
-		if !it.running() {
-			continue
-		}
-		if it.t.CPUs == 0 && it.t.Memory == 0 {
-			continue
-		}
-		running++
-		vcpu += it.t.CPUs
-		committedMem += it.t.Memory
-	}
-
-	seg := func(label, value string) string {
-		return labelStyle.Render(label+" ") + valueStyle.Render(value)
-	}
-	gap := footerStyle.Render("   ")
-
-	left := strings.Join([]string{
-		titleStyle.Render(m.hostName),
-		seg("cores", strconv.Itoa(h.Cores)),
-		seg("load", fmt.Sprintf("%.2f", h.Load)),
-		seg("ram", fmt.Sprintf("%s/%s", humanize.Bytes(h.MemUsed), humanize.Bytes(h.MemTotal))),
-	}, gap)
-
-	committed := seg("committed", fmt.Sprintf("%d vCPU / %s across %d running", vcpu, humanize.Bytes(committedMem), running))
-
-	content := truncate(left+gap+committed, width-chromeCells)
+	content := fitInReadingOrder(m.hostSegments(), width-chromeCells)
 	return hostBarBorder.Width(width - borderCells).Render(content)
+}
+
+type barSegment struct {
+	text     string
+	priority int
+}
+
+func (m model) hostSegments() []barSegment {
+	h := m.hostStats
+	load := loadFraction(h.Load, h.Cores)
+
+	return []barSegment{
+		{text: titleStyle.Render(m.hostName), priority: 0},
+		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
+		{text: hostGauge("ram", meter(usedFraction(h.MemUsed, h.MemTotal), hostBarMeter), amount(h.MemUsed, h.MemTotal)), priority: 2},
+		{text: hostGauge("disk", meter(usedFraction(h.DiskUsed, h.DiskTotal), hostBarMeter), amount(h.DiskUsed, h.DiskTotal)), priority: 4},
+		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
+		{text: m.committedSummary(), priority: 3},
+	}
+}
+
+func hostGauge(label, bar, reading string) string {
+	return labelStyle.Render(label+" ") + bar + " " + valueStyle.Render(reading)
+}
+
+func fitInReadingOrder(segments []barSegment, width int) string {
+	order := make([]int, len(segments))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return segments[a].priority - segments[b].priority
+	})
+
+	keep := make([]bool, len(segments))
+	used := 0
+	for _, i := range order {
+		if !visible(segments[i].text) {
+			continue
+		}
+		cost := lipgloss.Width(segments[i].text)
+		if used > 0 {
+			cost += hostBarGap
+		}
+		if used+cost > width {
+			continue
+		}
+		used += cost
+		keep[i] = true
+	}
+
+	var kept []string
+	for i, s := range segments {
+		if keep[i] {
+			kept = append(kept, s.text)
+		}
+	}
+	return truncate(strings.Join(kept, strings.Repeat(" ", hostBarGap)), width)
+}
+
+func (m model) committedSummary() string {
+	var vcpu int
+	var memory uint64
+	for _, it := range m.items {
+		if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
+			continue
+		}
+		vcpu += it.t.CPUs
+		memory += it.t.Memory
+	}
+	if vcpu == 0 && memory == 0 {
+		return ""
+	}
+	return labelStyle.Render("committed ") + valueStyle.Render(
+		fmt.Sprintf("%d vCPU · %s", vcpu, humanize.Bytes(memory)))
 }
 
 func rule(title string, width int) string {
