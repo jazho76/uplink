@@ -5,7 +5,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -205,17 +207,18 @@ func (m model) renderPane(p pane, focused bool, width, height int) string {
 	}
 
 	rows := max(height-borderCells, 1)
-	inner := max(width-chromeCells, 1)
+	interior := max(width-borderCells, 1)
 	start := scrollOffset(p.cursor, len(p.items), rows)
 
 	summary := labelStyle.Render(paneSummary(p))
+	blank := strings.Repeat(" ", interior)
 	lines := []string{paneEdge("╭", "╮", accentLetter(p.section, p.key, title), summary, width, border)}
 	for i := start; i < start+rows; i++ {
-		row := ""
+		row := blank
 		if i < len(p.items) {
-			row = m.paneRow(p.items[i], i == p.cursor, focused, inner)
+			row = m.paneRow(p.items[i], i == p.cursor, focused, interior)
 		}
-		lines = append(lines, border.Render("│")+" "+pad(row, inner)+" "+border.Render("│"))
+		lines = append(lines, border.Render("│")+row+border.Render("│"))
 	}
 
 	hint := labelStyle.Render(scrollHint(start, len(p.items), rows))
@@ -253,38 +256,50 @@ func accentLetter(text string, key rune, base lipgloss.Style) string {
 }
 
 func (m model) paneRow(it item, selected, focused bool, width int) string {
-	nameStyle, marker := dimRow, "  "
-	if selected {
-		nameStyle = selectedRow
-		if focused {
-			marker = pointerStyle.Render("▌ ")
-		}
-	}
+	base := rowBase(selected, focused)
 
 	key := rune(0)
 	if focused {
 		key = it.key
 	}
-	name := accentLetter(it.name(), key, nameStyle)
+	name := layer(base, rowName).Bold(selected)
+	left := glyph(it, base) + base.Render(" ") + accentLetter(it.name(), key, name)
 
 	var status []string
 	if selected && focused && m.modeIdx != 0 {
-		status = append(status, modeMarker.Render("["+m.mode().Name+"]"))
+		status = append(status, layer(base, modeMarker).Render("["+m.mode().Name+"]"))
 	}
 	if it.autostart {
-		status = append(status, autoMarker.Render("↻"))
+		status = append(status, layer(base, autoMarker).Render("↻"))
 	}
 	if verb := m.tasks[it.name()]; verb != "" {
-		status = append(status, m.spinner.View()+" "+labelStyle.Render(verb))
+		spin := layer(base, spinnerStyle).Render(spinnerFrame(m.spinner))
+		status = append(status, spin+layer(base, labelStyle).Render(" "+verb))
 	}
 
-	return spread(marker+glyph(it)+" "+name, strings.Join(status, " "), width)
+	return inset(left, strings.Join(status, base.Render(" ")), width, base)
 }
 
-func pad(s string, width int) string {
+func spinnerFrame(s spinner.Model) string {
+	return ansi.Strip(s.View())
+}
+
+func inset(left, right string, width int, base lipgloss.Style) string {
+	edge := base.Render(" ")
+	return spread(edge+left, right+edge, width, base)
+}
+
+func rowBase(selected, focused bool) lipgloss.Style {
+	if selected && focused {
+		return rowFill
+	}
+	return plainStyle
+}
+
+func pad(s string, width int, base lipgloss.Style) string {
 	s = truncate(s, width)
 	if gap := width - lipgloss.Width(s); gap > 0 {
-		s += strings.Repeat(" ", gap)
+		s += base.Render(strings.Repeat(" ", gap))
 	}
 	return s
 }

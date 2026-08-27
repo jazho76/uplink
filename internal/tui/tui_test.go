@@ -284,7 +284,7 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 
 func TestGlyphDistinguishesKindAndState(t *testing.T) {
 	shape := func(provider string, status target.Status) string {
-		return glyph(item{t: target.Target{Provider: provider, Status: status}})
+		return glyph(item{t: target.Target{Provider: provider, Status: status}}, plainStyle)
 	}
 
 	host := shape(target.ProviderLocal, target.StatusRunning)
@@ -547,7 +547,7 @@ func TestItemKeyExhaustionLeavesItemUnaddressable(t *testing.T) {
 	if reserved := panes[0].items[3]; reserved.key != 0 {
 		t.Errorf("reserved letters are never handed out, got %q", reserved.key)
 	}
-	if got := accentLetter(last.name(), last.key, dimRow); got != dimRow.Render(last.name()) {
+	if got := accentLetter(last.name(), last.key, plainStyle); got != plainStyle.Render(last.name()) {
 		t.Errorf("an unaddressable item carries no accent, got %q", got)
 	}
 	if _, ok := itemForKey(panes[0], "a"); !ok {

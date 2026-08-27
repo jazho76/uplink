@@ -26,14 +26,14 @@ const (
 )
 
 var (
+	plainStyle   = lipgloss.NewStyle()
+	rowName      = lipgloss.NewStyle().Foreground(ui.Fg)
+	rowFill      = lipgloss.NewStyle().Background(ui.Selection)
 	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
 
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
-	pointerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
-	selectedRow  = lipgloss.NewStyle().Foreground(ui.Fg).Bold(true)
-	dimRow       = lipgloss.NewStyle().Foreground(ui.Fg)
-	autoMarker   = lipgloss.NewStyle().Foreground(ui.Magenta)
-	modeMarker   = lipgloss.NewStyle().Foreground(ui.Yellow)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
+	autoMarker = lipgloss.NewStyle().Foreground(ui.Magenta)
+	modeMarker = lipgloss.NewStyle().Foreground(ui.Yellow)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
 	footerStyle    = lipgloss.NewStyle().Foreground(ui.Comment)
@@ -48,15 +48,6 @@ var (
 	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
 	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
 
-	hostGlyph = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
-
-	vmRunningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
-	vmStoppedGlyph = lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
-
-	remoteReachableGlyph   = lipgloss.NewStyle().Foreground(ui.Green).Render("◆")
-	remoteUnprobedGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("◇")
-	remoteUnreachableGlyph = lipgloss.NewStyle().Foreground(ui.Red).Render("×")
-
 	previewBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ui.Comment).
@@ -67,28 +58,33 @@ var (
 			Padding(0, 1)
 )
 
-func glyph(it item) string {
+func glyph(it item, base lipgloss.Style) string {
+	mark, color := glyphOf(it)
+	return base.Foreground(color).Render(mark)
+}
+
+func glyphOf(it item) (string, lipgloss.TerminalColor) {
 	switch it.t.Provider {
 	case target.ProviderLocal:
-		return hostGlyph
+		return "⬢", ui.Cyan
 	case target.ProviderRemote:
-		return remoteGlyph(it.t.Status)
+		return remoteGlyphOf(it.t.Status)
 	default:
 		if it.running() {
-			return vmRunningGlyph
+			return "●", ui.Green
 		}
-		return vmStoppedGlyph
+		return "○", ui.Comment
 	}
 }
 
-func remoteGlyph(status target.Status) string {
+func remoteGlyphOf(status target.Status) (string, lipgloss.TerminalColor) {
 	switch status {
 	case target.StatusRunning:
-		return remoteReachableGlyph
+		return "◆", ui.Green
 	case target.StatusUnreachable:
-		return remoteUnreachableGlyph
+		return "×", ui.Red
 	default:
-		return remoteUnprobedGlyph
+		return "◇", ui.Comment
 	}
 }
 
@@ -124,8 +120,8 @@ func (m model) renderPreview(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := titleStyle.Render(it.name()) + "  " + glyph(it) + " " + string(it.t.Status)
-	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width) + "\n")
+	header := titleStyle.Render(it.name()) + "  " + glyph(it, plainStyle) + " " + string(it.t.Status)
+	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
 
 	if it.worthProbing() {
 		b.WriteString("\n" + rule("live", width))
@@ -253,7 +249,7 @@ func renderFields(fields []field, width int) string {
 
 	var b strings.Builder
 	for _, f := range fields {
-		label := labelStyle.Render(pad(f.key, gutter))
+		label := labelStyle.Render(pad(f.key, gutter, plainStyle))
 		b.WriteString(truncate(label+"  "+f.value, width) + "\n")
 	}
 	return b.String()
@@ -418,12 +414,16 @@ func stripControl(s string) string {
 
 func visible(s string) bool { return lipgloss.Width(s) > 0 }
 
-func spread(left, right string, width int) string {
+func spread(left, right string, width int, base lipgloss.Style) string {
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if !visible(right) || gap < 1 {
-		return truncate(left, width)
+		return pad(left, width, base)
 	}
-	return left + strings.Repeat(" ", gap) + right
+	return left + base.Render(strings.Repeat(" ", gap)) + right
+}
+
+func layer(base, style lipgloss.Style) lipgloss.Style {
+	return base.Foreground(style.GetForeground()).Bold(style.GetBold())
 }
 
 func truncate(s string, width int) string {
