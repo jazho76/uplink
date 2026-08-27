@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -50,7 +51,6 @@ const (
 type model struct {
 	self        string
 	reg         target.Registry
-	items       []item
 	panes       []pane
 	focus       int
 	modeIdx     int
@@ -95,7 +95,6 @@ func Run(reg target.Registry, configWarning error) error {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = spinnerStyle
 
 	in := textinput.New()
 	in.Prompt = ""
@@ -122,7 +121,7 @@ func Run(reg target.Registry, configWarning error) error {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd(), m.spinner.Tick)
+	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd())
 }
 
 func (m *model) rebuild(targets []target.Target) {
@@ -140,7 +139,6 @@ func (m *model) rebuild(targets []target.Target) {
 		}
 		items = append(items, it)
 	}
-	m.items = items
 
 	previouslyFocused := m.focusedSection()
 	m.panes = carryOverCursors(groupPanes(items), m.panes)
@@ -159,12 +157,7 @@ func carryOverCursors(fresh, previous []pane) []pane {
 }
 
 func paneIndex(panes []pane, section string) int {
-	for i, p := range panes {
-		if p.section == section {
-			return i
-		}
-	}
-	return 0
+	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
 }
 
 func (m model) focusedPane() (pane, bool) {
@@ -200,7 +193,7 @@ func (m *model) cycleMode(delta int) {
 	if n < 2 {
 		return
 	}
-	m.modeIdx = ((m.modeIdx+delta)%n + n) % n
+	m.modeIdx = wrap(m.modeIdx+delta, n)
 }
 
 func (m *model) moveCursor(delta int) tea.Cmd {
@@ -209,54 +202,39 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 		return nil
 	}
 	if to := p.cursor + delta; to >= 0 && to < len(p.items) {
-		return m.selectItem(to)
+		return m.focusItem(m.focus, to)
 	}
-	return m.spillPane(delta)
-}
 
-func (m *model) spillPane(delta int) tea.Cmd {
-	if len(m.panes) == 0 {
-		return nil
-	}
-	next := ((m.focus+delta)%len(m.panes) + len(m.panes)) % len(m.panes)
-
-	landed := m.panes[next]
-	landed.cursor = 0
+	next := wrap(m.focus+delta, len(m.panes))
 	if delta < 0 {
-		landed.cursor = max(len(landed.items)-1, 0)
+		return m.focusItem(next, len(m.panes[next].items)-1)
 	}
-
-	m.panes = withPane(m.panes, next, landed)
-	m.focus = next
-	m.modeIdx = 0
-	return m.onSelectionChange()
+	return m.focusItem(next, 0)
 }
 
-func (m *model) selectItem(to int) tea.Cmd {
-	moved, ok := m.focusedPane()
-	if !ok || to < 0 || to >= len(moved.items) || to == moved.cursor {
+func (m *model) focusItem(inPane, cursor int) tea.Cmd {
+	if inPane < 0 || inPane >= len(m.panes) {
 		return nil
 	}
-	moved.cursor = to
-
-	m.panes = withPane(m.panes, m.focus, moved)
-	m.modeIdx = 0
-	return m.onSelectionChange()
-}
-
-func withPane(panes []pane, i int, p pane) []pane {
-	next := append([]pane(nil), panes...)
-	next[i] = p
-	return next
-}
-
-func (m *model) focusPane(i int) tea.Cmd {
-	if i < 0 || i >= len(m.panes) || i == m.focus {
+	landed := m.panes[inPane]
+	landed.cursor = min(max(cursor, 0), max(len(landed.items)-1, 0))
+	if inPane == m.focus && landed.cursor == m.panes[inPane].cursor {
 		return nil
 	}
-	m.focus = i
-	m.modeIdx = 0
+
+	m.panes = append([]pane(nil), m.panes...)
+	m.panes[inPane] = landed
+	m.focus, m.modeIdx = inPane, 0
 	return m.onSelectionChange()
+}
+
+func (m *model) startTask(name, verb string, task tea.Cmd) tea.Cmd {
+	m.tasks[name], m.status = verb, ""
+	return tea.Batch(task, m.spinner.Tick)
+}
+
+func wrap(i, n int) int {
+	return ((i % n) + n) % n
 }
 
 type tickMsg struct{}

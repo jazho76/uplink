@@ -20,15 +20,11 @@ const (
 type layout struct {
 	paneColumnOuterW int
 	previewOuterW    int
-	hostBarOuterW    int
 	bodyOuterH       int
 }
 
 func computeLayout(width, height int) layout {
-	l := layout{
-		hostBarOuterW: width,
-		bodyOuterH:    max(height-hostBarRows-footerRows, minBodyH),
-	}
+	l := layout{bodyOuterH: max(height-hostBarRows-footerRows, minBodyH)}
 
 	l.paneColumnOuterW = max(width*paneColumnPercent/100, minPaneColumnW)
 	l.previewOuterW = width - l.paneColumnOuterW
@@ -37,4 +33,18 @@ func computeLayout(width, height int) layout {
 		l.paneColumnOuterW = width - l.previewOuterW
 	}
 	return l
+}
+
+func shares(total, buckets int) []int {
+	if buckets < 1 {
+		return nil
+	}
+	out := make([]int, buckets)
+	for i := range out {
+		out[i] = total / buckets
+		if i < total%buckets {
+			out[i]++
+		}
+	}
+	return out
 }

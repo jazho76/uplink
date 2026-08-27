@@ -15,12 +15,11 @@ import (
 )
 
 const (
-	minPreviewTextW = 10
-
 	gaugeGap      = 3
 	percentGap    = 2
 	percentWidth  = len("100%")
 	minHostBarGap = 3
+	hostGaugeGap  = 1
 	fieldGap      = 2
 	hostBarMeter  = 10
 	minLiveBar    = 8
@@ -28,7 +27,6 @@ const (
 
 var (
 	plainStyle   = lipgloss.NewStyle()
-	rowName      = lipgloss.NewStyle().Foreground(ui.Fg)
 	rowFill      = lipgloss.NewStyle().Background(ui.Selection)
 	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
 
@@ -49,12 +47,9 @@ var (
 	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
 	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
 
-	previewBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.Comment).
-			Padding(0, 1)
-	hostBarBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+	boxBorder = lipgloss.RoundedBorder()
+	boxStyle  = lipgloss.NewStyle().
+			Border(boxBorder).
 			BorderForeground(ui.Comment).
 			Padding(0, 1)
 )
@@ -102,19 +97,19 @@ func (m model) View() string {
 	}
 
 	l := computeLayout(m.width, m.height)
-	previewH := l.bodyOuterH - borderCells
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.renderPanes(l.paneColumnOuterW, l.bodyOuterH),
+		m.renderPreview(l.previewOuterW, l.bodyOuterH))
 
-	panes := m.renderPanes(l.paneColumnOuterW, l.bodyOuterH)
-	preview := previewBorder.Width(l.previewOuterW - borderCells).Height(previewH).
-		Render(m.renderPreview(l.previewOuterW-chromeCells, previewH))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, panes, preview)
-
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(l.hostBarOuterW), m.renderFooter())
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(m.width), m.renderFooter())
 }
 
 func (m model) renderPreview(width, height int) string {
-	width = max(width, minPreviewTextW)
+	return boxStyle.Width(width - borderCells).Height(height - borderCells).
+		Render(m.previewBody(width-chromeCells, height-borderCells))
+}
 
+func (m model) previewBody(width, height int) string {
 	it := m.selected()
 	if it.name() == "" {
 		return ""
@@ -162,13 +157,13 @@ func (m model) renderLive(name string, width, height int) string {
 	load := loadFraction(s.Load, s.Cores)
 	gauges := []gaugeRow{
 		{"load", load, fmt.Sprintf("%.2f / %d", s.Load, s.Cores)},
-		{"memory", usedFraction(s.MemUsed, s.MemTotal), amount(s.MemUsed, s.MemTotal)},
-		{"disk", usedFraction(s.DiskUsed, s.DiskTotal), amount(s.DiskUsed, s.DiskTotal)},
+		usageGauge("memory", s.MemUsed, s.MemTotal),
+		usageGauge("disk", s.DiskUsed, s.DiskTotal),
 	}
 
-	fields := gaugeFields(gauges, width)
-	indent := widestKey(fields) + fieldGap
-	return renderFields(fields, width) + m.renderLoadChart(e, load, width-indent, height, indent)
+	indent := gaugeIndent(gauges)
+	return renderFields(gaugeFields(gauges, width-indent), width) +
+		renderLoadChart(e, load, width-indent, height, indent)
 }
 
 type gaugeRow struct {
@@ -177,14 +172,25 @@ type gaugeRow struct {
 	reading  string
 }
 
-func gaugeFields(gauges []gaugeRow, width int) []field {
-	labels, readings := 0, 0
+func usageGauge(label string, used, total uint64) gaugeRow {
+	return gaugeRow{label, usedFraction(used, total), amount(used, total)}
+}
+
+func gaugeIndent(gauges []gaugeRow) int {
+	labels := 0
 	for _, g := range gauges {
 		labels = max(labels, lipgloss.Width(g.label))
+	}
+	return labels + fieldGap
+}
+
+func gaugeFields(gauges []gaugeRow, width int) []field {
+	readings := 0
+	for _, g := range gauges {
 		readings = max(readings, lipgloss.Width(g.reading))
 	}
 
-	bar := width - labels - fieldGap - gaugeGap - readings - percentGap - percentWidth
+	bar := width - gaugeGap - readings - percentGap - percentWidth
 	if bar < minLiveBar {
 		bar = 0
 	}
@@ -194,26 +200,30 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 		reading := valueStyle.Render(pad(g.reading, readings, plainStyle))
 		percent := labelStyle.Render(fmt.Sprintf("%3.0f%%", g.fraction*100))
 		gap := strings.Repeat(" ", percentGap)
-		fields = append(fields, field{g.label, gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent)})
+		fields = append(fields, field{g.label,
+			gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent, gaugeGap)})
 	}
 	return fields
 }
 
-func (m model) renderLoadChart(e liveEntry, load float64, width, height, indent int) string {
-	if width < minChartSpan {
+func renderLoadChart(e liveEntry, load float64, width, height, indent int) string {
+	if width < 1 {
 		return ""
 	}
 	visible := newest(e.history, width)
 	ceiling := chartCeiling(visible)
 
+	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
+	head := labelStyle.Render("load · last " + window)
+	peak := labelStyle.Render(fmt.Sprintf("peak %.2f", ceiling*float64(e.stats.Cores)))
+	if width < lipgloss.Width(head)+1+lipgloss.Width(peak) {
+		return ""
+	}
+
 	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(load))
 	if len(plot) == 0 {
 		return ""
 	}
-
-	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
-	head := labelStyle.Render("load · last " + window)
-	peak := labelStyle.Render(fmt.Sprintf("peak %.2f", ceiling*float64(e.stats.Cores)))
 
 	gutter := strings.Repeat(" ", indent)
 	lines := append([]string{spread(head, peak, width, plainStyle)}, plot...)
@@ -227,11 +237,11 @@ func (m model) renderLoadChart(e liveEntry, load float64, width, height, indent 
 	return b.String()
 }
 
-func gauge(bar, reading string) string {
+func gauge(bar, reading string, gap int) string {
 	if !visible(bar) {
 		return valueStyle.Render(reading)
 	}
-	return bar + strings.Repeat(" ", gaugeGap) + valueStyle.Render(reading)
+	return bar + strings.Repeat(" ", gap) + valueStyle.Render(reading)
 }
 
 func amount(used, total uint64) string {
@@ -353,7 +363,7 @@ func (m model) renderFooter() string {
 func (m model) renderHostBar(width int) string {
 	interior := width - chromeCells
 	content := spaceEvenly(fitInReadingOrder(m.hostSegments(), interior), interior)
-	return hostBarBorder.Width(width - borderCells).Render(content)
+	return boxStyle.Width(width - borderCells).Render(content)
 }
 
 type barSegment struct {
@@ -368,15 +378,20 @@ func (m model) hostSegments() []barSegment {
 	return []barSegment{
 		{text: titleStyle.Render(m.hostName), priority: 0},
 		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
-		{text: hostGauge("ram", meter(usedFraction(h.MemUsed, h.MemTotal), hostBarMeter, thinGlyphs), amount(h.MemUsed, h.MemTotal)), priority: 2},
-		{text: hostGauge("disk", meter(usedFraction(h.DiskUsed, h.DiskTotal), hostBarMeter, thinGlyphs), amount(h.DiskUsed, h.DiskTotal)), priority: 4},
+		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
+		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
 		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
 		{text: m.committedSummary(), priority: 3},
 	}
 }
 
+func hostUsage(label string, used, total uint64) string {
+	g := usageGauge(label, used, total)
+	return hostGauge(g.label, meter(g.fraction, hostBarMeter, thinGlyphs), g.reading)
+}
+
 func hostGauge(label, bar, reading string) string {
-	return labelStyle.Render(label+" ") + bar + " " + valueStyle.Render(reading)
+	return labelStyle.Render(label+" ") + gauge(bar, reading, hostGaugeGap)
 }
 
 func fitInReadingOrder(segments []barSegment, width int) []string {
@@ -425,28 +440,25 @@ func spaceEvenly(parts []string, width int) string {
 		return truncate(strings.Join(parts, strings.Repeat(" ", minHostBarGap)), width)
 	}
 
-	slack := width - filled
 	var spaced strings.Builder
-	for i, p := range parts {
-		spaced.WriteString(p)
-		if remaining := gaps - i; remaining > 0 {
-			gap := slack / remaining
-			slack -= gap
-			spaced.WriteString(strings.Repeat(" ", gap))
-		}
+	for i, gap := range shares(width-filled, gaps) {
+		spaced.WriteString(parts[i] + strings.Repeat(" ", gap))
 	}
+	spaced.WriteString(parts[gaps])
 	return spaced.String()
 }
 
 func (m model) committedSummary() string {
 	var vcpu int
 	var memory uint64
-	for _, it := range m.items {
-		if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
-			continue
+	for _, p := range m.panes {
+		for _, it := range p.items {
+			if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
+				continue
+			}
+			vcpu += it.t.CPUs
+			memory += it.t.Memory
 		}
-		vcpu += it.t.CPUs
-		memory += it.t.Memory
 	}
 	if vcpu == 0 && memory == 0 {
 		return ""
@@ -490,6 +502,14 @@ func spread(left, right string, width int, base lipgloss.Style) string {
 		return pad(left, width, base)
 	}
 	return left + base.Render(strings.Repeat(" ", gap)) + right
+}
+
+func pad(s string, width int, base lipgloss.Style) string {
+	s = truncate(s, width)
+	if gap := width - lipgloss.Width(s); gap > 0 {
+		s += base.Render(strings.Repeat(" ", gap))
+	}
+	return s
 }
 
 func layer(base, style lipgloss.Style) lipgloss.Style {

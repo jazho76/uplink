@@ -74,9 +74,5 @@ func atou(s string) uint64 {
 }
 
 func seconds(s string) time.Duration {
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
-	}
-	return time.Duration(v) * time.Second
+	return time.Duration(atof(s)) * time.Second
 }

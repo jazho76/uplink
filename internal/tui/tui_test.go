@@ -85,6 +85,14 @@ func newTestModel() (model, *fakeVMs) {
 	return m, vms
 }
 
+func allItems(m model) []item {
+	var all []item
+	for _, p := range m.panes {
+		all = append(all, p.items...)
+	}
+	return all
+}
+
 func load(m model) model {
 	targets, _ := m.reg.All()
 	next, _ := m.Update(loadedMsg{targets: targets, hostStats: probe.Stats{Cores: 8, Load: 0.42}})
@@ -99,14 +107,14 @@ func sized(m model) model {
 func TestRebuildOrdersHostFirst(t *testing.T) {
 	m, _ := newTestModel()
 	m = load(m)
-	if len(m.items) != 3 {
-		t.Fatalf("want 3 items (host + 2 vms), got %d", len(m.items))
+	if len(allItems(m)) != 3 {
+		t.Fatalf("want 3 items (host + 2 vms), got %d", len(allItems(m)))
 	}
-	if m.items[0].t.Provider != target.ProviderLocal {
-		t.Fatalf("first item should come from the local provider, got %q", m.items[0].t.Provider)
+	if allItems(m)[0].t.Provider != target.ProviderLocal {
+		t.Fatalf("first item should come from the local provider, got %q", allItems(m)[0].t.Provider)
 	}
-	if m.items[1].name() != "forge" || m.items[2].name() != "tokyo" {
-		t.Fatalf("unexpected vm order: %q %q", m.items[1].name(), m.items[2].name())
+	if allItems(m)[1].name() != "forge" || allItems(m)[2].name() != "tokyo" {
+		t.Fatalf("unexpected vm order: %q %q", allItems(m)[1].name(), allItems(m)[2].name())
 	}
 }
 
@@ -114,7 +122,7 @@ func TestCapabilitiesFollowProvider(t *testing.T) {
 	m, _ := newTestModel()
 	m = load(m)
 
-	host, forge := m.items[0], m.items[1]
+	host, forge := allItems(m)[0], allItems(m)[1]
 	if host.caps.lifecycle || host.caps.autostart || host.caps.tail {
 		t.Errorf("host should expose no lifecycle, autostart, or logs: %+v", host.caps)
 	}
@@ -152,11 +160,11 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "stopped")}
 	m = sized(load(m))
 
-	if !m.items[1].running() {
-		t.Fatalf("forge should be running, got status %q", m.items[1].t.Status)
+	if !allItems(m)[1].running() {
+		t.Fatalf("forge should be running, got status %q", allItems(m)[1].t.Status)
 	}
-	if m.items[2].t.Status != target.StatusStopped {
-		t.Fatalf("tokyo should be stopped, got %q", m.items[2].t.Status)
+	if allItems(m)[2].t.Status != target.StatusStopped {
+		t.Fatalf("tokyo should be stopped, got %q", allItems(m)[2].t.Status)
 	}
 
 	m = focus(m, "forge")
@@ -179,8 +187,8 @@ func TestProviderErrorKeepsTargets(t *testing.T) {
 
 	next, _ := m.Update(loadedMsg{targets: []target.Target{vm("forge", "running")}, err: errBoom{}})
 	m = next.(model)
-	if len(m.items) != 1 {
-		t.Fatalf("targets from healthy providers should survive, got %d items", len(m.items))
+	if len(allItems(m)) != 1 {
+		t.Fatalf("targets from healthy providers should survive, got %d items", len(allItems(m)))
 	}
 	if !strings.Contains(m.status, "boom") {
 		t.Errorf("status should surface the provider error, got %q", m.status)
@@ -275,7 +283,7 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 	if !strings.Contains(m.renderPanes(30, 12), "[shell]") {
 		t.Errorf("an off-default mode should be marked on the row: %s", m.renderPanes(30, 12))
 	}
-	preview := m.renderPreview(50, 20)
+	preview := m.previewBody(50, 20)
 	for _, want := range []string{"mode", "shell", "2 of 3"} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("preview missing %q: %s", want, preview)
@@ -617,7 +625,7 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 	m.live["forge"] = liveEntry{history: history,
 		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
-	preview := ansi.Strip(m.renderPreview(70, 40))
+	preview := ansi.Strip(m.previewBody(70, 40))
 	gauges, chart := strings.Index(preview, "disk"), strings.Index(preview, "load · last")
 	if chart < 0 {
 		t.Fatalf("a roomy preview should carry the chart:\n%s", preview)
@@ -629,7 +637,7 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 		t.Errorf("the chart must state the ceiling it scaled to:\n%s", preview)
 	}
 
-	cramped := ansi.Strip(m.renderPreview(minChartSpan, 40))
+	cramped := ansi.Strip(m.previewBody(20, 40))
 	if strings.Contains(cramped, "load · last") {
 		t.Errorf("a pane too narrow to plot drops the chart:\n%s", cramped)
 	}
@@ -641,8 +649,8 @@ func TestLoadChartSpansTheAvailableWidth(t *testing.T) {
 		e.history = appendSample(e.history, float64(i%7)/7)
 	}
 
-	for _, width := range []int{minChartSpan, 40, 96} {
-		block := ansi.Strip((model{}).renderLoadChart(e, 0.25, width, 40, 0))
+	for _, width := range []int{28, 40, 96} {
+		block := ansi.Strip(renderLoadChart(e, 0.25, width, 40, 0))
 		for i, line := range strings.Split(strings.Trim(block, "\n"), "\n") {
 			if got := lipgloss.Width(line); got != width {
 				t.Errorf("%d cols: chart line %d spans %d", width, i, got)
@@ -658,7 +666,7 @@ func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
 		e.history = appendSample(e.history, 0.2)
 	}
 
-	narrow := ansi.Strip((model{}).renderLoadChart(e, 0.2, minChartSpan, 40, 0))
+	narrow := ansi.Strip(renderLoadChart(e, 0.2, 30, 40, 0))
 	if strings.Contains(narrow, "peak 9.00") {
 		t.Errorf("a spike scrolled off the chart must not be claimed as its peak:\n%s", narrow)
 	}
@@ -666,7 +674,7 @@ func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
 		t.Errorf("the peak should be the tallest column actually drawn:\n%s", narrow)
 	}
 
-	wide := ansi.Strip((model{}).renderLoadChart(e, 0.2, 100, 40, 0))
+	wide := ansi.Strip(renderLoadChart(e, 0.2, 100, 40, 0))
 	if !strings.Contains(wide, "peak 9.00") {
 		t.Errorf("a chart wide enough to include the spike should report it:\n%s", wide)
 	}
@@ -678,12 +686,13 @@ func TestLoadChartWindowFollowsWhatIsVisible(t *testing.T) {
 		e.history = appendSample(e.history, 0.3)
 	}
 
-	wide := ansi.Strip((model{}).renderLoadChart(e, 0.3, 120, 40, 0))
-	narrow := ansi.Strip((model{}).renderLoadChart(e, 0.3, minChartSpan, 40, 0))
+	const narrowWidth = 30
+	wide := ansi.Strip(renderLoadChart(e, 0.3, 120, 40, 0))
+	narrow := ansi.Strip(renderLoadChart(e, 0.3, narrowWidth, 40, 0))
 	if wide == narrow {
 		t.Fatalf("a wider chart shows a longer window")
 	}
-	if !strings.Contains(narrow, humanize.Duration(time.Duration(minChartSpan)*liveInterval)) {
+	if !strings.Contains(narrow, humanize.Duration(narrowWidth*liveInterval)) {
 		t.Errorf("the window must describe the visible samples, not the whole buffer:\n%s", narrow)
 	}
 }
@@ -695,7 +704,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m = focus(m, "forge")
 	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
-	preview := ansi.Strip(m.renderPreview(60, 30))
+	preview := ansi.Strip(m.previewBody(60, 30))
 	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
 	if live < 0 || spec < 0 {
 		t.Fatalf("preview should carry both sections:\n%s", preview)
@@ -727,7 +736,7 @@ func TestStoppedTargetShowsNoStaleUptime(t *testing.T) {
 	if got := m.uptimeOf(m.selected()); got != "" {
 		t.Errorf("a stopped target must not show the uptime from its last run, got %q", got)
 	}
-	if strings.Contains(ansi.Strip(m.renderPreview(60, 20)), "live") {
+	if strings.Contains(ansi.Strip(m.previewBody(60, 20)), "live") {
 		t.Errorf("a stopped target has no live block, so its header has nothing to report")
 	}
 }
@@ -937,6 +946,41 @@ func TestViewWithinBounds(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestSpinnerAnimatesOnlyWhileTasksRun(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	if _, idle := m.Update(m.spinner.Tick()); idle != nil {
+		t.Errorf("an idle list should not keep rebuilding frames ten times a second")
+	}
+
+	next, started := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	m = next.(model)
+	if m.tasks["forge"] != verbStop {
+		t.Fatalf("ctrl+s should mark forge stopping, got %q", m.tasks["forge"])
+	}
+	if !kicksTheSpinner(started) {
+		t.Errorf("starting a task must set the spinner back in motion")
+	}
+	if _, running := m.Update(m.spinner.Tick()); running == nil {
+		t.Errorf("a running task keeps the spinner ticking")
+	}
+}
+
+func kicksTheSpinner(cmd tea.Cmd) bool {
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		return false
+	}
+	for _, queued := range batch {
+		if _, tick := queued().(spinner.TickMsg); tick {
+			return true
+		}
+	}
+	return false
 }
 
 func TestConcurrentTaskGuards(t *testing.T) {

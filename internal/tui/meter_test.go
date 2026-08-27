@@ -110,10 +110,10 @@ func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 		t.Errorf("a roomy pane should draw a bar, got %q", roomy)
 	}
 
-	if got := ansi.Strip(gauge("", "7.6GiB / 31GiB")); got != "7.6GiB / 31GiB" {
+	if got := ansi.Strip(gauge("", "7.6GiB / 31GiB", gaugeGap)); got != "7.6GiB / 31GiB" {
 		t.Errorf("an absent bar leaves the reading alone, got %q", got)
 	}
-	if got := ansi.Strip(gauge(meter(0.5, 4, thinGlyphs), "1.32")); got != "━━──   1.32" {
+	if got := ansi.Strip(gauge(meter(0.5, 4, thinGlyphs), "1.32", gaugeGap)); got != "━━──   1.32" {
 		t.Errorf("a bar keeps its reading beside it, got %q", got)
 	}
 }
@@ -137,10 +137,10 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
 	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
 		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30},
-		items: []item{
+		panes: groupPanes([]item{
 			{t: target.Target{Name: "kyoto", Status: target.StatusRunning, CPUs: 6, Memory: 12 << 30}},
 			{t: target.Target{Name: "forge", Status: target.StatusRunning, CPUs: 8, Memory: 16 << 30}},
-		}}
+		})}
 
 	for _, width := range []int{minWidth, 60, 80, 100, 140} {
 		bar := m.renderHostBar(width)

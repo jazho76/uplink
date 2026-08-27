@@ -24,7 +24,6 @@ const (
 	minChartRows    = 2
 	maxChartRows    = 4
 	chartPaneShare  = 4
-	minChartSpan    = len("load · last 15m") + 1 + len("peak 123.45")
 	minChartCeiling = 0.02
 )
 
@@ -120,7 +119,8 @@ func sparkline(samples []float64, width int, fill lipgloss.Style) string {
 
 	var trace strings.Builder
 	for _, s := range samples {
-		trace.WriteRune(sparkLevels[int(clampFraction(s)*float64(len(sparkLevels)-1))])
+		reached := max(clampFraction(s)*float64(len(sparkLevels)), 1)
+		trace.WriteRune(chartCell(reached, 0))
 	}
 
 	return labelStyle.Render(strings.Repeat(thinGlyphs.track, width-len(samples))) +
