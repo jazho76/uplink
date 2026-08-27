@@ -36,7 +36,6 @@ var (
 	paneBorderFocus = lipgloss.NewStyle().Foreground(ui.Cyan)
 	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
 	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
-	paneKeyStyle    = lipgloss.NewStyle().Foreground(ui.Magenta).Bold(true)
 
 	hostGlyph = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
 

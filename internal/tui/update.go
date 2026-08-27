@@ -133,8 +133,13 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	default:
-		if i, ok := paneForKey(m.panes, msg.String()); ok {
+		if i, ok := paneForKey(m.panes, msg.String()); ok && i != m.focus {
 			cmd := m.focusPane(i)
+			return m, cmd
+		}
+		focused, _ := m.focusedPane()
+		if i, ok := itemForKey(focused, msg.String()); ok {
+			cmd := m.selectItem(i)
 			return m, cmd
 		}
 	}

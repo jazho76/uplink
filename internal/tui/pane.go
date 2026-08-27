@@ -42,17 +42,42 @@ func groupPanes(items []item) []pane {
 		panes[i].items = append(panes[i].items, it)
 	}
 	assignPaneKeys(panes)
+	assignItemKeys(panes)
 	return panes
 }
 
 func assignPaneKeys(panes []pane) {
 	taken := reservedPaneKeys
 	for i := range panes {
-		if key := firstFreeLetter(panes[i].section, taken); key != 0 {
-			panes[i].key = key
-			taken += string(key)
+		panes[i].key, taken = claimLetter(panes[i].section, taken)
+	}
+}
+
+func assignItemKeys(panes []pane) {
+	for i := range panes {
+		taken := reservedPaneKeys + otherPaneKeys(panes, i)
+		for j := range panes[i].items {
+			panes[i].items[j].key, taken = claimLetter(panes[i].items[j].name(), taken)
 		}
 	}
+}
+
+func claimLetter(word, taken string) (rune, string) {
+	key := firstFreeLetter(word, taken)
+	if key == 0 {
+		return 0, taken
+	}
+	return key, taken + string(key)
+}
+
+func otherPaneKeys(panes []pane, skip int) string {
+	var keys string
+	for i, p := range panes {
+		if i != skip && p.key != 0 {
+			keys += string(p.key)
+		}
+	}
+	return keys
 }
 
 func firstFreeLetter(word, taken string) rune {
@@ -67,6 +92,15 @@ func firstFreeLetter(word, taken string) rune {
 func paneForKey(panes []pane, key string) (int, bool) {
 	for i, p := range panes {
 		if p.key != 0 && string(p.key) == key {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func itemForKey(p pane, key string) (int, bool) {
+	for i, it := range p.items {
+		if it.key != 0 && string(it.key) == key {
 			return i, true
 		}
 	}
@@ -175,7 +209,7 @@ func (m model) renderPane(p pane, focused bool, width, height int) string {
 	start := scrollOffset(p.cursor, len(p.items), rows)
 
 	summary := labelStyle.Render(paneSummary(p))
-	lines := []string{paneEdge("╭", "╮", paneLabel(p, title), summary, width, border)}
+	lines := []string{paneEdge("╭", "╮", accentLetter(p.section, p.key, title), summary, width, border)}
 	for i := start; i < start+rows; i++ {
 		row := ""
 		if i < len(p.items) {
@@ -208,24 +242,30 @@ func paneEdge(head, tail, left, right string, width int, border lipgloss.Style) 
 	}
 }
 
-func paneLabel(p pane, title lipgloss.Style) string {
-	for i, r := range p.section {
-		if p.key != 0 && unicode.ToLower(r) == p.key {
-			head, tail := p.section[:i], p.section[i+len(string(r)):]
-			return title.Render(head) + paneKeyStyle.Render(string(r)) + title.Render(tail)
+func accentLetter(text string, key rune, base lipgloss.Style) string {
+	for i, r := range text {
+		if key != 0 && unicode.ToLower(r) == key {
+			head, tail := text[:i], text[i+len(string(r)):]
+			return base.Render(head) + base.Underline(true).Render(string(r)) + base.Render(tail)
 		}
 	}
-	return title.Render(p.section)
+	return base.Render(text)
 }
 
 func (m model) paneRow(it item, selected, focused bool, width int) string {
-	marker, name := "  ", dimRow.Render(it.name())
+	nameStyle, marker := dimRow, "  "
 	if selected {
-		name = selectedRow.Render(it.name())
+		nameStyle = selectedRow
 		if focused {
 			marker = pointerStyle.Render("▌ ")
 		}
 	}
+
+	key := rune(0)
+	if focused {
+		key = it.key
+	}
+	name := accentLetter(it.name(), key, nameStyle)
 
 	var status []string
 	if selected && focused && m.modeIdx != 0 {

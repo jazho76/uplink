@@ -28,6 +28,7 @@ type item struct {
 	t         target.Target
 	provider  target.Provider
 	autostart bool
+	key       rune
 	caps      caps
 }
 
@@ -164,19 +165,21 @@ func paneIndex(panes []pane, section string) int {
 	return 0
 }
 
-func (m model) focusedSection() string {
+func (m model) focusedPane() (pane, bool) {
 	if m.focus < 0 || m.focus >= len(m.panes) {
-		return ""
+		return pane{}, false
 	}
-	return m.panes[m.focus].section
+	return m.panes[m.focus], true
+}
+
+func (m model) focusedSection() string {
+	p, _ := m.focusedPane()
+	return p.section
 }
 
 func (m model) selected() item {
-	if m.focus < 0 || m.focus >= len(m.panes) {
-		return item{}
-	}
-	p := m.panes[m.focus]
-	if p.cursor < 0 || p.cursor >= len(p.items) {
+	p, ok := m.focusedPane()
+	if !ok || p.cursor < 0 || p.cursor >= len(p.items) {
 		return item{}
 	}
 	return p.items[p.cursor]
@@ -199,12 +202,16 @@ func (m *model) cycleMode(delta int) {
 }
 
 func (m *model) moveCursor(delta int) tea.Cmd {
-	if m.focus < 0 || m.focus >= len(m.panes) {
+	p, ok := m.focusedPane()
+	if !ok {
 		return nil
 	}
-	moved := m.panes[m.focus]
-	to := moved.cursor + delta
-	if to < 0 || to >= len(moved.items) {
+	return m.selectItem(p.cursor + delta)
+}
+
+func (m *model) selectItem(to int) tea.Cmd {
+	moved, ok := m.focusedPane()
+	if !ok || to < 0 || to >= len(moved.items) || to == moved.cursor {
 		return nil
 	}
 	moved.cursor = to

@@ -417,19 +417,15 @@ func TestPaneFocusRemembersItsCursor(t *testing.T) {
 	}
 }
 
-// Once a real terminal turns colour on, lipgloss renders an empty string as
-// bare escape codes: invisible, but not "". A caption test that compares
-// against "" then pads the corner away from the fill and the pane stops
-// looking closed. The suite runs without a TTY, so the profile hides it.
 func TestPaneEdgeIgnoresInvisibleCaptions(t *testing.T) {
-	const invisible = "\x1b[94m\x1b[0m"
+	const styledButEmpty = "\x1b[94m\x1b[0m"
 	closed := "╰" + strings.Repeat("─", 22) + "╯"
 
 	for _, c := range []struct{ name, left, right string }{
 		{name: "no captions"},
-		{name: "invisible right", right: invisible},
-		{name: "invisible left", left: invisible},
-		{name: "invisible both", left: invisible, right: invisible},
+		{name: "invisible right", right: styledButEmpty},
+		{name: "invisible left", left: styledButEmpty},
+		{name: "invisible both", left: styledButEmpty, right: styledButEmpty},
 	} {
 		edge := ansi.Strip(paneEdge("╰", "╯", c.left, c.right, 24, paneBorder))
 		if edge != closed {
@@ -473,6 +469,67 @@ func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 	}
 }
 
+func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
+	panes := groupPanes([]item{
+		named(target.ProviderLocal, "local", "host"),
+		named(target.ProviderLima, "vms", "vault"),
+		named(target.ProviderRemote, "remotes", "riga"),
+		named(target.ProviderRemote, "remotes", "lisbon"),
+	})
+
+	keys := map[string]rune{}
+	for _, p := range panes {
+		for _, it := range p.items {
+			keys[it.name()] = it.key
+		}
+	}
+
+	if keys["riga"] != 'r' || keys["vault"] != 'v' {
+		t.Errorf("an item may claim its own pane's letter, got riga=%q vault=%q", keys["riga"], keys["vault"])
+	}
+	if keys["lisbon"] != 'i' {
+		t.Errorf("l belongs to the local pane, so lisbon should fall through to i, got %q", keys["lisbon"])
+	}
+}
+
+func TestItemKeysFallThroughWithinPane(t *testing.T) {
+	panes := groupPanes([]item{
+		named(target.ProviderRemote, "remotes", "dojo"),
+		named(target.ProviderRemote, "remotes", "dublin"),
+		named(target.ProviderRemote, "remotes", "denver"),
+	})
+
+	want := []rune{'d', 'u', 'e'}
+	for i, it := range panes[0].items {
+		if it.key != want[i] {
+			t.Errorf("%s took %q, want %q", it.name(), it.key, want[i])
+		}
+	}
+}
+
+func TestItemKeyExhaustionLeavesItemUnaddressable(t *testing.T) {
+	panes := groupPanes([]item{
+		named(target.ProviderLima, "vms", "ab"),
+		named(target.ProviderLima, "vms", "ba"),
+		named(target.ProviderLima, "vms", "aab"),
+		named(target.ProviderLima, "vms", "jkq"),
+	})
+
+	last := panes[0].items[2]
+	if last.key != 0 {
+		t.Errorf("an item with no free letter must stay unaddressable, got %q", last.key)
+	}
+	if reserved := panes[0].items[3]; reserved.key != 0 {
+		t.Errorf("reserved letters are never handed out, got %q", reserved.key)
+	}
+	if got := accentLetter(last.name(), last.key, dimRow); got != dimRow.Render(last.name()) {
+		t.Errorf("an unaddressable item carries no accent, got %q", got)
+	}
+	if _, ok := itemForKey(panes[0], "a"); !ok {
+		t.Errorf("the first claimant of a letter should still resolve")
+	}
+}
+
 func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	up := item{t: target.Target{Status: target.StatusRunning}}
 	off := item{t: target.Target{Status: target.StatusStopped}}
@@ -495,6 +552,70 @@ func TestClipMeasuresDisplayWidth(t *testing.T) {
 	}
 	if got := clip("a\tb\x00c", 10); got != "a bc" {
 		t.Errorf("clip should flatten tabs and drop control bytes, got %q", got)
+	}
+}
+
+func TestPaneLetterThenItemLetterSelects(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "running")}
+	m = sized(load(m))
+
+	if got := m.selected().name(); got != "host" {
+		t.Fatalf("focus should start on the first pane, got %q", got)
+	}
+
+	m = key(m, "v")
+	if got := m.selected().name(); got != "forge" {
+		t.Fatalf("v should focus the vms pane, got %q", got)
+	}
+
+	m = key(m, "t")
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("t should select tokyo inside the focused pane, got %q", got)
+	}
+
+	m = key(m, "z")
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("a letter no item holds must change nothing, got %q", got)
+	}
+	if m.status != "" {
+		t.Errorf("a miss must stay silent, got status %q", m.status)
+	}
+}
+
+func TestFocusedPaneLetterFallsThroughToItsItems(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running"), vm("vault", "running")}
+	m = sized(load(m))
+
+	m = key(m, "v")
+	if got := m.selected().name(); got != "forge" {
+		t.Fatalf("v should focus the vms pane, got %q", got)
+	}
+
+	m = key(m, "v")
+	if got := m.selected().name(); got != "vault" {
+		t.Fatalf("the focused pane's own letter should reach its items, got %q", got)
+	}
+}
+
+func TestItemLettersOnlyRenderInFocusedPane(t *testing.T) {
+	stylingEnabled(t)
+
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	forge := m.panes[1].items[0]
+	if forge.key == 0 {
+		t.Fatalf("forge should have claimed a letter")
+	}
+	plain := m.paneRow(item{t: forge.t}, false, true, 30)
+
+	if accented := m.paneRow(forge, false, true, 30); accented == plain {
+		t.Errorf("the focused pane should mark its item letters: %q", accented)
+	}
+	if unfocused := m.paneRow(forge, false, false, 30); unfocused != plain {
+		t.Errorf("an unfocused pane must not advertise letters that would not work: %q", unfocused)
 	}
 }
 
@@ -645,6 +766,19 @@ func TestConcurrentTaskGuards(t *testing.T) {
 	if m.hasTask("forge") {
 		t.Fatalf("actionMsg should clear the task")
 	}
+}
+
+const termenvANSIProfile = 2
+
+func stylingEnabled(t *testing.T) {
+	t.Helper()
+	previous := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenvANSIProfile)
+	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
+}
+
+func named(provider, section, name string) item {
+	return item{t: target.Target{Provider: provider, Section: section, Name: name}}
 }
 
 func focus(m model, name string) model {
