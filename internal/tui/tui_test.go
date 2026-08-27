@@ -48,6 +48,10 @@ type fakeVMs struct {
 
 func (fakeVMs) ID() string { return target.ProviderLima }
 
+func (*fakeVMs) Section() target.Section {
+	return target.Section{Name: "vms", Placeholder: []string{"no vms", "uplink vm create <template>"}}
+}
+
 func (f *fakeVMs) List() ([]target.Target, error) { return f.targets, nil }
 
 func (f *fakeVMs) Start(string, io.Writer) error { return nil }
@@ -103,9 +107,16 @@ func itemNamed(m model, name string) item {
 }
 
 func load(m model) model {
-	targets, _ := m.reg.All()
-	next, _ := m.Update(loadedMsg{targets: targets, hostStats: probe.Stats{Cores: 8, Load: 0.42}})
+	next, _ := m.Update(loadedMsg{listings: m.reg.Listings(), hostStats: probe.Stats{Cores: 8, Load: 0.42}})
 	return next.(model)
+}
+
+func listed(targets ...target.Target) target.Listings {
+	return target.Listings{{Provider: target.ProviderLima, Targets: targets}}
+}
+
+func panesOf(items ...item) []pane {
+	return groupPanes([]group{{items: items}})
 }
 
 func sized(m model) model {
@@ -198,7 +209,7 @@ func TestProviderErrorKeepsTargets(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 
-	next, _ := m.Update(loadedMsg{targets: []target.Target{vm("forge", "running")}, err: errBoom{}})
+	next, _ := m.Update(loadedMsg{listings: listed(vm("forge", "running")), err: errBoom{}})
 	m = next.(model)
 	if len(m.panes) != 1 || len(m.panes[0].items) != 1 {
 		t.Fatalf("targets from healthy providers should survive, got %d panes", len(m.panes))
@@ -351,8 +362,8 @@ func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m = sized(load(m))
 
 	next, _ := m.Update(loadedMsg{
-		targets: []target.Target{vm("forge", "running")},
-		err:     errors.Join(errBoom{}, errBoom{}),
+		listings: listed(vm("forge", "running")),
+		err:      errors.Join(errBoom{}, errBoom{}),
 	})
 	m = next.(model)
 
@@ -498,7 +509,11 @@ func TestFirstFreeLetterSkipsTaken(t *testing.T) {
 }
 
 func TestPaneKeysFallThroughOnCollision(t *testing.T) {
-	panes := []pane{{section: "remotes"}, {section: "rigs"}, {section: "queue"}}
+	panes := []pane{
+		{section: "remotes", items: []item{{}}},
+		{section: "rigs", items: []item{{}}},
+		{section: "queue", items: []item{{}}},
+	}
 	assignPaneKeys(panes)
 
 	if panes[0].key != 'r' || panes[1].key != 'i' || panes[2].key != 'u' {
@@ -508,12 +523,12 @@ func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 }
 
 func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
-	panes := groupPanes([]item{
+	panes := panesOf(
 		named(target.ProviderLocal, "local", "host"),
 		named(target.ProviderLima, "vms", "vault"),
 		named(target.ProviderRemote, "remotes", "riga"),
 		named(target.ProviderRemote, "remotes", "lisbon"),
-	})
+	)
 
 	keys := map[string]rune{}
 	for _, p := range panes {
@@ -531,11 +546,11 @@ func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
 }
 
 func TestItemKeysFallThroughWithinPane(t *testing.T) {
-	panes := groupPanes([]item{
+	panes := panesOf(
 		named(target.ProviderRemote, "remotes", "dojo"),
 		named(target.ProviderRemote, "remotes", "dublin"),
 		named(target.ProviderRemote, "remotes", "denver"),
-	})
+	)
 
 	want := []rune{'d', 'u', 'e'}
 	for i, it := range panes[0].items {
@@ -546,12 +561,12 @@ func TestItemKeysFallThroughWithinPane(t *testing.T) {
 }
 
 func TestItemKeyExhaustionLeavesItemUnaddressable(t *testing.T) {
-	panes := groupPanes([]item{
+	panes := panesOf(
 		named(target.ProviderLima, "vms", "ab"),
 		named(target.ProviderLima, "vms", "ba"),
 		named(target.ProviderLima, "vms", "aab"),
 		named(target.ProviderLima, "vms", "jkq"),
-	})
+	)
 
 	last := panes[0].items[2]
 	if last.key != 0 {
@@ -854,7 +869,7 @@ func TestPaneScrollFollowsCursor(t *testing.T) {
 func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 	panes := []pane{{items: make([]item, 1)}, {items: make([]item, 2)}, {items: make([]item, 2)}}
 
-	rows := distributeRows(panes, 20)
+	rows := distributeRows(panes, 20, 20)
 	sum := 0
 	for _, r := range rows {
 		sum += r
@@ -866,7 +881,7 @@ func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 		t.Errorf("slack should spread evenly, got %v", rows)
 	}
 
-	for _, r := range distributeRows(panes, 8) {
+	for _, r := range distributeRows(panes, 20, 8) {
 		if r < minPaneRows {
 			t.Errorf("an overfull column must not starve a pane, got %d", r)
 		}
@@ -1163,7 +1178,7 @@ func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
 	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}, {launcher: true}}}
 	vms := pane{section: "vms", items: []item{{}, {}}}
 
-	rows := distributeRows([]pane{launcher, vms}, 20)
+	rows := distributeRows([]pane{launcher, vms}, 20, 20)
 	if rows[0] != len(launcher.items)+borderCells {
 		t.Errorf("a launcher pane cannot use extra rows, got %d", rows[0])
 	}
@@ -1224,5 +1239,133 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	m.logPeek = peek{name: m.selected().name(), text: "journal line", at: time.Now()}
 	if cmd := m.peekLogs(); cmd != nil {
 		t.Errorf("a fresh peek should not refetch on every poll")
+	}
+}
+
+func TestDeclaredSectionKeepsItsPaneWhenEmpty(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = nil
+	m = sized(load(m))
+
+	if len(m.panes) != 2 {
+		t.Fatalf("the vms pane should outlive its last vm, got %d panes", len(m.panes))
+	}
+	empty := m.panes[1]
+	if empty.section != "vms" || len(empty.items) != 0 {
+		t.Fatalf("want an empty vms pane, got %q with %d items", empty.section, len(empty.items))
+	}
+	if empty.key != 0 {
+		t.Errorf("an inert pane takes no jump key, got %q", empty.key)
+	}
+	if !strings.Contains(m.View(), "no vms") {
+		t.Error("the empty pane should say why it is empty")
+	}
+}
+
+func TestUndeclaredSectionVanishesWhenEmpty(t *testing.T) {
+	panes := groupPanes([]group{
+		{items: []item{named(target.ProviderLocal, "local", "host")}},
+		{section: "vms", placeholder: []string{"no vms"}},
+		{},
+	})
+
+	if len(panes) != 2 {
+		t.Fatalf("only a declared section survives with no targets, got %d panes", len(panes))
+	}
+	if panes[0].section != "local" || panes[1].section != "vms" {
+		t.Fatalf("want the local and vms panes, got %q and %q", panes[0].section, panes[1].section)
+	}
+	if len(panes[1].placeholder) != 1 {
+		t.Errorf("the declared section should carry its placeholder, got %+v", panes[1])
+	}
+}
+
+func TestCursorSkipsAnEmptyPane(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = nil
+	m = sized(load(m))
+
+	for _, want := range []string{"shell", "top", "tmux"} {
+		m = key(m, "down")
+		if got := m.selected().label(); got != want {
+			t.Fatalf("down should reach %q, got %q", want, got)
+		}
+	}
+	if got := m.focusedSection(); got != "local" {
+		t.Errorf("an empty pane must never take the focus, got %q", got)
+	}
+}
+
+func TestFocusLeavesTheSectionItEmptied(t *testing.T) {
+	m, vms := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	vms.targets = nil
+	m = load(m)
+
+	if got := m.focusedSection(); got != "local" {
+		t.Errorf("deleting the last vm should hand the focus back, got %q", got)
+	}
+	if m.selected().name() == "" {
+		t.Error("the focus should land on a real target")
+	}
+}
+
+func TestEmptyPaneGetsNoSlack(t *testing.T) {
+	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}}}
+	empty := pane{section: "vms", placeholder: []string{"no vms"}}
+	remotes := pane{section: "remotes", items: []item{{}, {}}}
+
+	rows := distributeRows([]pane{launcher, empty, remotes}, 20, 20)
+	if rows[1] != minPaneRows {
+		t.Errorf("an empty pane should not absorb slack, got %d", rows[1])
+	}
+	if sum := rows[0] + rows[1] + rows[2]; sum != 20 {
+		t.Errorf("the slack should still be spent, got %d of 20", sum)
+	}
+
+	fresh := distributeRows([]pane{launcher, empty}, 20, 20)
+	if fresh[1] != minPaneRows || fresh[0]+fresh[1] != 20 {
+		t.Errorf("with nothing else to grow the launcher takes the slack, got %v", fresh)
+	}
+}
+
+func TestPlaceholderKeepsOnlyTheLinesThatFit(t *testing.T) {
+	m, _ := newTestModel()
+	p := pane{section: "vms", placeholder: []string{"no vms", "uplink vm create <template>"}}
+
+	wide := m.renderPane(p, false, 40, 4)
+	if !strings.Contains(wide, "no vms") || !strings.Contains(wide, "uplink vm create <template>") {
+		t.Errorf("a wide pane shows the whole placeholder, got:\n%s", wide)
+	}
+
+	narrow := m.renderPane(p, false, minPaneColumnW, 4)
+	if !strings.Contains(narrow, "no vms") {
+		t.Errorf("the first placeholder line must survive at %d cols, got:\n%s", minPaneColumnW, narrow)
+	}
+	if strings.Contains(narrow, "uplink") {
+		t.Errorf("a line that does not fit is dropped, not truncated, got:\n%s", narrow)
+	}
+	for _, line := range strings.Split(narrow, "\n") {
+		if got := lipgloss.Width(line); got != minPaneColumnW {
+			t.Errorf("pane line spans %d, want %d", got, minPaneColumnW)
+		}
+	}
+}
+
+func TestPlaceholderStaysHiddenWhileTheSectionHasTargets(t *testing.T) {
+	panes := groupPanes([]group{{
+		section:     "vms",
+		placeholder: []string{"no vms"},
+		items:       []item{named(target.ProviderLima, "vms", "forge")},
+	}})
+
+	m, _ := newTestModel()
+	if got := m.renderPane(panes[0], false, 40, 6); strings.Contains(got, "no vms") {
+		t.Errorf("a section with targets never shows its placeholder, got:\n%s", got)
+	}
+	if got := paneBodyRows(panes[0], paneTextWidth(40)); got != 1 {
+		t.Errorf("a populated pane is sized by its items, got %d rows", got)
 	}
 }

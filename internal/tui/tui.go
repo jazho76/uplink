@@ -139,25 +139,33 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd())
 }
 
-func (m *model) rebuild(targets []target.Target) {
-	items := make([]item, 0, len(targets))
-	for _, t := range targets {
-		provider := m.reg.Provider(t.Provider)
-		it := item{t: t, provider: provider}
-
-		_, it.caps.lifecycle = provider.(target.Lifecycle)
-		_, it.caps.tail = provider.(target.Tailer)
-		_, it.caps.probe = provider.(target.Prober)
-		if auto, ok := provider.(target.Autostarter); ok {
-			it.caps.autostart = true
-			it.autostart = auto.Autostart(t.Name)
+func (m *model) rebuild(listings target.Listings) {
+	groups := make([]group, 0, len(listings))
+	for _, l := range listings {
+		g := group{section: l.Section.Name, placeholder: l.Section.Placeholder}
+		for _, t := range l.Targets {
+			g.items = append(g.items, m.rowsFor(t)...)
 		}
-		items = append(items, launcherRows(it)...)
+		groups = append(groups, g)
 	}
 
 	previouslyFocused := m.focusedSection()
-	m.panes = carryOverCursors(groupPanes(items), m.panes)
-	m.focus = paneIndex(m.panes, previouslyFocused)
+	m.panes = carryOverCursors(groupPanes(groups), m.panes)
+	m.focus = paneToFocus(m.panes, previouslyFocused)
+}
+
+func (m model) rowsFor(t target.Target) []item {
+	provider := m.reg.Provider(t.Provider)
+	it := item{t: t, provider: provider}
+
+	_, it.caps.lifecycle = provider.(target.Lifecycle)
+	_, it.caps.tail = provider.(target.Tailer)
+	_, it.caps.probe = provider.(target.Prober)
+	if auto, ok := provider.(target.Autostarter); ok {
+		it.caps.autostart = true
+		it.autostart = auto.Autostart(t.Name)
+	}
+	return launcherRows(it)
 }
 
 func launcherRows(it item) []item {
@@ -186,8 +194,13 @@ func carryOverCursors(fresh, previous []pane) []pane {
 	return fresh
 }
 
-func paneIndex(panes []pane, section string) int {
-	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
+func paneToFocus(panes []pane, section string) int {
+	if i := slices.IndexFunc(panes, func(p pane) bool {
+		return p.section == section && len(p.items) > 0
+	}); i >= 0 {
+		return i
+	}
+	return max(slices.IndexFunc(panes, func(p pane) bool { return len(p.items) > 0 }), 0)
 }
 
 func (m model) focusedPane() (pane, bool) {
@@ -235,11 +248,24 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 		return m.focusItem(m.focus, to)
 	}
 
-	next := wrap(m.focus+delta, len(m.panes))
+	next, ok := nextPaneWithItems(m.panes, m.focus, delta)
+	if !ok {
+		return nil
+	}
 	if delta < 0 {
 		return m.focusItem(next, len(m.panes[next].items)-1)
 	}
 	return m.focusItem(next, 0)
+}
+
+func nextPaneWithItems(panes []pane, from, step int) (int, bool) {
+	for moved := 1; moved <= len(panes); moved++ {
+		next := wrap(from+moved*step, len(panes))
+		if len(panes[next].items) > 0 {
+			return next, true
+		}
+	}
+	return 0, false
 }
 
 func (m *model) focusItem(inPane, cursor int) tea.Cmd {
@@ -288,7 +314,7 @@ type liveStatsMsg struct {
 }
 
 type loadedMsg struct {
-	targets   []target.Target
+	listings  target.Listings
 	hostStats probe.Stats
 	err       error
 }
@@ -318,8 +344,8 @@ func logTickCmd() tea.Cmd {
 func (m model) loadCmd() tea.Cmd {
 	reg := m.reg
 	return func() tea.Msg {
-		targets, err := reg.All()
-		msg := loadedMsg{targets: targets, err: err}
+		listings := reg.Listings()
+		msg := loadedMsg{listings: listings, err: listings.Err()}
 		if prober, ok := reg.Provider(target.ProviderLocal).(target.Prober); ok {
 			if stats, err := prober.Probe(""); err == nil {
 				msg.hostStats = stats

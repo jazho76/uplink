@@ -13,14 +13,22 @@ import (
 
 const (
 	minPaneRows      = borderCells + 1
+	paneIndent       = 1
 	reservedPaneKeys = "qjk"
 )
 
 type pane struct {
-	section string
-	key     rune
-	items   []item
-	cursor  int
+	section     string
+	key         rune
+	items       []item
+	placeholder []string
+	cursor      int
+}
+
+type group struct {
+	section     string
+	placeholder []string
+	items       []item
 }
 
 func sectionOf(t target.Target) string {
@@ -30,19 +38,30 @@ func sectionOf(t target.Target) string {
 	return t.Provider
 }
 
-func groupPanes(items []item) []pane {
+func groupPanes(groups []group) []pane {
 	var panes []pane
 	at := map[string]int{}
-	for _, it := range items {
-		section := sectionOf(it.t)
-		i, grouped := at[section]
-		if !grouped {
+	paneFor := func(section string) int {
+		i, exists := at[section]
+		if !exists {
 			i = len(panes)
 			at[section] = i
 			panes = append(panes, pane{section: section})
 		}
-		panes[i].items = append(panes[i].items, it)
+		return i
 	}
+
+	for _, g := range groups {
+		for _, it := range g.items {
+			i := paneFor(sectionOf(it.t))
+			panes[i].items = append(panes[i].items, it)
+		}
+		if g.section != "" {
+			i := paneFor(g.section)
+			panes[i].placeholder = g.placeholder
+		}
+	}
+
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
 	return panes
@@ -51,6 +70,9 @@ func groupPanes(items []item) []pane {
 func assignPaneKeys(panes []pane) {
 	taken := reservedPaneKeys
 	for i := range panes {
+		if len(panes[i].items) == 0 {
+			continue
+		}
 		panes[i].key, taken = claimLetter(panes[i].section, taken)
 	}
 }
@@ -105,7 +127,7 @@ func keyMatches(assigned rune, pressed string) bool {
 	return assigned != 0 && string(assigned) == pressed
 }
 
-func distributeRows(panes []pane, total int) []int {
+func distributeRows(panes []pane, textWidth, total int) []int {
 	rows := make([]int, len(panes))
 	if len(panes) == 0 {
 		return rows
@@ -113,7 +135,7 @@ func distributeRows(panes []pane, total int) []int {
 
 	sum := 0
 	for i, p := range panes {
-		rows[i] = max(len(p.items)+borderCells, minPaneRows)
+		rows[i] = max(paneBodyRows(p, textWidth)+borderCells, minPaneRows)
 		sum += rows[i]
 	}
 
@@ -131,22 +153,53 @@ func distributeRows(panes []pane, total int) []int {
 	return rows
 }
 
-func growablePanes(panes []pane) []int {
-	var growable []int
-	for i, p := range panes {
-		if !launcherPane(p) {
-			growable = append(growable, i)
+func paneBodyRows(p pane, textWidth int) int {
+	return max(len(p.items), len(placeholderLines(p, textWidth)))
+}
+
+func placeholderLines(p pane, textWidth int) []string {
+	if len(p.items) > 0 {
+		return nil
+	}
+	return fitLines(p.placeholder, textWidth)
+}
+
+func paneTextWidth(width int) int {
+	return max(width-borderCells-paneIndent, 1)
+}
+
+func fitLines(lines []string, width int) []string {
+	fitted := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if lipgloss.Width(line) <= width {
+			fitted = append(fitted, line)
 		}
 	}
-	if len(growable) > 0 {
-		return growable
-	}
+	return fitted
+}
 
-	every := make([]int, len(panes))
-	for i := range panes {
-		every[i] = i
+func growablePanes(panes []pane) []int {
+	var scrollable, inhabited, all []int
+	for i, p := range panes {
+		all = append(all, i)
+		if len(p.items) == 0 {
+			continue
+		}
+		inhabited = append(inhabited, i)
+		if !launcherPane(p) {
+			scrollable = append(scrollable, i)
+		}
 	}
-	return every
+	return firstNonEmpty(scrollable, inhabited, all)
+}
+
+func firstNonEmpty(choices ...[]int) []int {
+	for _, chosen := range choices {
+		if len(chosen) > 0 {
+			return chosen
+		}
+	}
+	return nil
 }
 
 func launcherPane(p pane) bool {
@@ -207,7 +260,7 @@ func (m model) renderPanes(width, height int) string {
 	if len(m.panes) == 0 {
 		return ""
 	}
-	rows := distributeRows(m.panes, height)
+	rows := distributeRows(m.panes, paneTextWidth(width), height)
 	blocks := make([]string, 0, len(m.panes))
 	for i, p := range m.panes {
 		blocks = append(blocks, m.renderPane(p, i == m.focus, width, rows[i]))
@@ -225,15 +278,20 @@ func (m model) renderPane(p pane, focused bool, width, height int) string {
 	interior := max(width-borderCells, 1)
 	start := scrollOffset(p.cursor, len(p.items), rows)
 
+	placeholder := placeholderLines(p, paneTextWidth(width))
 	summary := labelStyle.Render(paneSummary(p))
 	blank := strings.Repeat(" ", interior)
+	indent := strings.Repeat(" ", paneIndent)
 	side := border.Render(boxBorder.Left)
 	lines := []string{paneEdge(boxBorder.TopLeft, boxBorder.TopRight,
 		accentLetter(p.section, p.key, title), summary, width, border)}
 	for i := start; i < start+rows; i++ {
 		row := blank
-		if i < len(p.items) {
+		switch {
+		case i < len(p.items):
 			row = m.paneRow(p.items[i], i == p.cursor, focused, interior)
+		case i < len(placeholder):
+			row = pad(indent+labelStyle.Render(placeholder[i]), interior, plainStyle)
 		}
 		lines = append(lines, side+row+side)
 	}

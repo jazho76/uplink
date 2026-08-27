@@ -129,6 +129,42 @@ type Prober interface {
 	Probe(name string) (probe.Stats, error)
 }
 
+type Section struct {
+	Name        string
+	Placeholder []string
+}
+
+type Sectioned interface {
+	Section() Section
+}
+
+type Listing struct {
+	Provider string
+	Section  Section
+	Targets  []Target
+	Err      error
+}
+
+type Listings []Listing
+
+func (l Listings) Targets() []Target {
+	var all []Target
+	for _, listing := range l {
+		all = append(all, listing.Targets...)
+	}
+	return all
+}
+
+func (l Listings) Err() error {
+	var errs []error
+	for _, listing := range l {
+		if listing.Err != nil {
+			errs = append(errs, listing.Err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 type Registry struct {
 	providers []Provider
 }
@@ -137,28 +173,43 @@ func NewRegistry(providers ...Provider) Registry {
 	return Registry{providers: providers}
 }
 
-func (r Registry) All() ([]Target, error) {
-	var (
-		all  []Target
-		errs []error
-		seen = map[string]string{}
-	)
+func (r Registry) Listings() Listings {
+	listings := make(Listings, 0, len(r.providers))
+	claimed := map[string]string{}
 	for _, p := range r.providers {
-		targets, err := p.List()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", p.ID(), err))
+		listings = append(listings, listingOf(p, claimed))
+	}
+	return listings
+}
+
+func listingOf(p Provider, claimed map[string]string) Listing {
+	l := Listing{Provider: p.ID()}
+	if sectioned, ok := p.(Sectioned); ok {
+		l.Section = sectioned.Section()
+	}
+
+	targets, err := p.List()
+	if err != nil {
+		l.Err = fmt.Errorf("%s: %w", p.ID(), err)
+		return l
+	}
+
+	var errs []error
+	for _, t := range targets {
+		if owner, taken := claimed[t.Name]; taken {
+			errs = append(errs, fmt.Errorf("duplicate target %q from %s and %s; rename one", t.Name, owner, p.ID()))
 			continue
 		}
-		for _, t := range targets {
-			if owner, dup := seen[t.Name]; dup {
-				errs = append(errs, fmt.Errorf("duplicate target %q from %s and %s; rename one", t.Name, owner, p.ID()))
-				continue
-			}
-			seen[t.Name] = p.ID()
-			all = append(all, t)
-		}
+		claimed[t.Name] = p.ID()
+		l.Targets = append(l.Targets, t)
 	}
-	return all, errors.Join(errs...)
+	l.Err = errors.Join(errs...)
+	return l
+}
+
+func (r Registry) All() ([]Target, error) {
+	listings := r.Listings()
+	return listings.Targets(), listings.Err()
 }
 
 func (r Registry) Provider(id string) Provider {

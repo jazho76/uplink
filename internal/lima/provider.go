@@ -17,6 +17,8 @@ const Section = "lima"
 
 const listHeader = "vms"
 
+const createHint = "uplink vm create <template>"
+
 type Config struct {
 	Modes []target.ModeSpec `yaml:"modes"`
 }
@@ -24,7 +26,8 @@ type Config struct {
 func (c Config) Validate() error { return target.ValidateSpecs(Section, c.Modes) }
 
 type Provider struct {
-	specs []target.ModeSpec
+	specs  []target.ModeSpec
+	hasBin bool
 }
 
 func New(cfg Config) *Provider {
@@ -32,7 +35,14 @@ func New(cfg Config) *Provider {
 	if len(specs) == 0 {
 		specs = defaultSpecs()
 	}
-	return &Provider{specs: specs}
+	return &Provider{specs: specs, hasBin: binAvailable()}
+}
+
+func (p *Provider) Section() target.Section {
+	if !p.hasBin {
+		return target.Section{Name: listHeader, Placeholder: []string{"lima not found"}}
+	}
+	return target.Section{Name: listHeader, Placeholder: []string{"no vms", createHint}}
 }
 
 func defaultSpecs() []target.ModeSpec {

@@ -2,6 +2,7 @@ package lima
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -9,6 +10,11 @@ import (
 )
 
 const bin = "limactl"
+
+func binAvailable() bool {
+	_, err := exec.LookPath(bin)
+	return err == nil
+}
 
 type Instance struct {
 	Name         string

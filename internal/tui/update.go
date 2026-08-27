@@ -42,7 +42,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.loadCmd(), tickCmd())
 
 	case loadedMsg:
-		m.rebuild(msg.targets)
+		m.rebuild(msg.listings)
 		m.hostStats = msg.hostStats
 		m.hostHistory = appendSample(m.hostHistory, loadFraction(msg.hostStats.Load, msg.hostStats.Cores))
 		if msg.err != nil {

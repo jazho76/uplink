@@ -137,10 +137,10 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
 	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
 		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30},
-		panes: groupPanes([]item{
-			{t: target.Target{Name: "kyoto", Status: target.StatusRunning, CPUs: 6, Memory: 12 << 30}},
-			{t: target.Target{Name: "forge", Status: target.StatusRunning, CPUs: 8, Memory: 16 << 30}},
-		})}
+		panes: panesOf(
+			item{t: target.Target{Name: "kyoto", Status: target.StatusRunning, CPUs: 6, Memory: 12 << 30}},
+			item{t: target.Target{Name: "forge", Status: target.StatusRunning, CPUs: 8, Memory: 16 << 30}},
+		)}
 
 	for _, width := range []int{minWidth, 60, 80, 100, 140} {
 		bar := m.renderHostBar(width)

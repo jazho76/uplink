@@ -134,3 +134,51 @@ func TestModeCommandQuotesPayloads(t *testing.T) {
 		}
 	}
 }
+
+type sectionedStub struct {
+	stub
+	section Section
+}
+
+func (s sectionedStub) Section() Section { return s.section }
+
+func TestListingsKeepASectionWithNoTargets(t *testing.T) {
+	reg := NewRegistry(
+		stub{id: "local", targets: []Target{named("local", "host")}},
+		sectionedStub{stub: stub{id: "lima"}, section: Section{Name: "vms", Placeholder: []string{"no vms"}}},
+	)
+
+	listings := reg.Listings()
+	if len(listings) != 2 {
+		t.Fatalf("every provider gets a listing, got %d", len(listings))
+	}
+	if got := listings[0].Section.Name; got != "" {
+		t.Errorf("a provider that declares no section has none, got %q", got)
+	}
+
+	vms := listings[1]
+	if vms.Section.Name != "vms" || len(vms.Targets) != 0 {
+		t.Fatalf("a declared section should outlive its targets, got %+v", vms)
+	}
+	if len(vms.Section.Placeholder) != 1 {
+		t.Errorf("the section carries its own placeholder, got %v", vms.Section.Placeholder)
+	}
+}
+
+func TestListingsKeepErrorsWithTheirProvider(t *testing.T) {
+	reg := NewRegistry(
+		stub{id: "lima", err: errors.New("limactl exploded")},
+		stub{id: "remote", targets: []Target{named("remote", "dojo")}},
+	)
+
+	listings := reg.Listings()
+	if listings[0].Err == nil || !strings.Contains(listings[0].Err.Error(), "limactl exploded") {
+		t.Errorf("the failing provider should own its error, got %v", listings[0].Err)
+	}
+	if listings[1].Err != nil {
+		t.Errorf("a healthy provider should stay clean, got %v", listings[1].Err)
+	}
+	if err := listings.Err(); err == nil || !strings.Contains(err.Error(), "lima") {
+		t.Errorf("the joined error should name the provider, got %v", err)
+	}
+}
