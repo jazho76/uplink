@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -13,19 +15,24 @@ import (
 )
 
 const (
-	minWidth  = 40
-	minHeight = 14
+	gaugeGap      = 3
+	percentGap    = 2
+	percentWidth  = len("100%")
+	minHostBarGap = 3
+	hostGaugeGap  = 1
+	fieldGap      = 2
+	hostBarMeter  = 10
+	minLiveBar    = 8
 )
 
 var (
+	plainStyle   = lipgloss.NewStyle()
+	rowFill      = lipgloss.NewStyle().Background(ui.Selection)
 	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
 
-	titleStyle   = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
-	pointerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
-	selectedRow  = lipgloss.NewStyle().Foreground(ui.Fg).Bold(true)
-	dimRow       = lipgloss.NewStyle().Foreground(ui.Fg)
-	autoMarker   = lipgloss.NewStyle().Foreground(ui.Magenta)
-	modeMarker   = lipgloss.NewStyle().Foreground(ui.Yellow)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
+	autoMarker = lipgloss.NewStyle().Foreground(ui.Magenta)
+	modeMarker = lipgloss.NewStyle().Foreground(ui.Yellow)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
 	footerStyle    = lipgloss.NewStyle().Foreground(ui.Comment)
@@ -35,51 +42,45 @@ var (
 	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
 	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
 
-	hostGlyph = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
+	paneBorder      = lipgloss.NewStyle().Foreground(ui.Comment)
+	paneBorderFocus = lipgloss.NewStyle().Foreground(ui.Cyan)
+	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
+	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
 
-	vmRunningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
-	vmStoppedGlyph = lipgloss.NewStyle().Foreground(ui.Comment).Render("○")
-
-	remoteReachableGlyph   = lipgloss.NewStyle().Foreground(ui.Green).Render("◆")
-	remoteUnprobedGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("◇")
-	remoteUnreachableGlyph = lipgloss.NewStyle().Foreground(ui.Red).Render("×")
-
-	listBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.Comment).
-			Padding(0, 1)
-	previewBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.Comment).
-			Padding(0, 1)
-	hostBarBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
+	boxBorder = lipgloss.RoundedBorder()
+	boxStyle  = lipgloss.NewStyle().
+			Border(boxBorder).
 			BorderForeground(ui.Comment).
 			Padding(0, 1)
 )
 
-func glyph(it item) string {
+func glyph(it item, base lipgloss.Style) string {
+	mark, color := glyphOf(it)
+	return base.Foreground(color).Render(mark)
+}
+
+func glyphOf(it item) (string, lipgloss.TerminalColor) {
 	switch it.t.Provider {
 	case target.ProviderLocal:
-		return hostGlyph
+		return "⬢", ui.Cyan
 	case target.ProviderRemote:
-		return remoteGlyph(it.t.Status)
+		return remoteGlyphOf(it.t.Status)
 	default:
 		if it.running() {
-			return vmRunningGlyph
+			return "●", ui.Green
 		}
-		return vmStoppedGlyph
+		return "○", ui.Comment
 	}
 }
 
-func remoteGlyph(status target.Status) string {
+func remoteGlyphOf(status target.Status) (string, lipgloss.TerminalColor) {
 	switch status {
 	case target.StatusRunning:
-		return remoteReachableGlyph
+		return "◆", ui.Green
 	case target.StatusUnreachable:
-		return remoteUnreachableGlyph
+		return "×", ui.Red
 	default:
-		return remoteUnprobedGlyph
+		return "◇", ui.Comment
 	}
 }
 
@@ -95,91 +96,36 @@ func (m model) View() string {
 		return m.renderLogs()
 	}
 
-	listW := m.width * 38 / 100
-	if listW < 20 {
-		listW = 20
-	}
-	previewW := m.width - listW - 6
-	bodyH := m.height - 7
-	if bodyH < 5 {
-		bodyH = 5
-	}
+	l := computeLayout(m.width, m.height)
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		m.renderPanes(l.paneColumnOuterW, l.bodyOuterH),
+		m.renderPreview(l.previewOuterW, l.bodyOuterH))
 
-	list := listBorder.Width(listW).Height(bodyH).Render(clampBlock(m.renderList(), listW-4, bodyH))
-	preview := previewBorder.Width(previewW).Height(bodyH).Render(m.renderPreview(previewW, bodyH))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, list, preview)
-
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(), m.renderFooter())
-}
-
-func (m model) renderList() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("uplink") + "\n\n")
-
-	section := ""
-	for i, it := range m.items {
-		if it.t.Section != section {
-			section = it.t.Section
-			if section != "" {
-				fmt.Fprintf(&b, "   %s %s %s\n",
-					footerStyle.Render("──"), sectionStyle.Render(section), footerStyle.Render("──"))
-			}
-		}
-
-		label := " "
-		if i < 9 {
-			label = keyStyle.Render(strconv.Itoa(i + 1))
-		}
-		marker := "  "
-		name := dimRow.Render(it.name())
-		if i == m.cursor {
-			marker = pointerStyle.Render("▌ ")
-			name = selectedRow.Render(it.name())
-		}
-		trailing := ""
-		if i == m.cursor && m.modeIdx != 0 {
-			trailing += " " + modeMarker.Render("["+m.mode().Name+"]")
-		}
-		if it.autostart {
-			trailing += " " + autoMarker.Render("↻")
-		}
-		if verb := m.tasks[it.name()]; verb != "" {
-			trailing += " " + m.spinner.View() + " " + labelStyle.Render(verb)
-		}
-		fmt.Fprintf(&b, "%s %s%s %s%s\n", label, marker, glyph(it), name, trailing)
-	}
-	return b.String()
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(m.width), m.renderFooter())
 }
 
 func (m model) renderPreview(width, height int) string {
-	cw := width - 4
-	if cw < 10 {
-		cw = 10
-	}
+	return boxStyle.Width(width - borderCells).Height(height - borderCells).
+		Render(m.previewBody(width-chromeCells, height-borderCells))
+}
 
+func (m model) previewBody(width, height int) string {
 	it := m.selected()
 	if it.name() == "" {
 		return ""
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name()), glyph(it), string(it.t.Status))
-
-	if n := len(it.t.Modes); n > 1 {
-		kv(&b, "mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
-			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n))))
-	}
-	for _, f := range it.t.Detail {
-		kv(&b, f.Key, f.Value)
-	}
-	if it.caps.autostart {
-		kv(&b, "auto", autostartLabel(it))
-	}
+	header := titleStyle.Render(it.name()) + "  " + glyph(it, plainStyle) + " " + string(it.t.Status)
+	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
 
 	if it.worthProbing() {
-		b.WriteString("\n" + rule("live", cw))
-		m.renderLive(&b, it.name())
+		b.WriteString("\n" + rule("live", width))
+		b.WriteString(m.renderLive(it.name(), width, height))
 	}
+
+	b.WriteString("\n" + rule("spec", width))
+	b.WriteString(renderFields(m.specFields(it), width))
 
 	if m.logPeek != "" {
 		used := strings.Count(b.String(), "\n")
@@ -189,32 +135,151 @@ func (m model) renderPreview(width, height int) string {
 			if len(lines) > fit {
 				lines = lines[len(lines)-fit:]
 			}
-			b.WriteString("\n" + rule("logs", cw))
+			b.WriteString("\n" + rule("logs", width))
 			for _, line := range lines {
-				b.WriteString(detailLogStyle.Render(clip(line, cw)) + "\n")
+				b.WriteString(detailLogStyle.Render(clip(line, width)) + "\n")
 			}
 		}
 	}
-	return clampBlock(b.String(), cw, height)
+	return clampBlock(b.String(), width, height)
 }
 
-func (m model) renderLive(b *strings.Builder, name string) {
+func (m model) renderLive(name string, width, height int) string {
 	e, ok := m.live[name]
 	if !ok {
-		b.WriteString(labelStyle.Render("…") + "\n")
-		return
+		return labelStyle.Render("…") + "\n"
 	}
 	if e.err {
-		kv(b, "load", labelStyle.Render("unavailable"))
-		return
+		return renderFields([]field{{"load", labelStyle.Render("unavailable")}}, width)
 	}
+
 	s := e.stats
-	kv(b, "load", s.Load)
-	kv(b, "ram", fmt.Sprintf("%s / %s", humanize.Bytes(s.MemUsed), humanize.Bytes(s.MemTotal)))
-	kv(b, "used", fmt.Sprintf("%s / %s", humanize.Bytes(s.DiskUsed), humanize.Bytes(s.DiskTotal)))
-	if up := humanize.Duration(s.Uptime); up != "" {
-		kv(b, "up", up)
+	load := loadFraction(s.Load, s.Cores)
+	gauges := []gaugeRow{
+		{"load", load, fmt.Sprintf("%.2f / %d", s.Load, s.Cores)},
+		usageGauge("memory", s.MemUsed, s.MemTotal),
+		usageGauge("disk", s.DiskUsed, s.DiskTotal),
 	}
+
+	indent := gaugeIndent(gauges)
+	return renderFields(gaugeFields(gauges, width-indent), width) +
+		renderLoadChart(e, load, width-indent, height, indent)
+}
+
+type gaugeRow struct {
+	label    string
+	fraction float64
+	reading  string
+}
+
+func usageGauge(label string, used, total uint64) gaugeRow {
+	return gaugeRow{label, usedFraction(used, total), amount(used, total)}
+}
+
+func gaugeIndent(gauges []gaugeRow) int {
+	labels := 0
+	for _, g := range gauges {
+		labels = max(labels, lipgloss.Width(g.label))
+	}
+	return labels + fieldGap
+}
+
+func gaugeFields(gauges []gaugeRow, width int) []field {
+	readings := 0
+	for _, g := range gauges {
+		readings = max(readings, lipgloss.Width(g.reading))
+	}
+
+	bar := width - gaugeGap - readings - percentGap - percentWidth
+	if bar < minLiveBar {
+		bar = 0
+	}
+
+	fields := make([]field, 0, len(gauges))
+	for _, g := range gauges {
+		reading := valueStyle.Render(pad(g.reading, readings, plainStyle))
+		percent := labelStyle.Render(fmt.Sprintf("%3.0f%%", g.fraction*100))
+		gap := strings.Repeat(" ", percentGap)
+		fields = append(fields, field{g.label,
+			gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent, gaugeGap)})
+	}
+	return fields
+}
+
+func renderLoadChart(e liveEntry, load float64, width, height, indent int) string {
+	if width < 1 {
+		return ""
+	}
+	visible := newest(e.history, width)
+	ceiling := chartCeiling(visible)
+
+	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
+	head := labelStyle.Render("load · last " + window)
+	peak := labelStyle.Render(fmt.Sprintf("peak %.2f", ceiling*float64(e.stats.Cores)))
+	if width < lipgloss.Width(head)+1+lipgloss.Width(peak) {
+		return ""
+	}
+
+	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(load))
+	if len(plot) == 0 {
+		return ""
+	}
+
+	gutter := strings.Repeat(" ", indent)
+	lines := append([]string{spread(head, peak, width, plainStyle)}, plot...)
+	lines = append(lines, labelStyle.Render(strings.Repeat(thinGlyphs.track, width)))
+
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, line := range lines {
+		b.WriteString(gutter + line + "\n")
+	}
+	return b.String()
+}
+
+func gauge(bar, reading string, gap int) string {
+	if !visible(bar) {
+		return valueStyle.Render(reading)
+	}
+	return bar + strings.Repeat(" ", gap) + valueStyle.Render(reading)
+}
+
+func amount(used, total uint64) string {
+	u, t := humanize.Bytes(used), humanize.Bytes(total)
+	if unit := unitOf(t); unit != "" && strings.HasSuffix(u, unit) {
+		return strings.TrimSuffix(u, unit) + "/" + t
+	}
+	return u + "/" + t
+}
+
+func unitOf(size string) string {
+	return strings.TrimLeft(size, "0123456789.")
+}
+
+func (m model) uptimeOf(it item) string {
+	e, ok := m.live[it.name()]
+	if !it.worthProbing() || !ok || e.err {
+		return ""
+	}
+	if up := humanize.Duration(e.stats.Uptime); up != "" {
+		return "up " + up
+	}
+	return ""
+}
+
+func (m model) specFields(it item) []field {
+	var fields []field
+	if n := len(it.t.Modes); n > 1 {
+		fields = append(fields, field{"mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
+			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n)))})
+	}
+	for _, f := range it.t.Detail {
+		fields = append(fields, field{f.Key, f.Value})
+	}
+	if it.caps.autostart {
+		fields = append(fields, field{"auto", autostartLabel(it)})
+	}
+	return fields
 }
 
 func autostartLabel(it item) string {
@@ -224,18 +289,32 @@ func autostartLabel(it item) string {
 	return "off"
 }
 
-func kv(b *strings.Builder, key, value string) {
-	fmt.Fprintf(b, "%s %s\n", labelStyle.Render(fmt.Sprintf("%-6s", key)), value)
+type field struct{ key, value string }
+
+func widestKey(fields []field) int {
+	widest := 0
+	for _, f := range fields {
+		widest = max(widest, lipgloss.Width(f.key))
+	}
+	return widest
+}
+
+func renderFields(fields []field, width int) string {
+	gutter := widestKey(fields)
+
+	var b strings.Builder
+	for _, f := range fields {
+		label := labelStyle.Render(pad(f.key, gutter, plainStyle))
+		b.WriteString(truncate(label+strings.Repeat(" ", fieldGap)+f.value, width) + "\n")
+	}
+	return b.String()
 }
 
 func (m model) renderLogs() string {
 	header := titleStyle.Render("logs: " + m.logName)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
-	bodyH := m.height - 2
-	if bodyH < 1 {
-		bodyH = 1
-	}
+	bodyH := max(m.height-2, 1)
 	lines := strings.Split(m.logView, "\n")
 	if len(lines) > bodyH {
 		lines = lines[len(lines)-bodyH:]
@@ -281,46 +360,116 @@ func (m model) renderFooter() string {
 	return keys + "\n" + truncate(statusStyle.Render(oneLine(m.status)), m.width)
 }
 
-func (m model) renderHostBar() string {
+func (m model) renderHostBar(width int) string {
+	interior := width - chromeCells
+	content := spaceEvenly(fitInReadingOrder(m.hostSegments(), interior), interior)
+	return boxStyle.Width(width - borderCells).Render(content)
+}
+
+type barSegment struct {
+	text     string
+	priority int
+}
+
+func (m model) hostSegments() []barSegment {
 	h := m.hostStats
-	var running, vcpu int
-	var committedMem uint64
-	for _, it := range m.items {
-		if !it.running() {
+	load := loadFraction(h.Load, h.Cores)
+
+	return []barSegment{
+		{text: titleStyle.Render(m.hostName), priority: 0},
+		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
+		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
+		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
+		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
+		{text: m.committedSummary(), priority: 3},
+	}
+}
+
+func hostUsage(label string, used, total uint64) string {
+	g := usageGauge(label, used, total)
+	return hostGauge(g.label, meter(g.fraction, hostBarMeter, thinGlyphs), g.reading)
+}
+
+func hostGauge(label, bar, reading string) string {
+	return labelStyle.Render(label+" ") + gauge(bar, reading, hostGaugeGap)
+}
+
+func fitInReadingOrder(segments []barSegment, width int) []string {
+	order := make([]int, len(segments))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		return segments[a].priority - segments[b].priority
+	})
+
+	keep := make([]bool, len(segments))
+	used := 0
+	for _, i := range order {
+		if !visible(segments[i].text) {
 			continue
 		}
-		if it.t.CPUs == 0 && it.t.Memory == 0 {
+		cost := lipgloss.Width(segments[i].text)
+		if used > 0 {
+			cost += minHostBarGap
+		}
+		if used+cost > width {
 			continue
 		}
-		running++
-		vcpu += it.t.CPUs
-		committedMem += it.t.Memory
+		used += cost
+		keep[i] = true
 	}
 
-	seg := func(label, value string) string {
-		return labelStyle.Render(label+" ") + valueStyle.Render(value)
+	var kept []string
+	for i, s := range segments {
+		if keep[i] {
+			kept = append(kept, s.text)
+		}
 	}
-	gap := footerStyle.Render("   ")
+	return kept
+}
 
-	left := strings.Join([]string{
-		titleStyle.Render(m.hostName),
-		seg("cores", strconv.Itoa(h.Cores)),
-		seg("load", h.Load),
-		seg("ram", fmt.Sprintf("%s/%s", humanize.Bytes(h.MemUsed), humanize.Bytes(h.MemTotal))),
-	}, gap)
+func spaceEvenly(parts []string, width int) string {
+	filled := 0
+	for _, p := range parts {
+		filled += lipgloss.Width(p)
+	}
 
-	committed := seg("committed", fmt.Sprintf("%d vCPU / %s across %d running", vcpu, humanize.Bytes(committedMem), running))
+	gaps := len(parts) - 1
+	if gaps < 1 || filled >= width {
+		return truncate(strings.Join(parts, strings.Repeat(" ", minHostBarGap)), width)
+	}
 
-	content := truncate(left+gap+committed, m.width-4)
-	return hostBarBorder.Width(m.width - 2).Render(content)
+	var spaced strings.Builder
+	for i, gap := range shares(width-filled, gaps) {
+		spaced.WriteString(parts[i] + strings.Repeat(" ", gap))
+	}
+	spaced.WriteString(parts[gaps])
+	return spaced.String()
+}
+
+func (m model) committedSummary() string {
+	var vcpu int
+	var memory uint64
+	for _, p := range m.panes {
+		for _, it := range p.items {
+			if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
+				continue
+			}
+			vcpu += it.t.CPUs
+			memory += it.t.Memory
+		}
+	}
+	if vcpu == 0 && memory == 0 {
+		return ""
+	}
+	return labelStyle.Render("committed ") + valueStyle.Render(
+		fmt.Sprintf("%d vCPU · %s", vcpu, humanize.Bytes(memory)))
 }
 
 func rule(title string, width int) string {
 	head := sectionStyle.Render(title) + " "
-	dashes := width - lipgloss.Width(head)
-	if dashes < 0 {
-		dashes = 0
-	}
+	dashes := max(width-lipgloss.Width(head), 0)
 	return head + footerStyle.Render(strings.Repeat("─", dashes)) + "\n"
 }
 
@@ -329,7 +478,11 @@ func oneLine(s string) string {
 }
 
 func clip(s string, width int) string {
-	s = strings.Map(func(r rune) rune {
+	return truncate(stripControl(s), width)
+}
+
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\t':
 			return ' '
@@ -339,18 +492,32 @@ func clip(s string, width int) string {
 			return r
 		}
 	}, s)
-	r := []rune(s)
-	if len(r) > width {
-		r = r[:width]
+}
+
+func visible(s string) bool { return lipgloss.Width(s) > 0 }
+
+func spread(left, right string, width int, base lipgloss.Style) string {
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if !visible(right) || gap < 1 {
+		return pad(left, width, base)
 	}
-	return string(r)
+	return left + base.Render(strings.Repeat(" ", gap)) + right
+}
+
+func pad(s string, width int, base lipgloss.Style) string {
+	s = truncate(s, width)
+	if gap := width - lipgloss.Width(s); gap > 0 {
+		s += base.Render(strings.Repeat(" ", gap))
+	}
+	return s
+}
+
+func layer(base, style lipgloss.Style) lipgloss.Style {
+	return base.Foreground(style.GetForeground()).Bold(style.GetBold())
 }
 
 func truncate(s string, width int) string {
-	if width < 0 {
-		width = 0
-	}
-	return ansi.Truncate(s, width, "")
+	return ansi.Truncate(s, max(width, 0), "")
 }
 
 func clampBlock(s string, width, height int) string {

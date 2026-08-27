@@ -11,7 +11,7 @@ import (
 
 type Stats struct {
 	Cores     int
-	Load      string
+	Load      float64
 	MemUsed   uint64
 	MemTotal  uint64
 	DiskUsed  uint64
@@ -45,7 +45,7 @@ func Parse(out string) Stats {
 		}
 		switch f[0] {
 		case "load":
-			s.Load = f[1]
+			s.Load = atof(f[1])
 		case "cores":
 			s.Cores, _ = strconv.Atoi(f[1])
 		case "mem":
@@ -63,15 +63,16 @@ func Parse(out string) Stats {
 	return s
 }
 
+func atof(s string) float64 {
+	v, _ := strconv.ParseFloat(s, 64)
+	return v
+}
+
 func atou(s string) uint64 {
 	n, _ := strconv.ParseUint(s, 10, 64)
 	return n
 }
 
 func seconds(s string) time.Duration {
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
-	}
-	return time.Duration(v) * time.Second
+	return time.Duration(atof(s)) * time.Second
 }

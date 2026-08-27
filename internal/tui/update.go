@@ -33,6 +33,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loadedMsg:
 		m.rebuild(msg.targets)
 		m.hostStats = msg.hostStats
+		m.hostHistory = appendSample(m.hostHistory, loadFraction(msg.hostStats.Load, msg.hostStats.Cores))
 		if msg.err != nil {
 			m.status = msg.err.Error()
 		}
@@ -42,7 +43,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.liveFetch(), liveTickCmd())
 
 	case liveStatsMsg:
-		m.live[msg.name] = liveEntry{stats: msg.stats, at: time.Now(), err: msg.err}
+		entry := liveEntry{stats: msg.stats, at: time.Now(), err: msg.err, history: m.live[msg.name].history}
+		if !msg.err {
+			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
+		}
+		m.live[msg.name] = entry
 		return m, nil
 
 	case actionMsg:
@@ -70,6 +75,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.spinner, cmd = m.spinner.Update(msg)
+	if len(m.tasks) == 0 {
+		return m, nil
+	}
 	return m, cmd
 }
 
@@ -79,9 +87,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "up", "k":
-		return m, m.moveCursor(m.cursor - 1)
+		cmd := m.moveCursor(-1)
+		return m, cmd
 	case "down", "j":
-		return m, m.moveCursor(m.cursor + 1)
+		cmd := m.moveCursor(1)
+		return m, cmd
 
 	case "tab":
 		m.cycleMode(1)
@@ -92,12 +102,6 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		return m.connect()
-
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if idx := int(msg.String()[0] - '1'); idx < len(m.items) {
-			m.moveCursor(idx)
-			return m.connect()
-		}
 
 	case "ctrl+l":
 		if it := m.selected(); it.caps.tail {
@@ -114,18 +118,18 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "ctrl+s":
 		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
-			m.tasks[it.name()], m.status = verbStop, ""
-			return m, stopCmd(it.provider, it.name())
+			cmd := m.startTask(it.name(), verbStop, stopCmd(it.provider, it.name()))
+			return m, cmd
 		}
 	case "ctrl+r":
 		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
-			m.tasks[it.name()], m.status = verbRestart, ""
-			return m, restartCmd(it.provider, it.name())
+			cmd := m.startTask(it.name(), verbRestart, restartCmd(it.provider, it.name()))
+			return m, cmd
 		}
 	case "ctrl+a":
 		if it := m.selected(); it.caps.autostart && !m.hasTask(it.name()) {
-			m.tasks[it.name()], m.status = verbAuto, ""
-			return m, autostartCmd(it.provider, it.name(), !it.autostart)
+			cmd := m.startTask(it.name(), verbAuto, autostartCmd(it.provider, it.name(), !it.autostart))
+			return m, cmd
 		}
 	case "ctrl+x":
 		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
@@ -134,6 +138,17 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Placeholder = ""
 			m.input.Focus()
 			m.status = ""
+		}
+
+	default:
+		if i, ok := paneForKey(m.panes, msg.String()); ok && i != m.focus {
+			cmd := m.focusItem(i, m.panes[i].cursor)
+			return m, cmd
+		}
+		focused, _ := m.focusedPane()
+		if i, ok := itemForKey(focused, msg.String()); ok {
+			cmd := m.focusItem(m.focus, i)
+			return m, cmd
 		}
 	}
 	return m, nil
@@ -155,8 +170,8 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = "aborted"
 			return m, nil
 		}
-		m.tasks[it.name()], m.status = verbDelete, ""
-		return m, deleteCmd(it.provider, it.name())
+		cmd := m.startTask(it.name(), verbDelete, deleteCmd(it.provider, it.name()))
+		return m, cmd
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)

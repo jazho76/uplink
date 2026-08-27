@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"slices"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -28,6 +29,7 @@ type item struct {
 	t         target.Target
 	provider  target.Provider
 	autostart bool
+	key       rune
 	caps      caps
 }
 
@@ -47,25 +49,26 @@ const (
 )
 
 type model struct {
-	self      string
-	reg       target.Registry
-	items     []item
-	cursor    int
-	modeIdx   int
-	width     int
-	height    int
-	status    string
-	spinner   spinner.Model
-	screen    screen
-	input     textinput.Model
-	logName   string
-	logView   string
-	logTailer target.Tailer
-	hostName  string
-	hostStats probe.Stats
-	live      map[string]liveEntry
-	logPeek   string
-	tasks     map[string]string
+	self        string
+	reg         target.Registry
+	panes       []pane
+	focus       int
+	modeIdx     int
+	width       int
+	height      int
+	status      string
+	spinner     spinner.Model
+	screen      screen
+	input       textinput.Model
+	logName     string
+	logView     string
+	logTailer   target.Tailer
+	hostName    string
+	hostStats   probe.Stats
+	hostHistory []float64
+	live        map[string]liveEntry
+	logPeek     string
+	tasks       map[string]string
 }
 
 const (
@@ -78,9 +81,10 @@ const (
 func (m model) hasTask(name string) bool { return m.tasks[name] != "" }
 
 type liveEntry struct {
-	stats probe.Stats
-	at    time.Time
-	err   bool
+	stats   probe.Stats
+	history []float64
+	at      time.Time
+	err     bool
 }
 
 func Run(reg target.Registry, configWarning error) error {
@@ -91,7 +95,6 @@ func Run(reg target.Registry, configWarning error) error {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = spinnerStyle
 
 	in := textinput.New()
 	in.Prompt = ""
@@ -118,7 +121,7 @@ func Run(reg target.Registry, configWarning error) error {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd(), m.spinner.Tick)
+	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd())
 }
 
 func (m *model) rebuild(targets []target.Target) {
@@ -136,20 +139,45 @@ func (m *model) rebuild(targets []target.Target) {
 		}
 		items = append(items, it)
 	}
-	m.items = items
-	if m.cursor >= len(m.items) {
-		m.cursor = len(m.items) - 1
+
+	previouslyFocused := m.focusedSection()
+	m.panes = carryOverCursors(groupPanes(items), m.panes)
+	m.focus = paneIndex(m.panes, previouslyFocused)
+}
+
+func carryOverCursors(fresh, previous []pane) []pane {
+	cursors := map[string]int{}
+	for _, p := range previous {
+		cursors[p.section] = p.cursor
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	for i := range fresh {
+		fresh[i].cursor = max(min(cursors[fresh[i].section], len(fresh[i].items)-1), 0)
 	}
+	return fresh
+}
+
+func paneIndex(panes []pane, section string) int {
+	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
+}
+
+func (m model) focusedPane() (pane, bool) {
+	if m.focus < 0 || m.focus >= len(m.panes) {
+		return pane{}, false
+	}
+	return m.panes[m.focus], true
+}
+
+func (m model) focusedSection() string {
+	p, _ := m.focusedPane()
+	return p.section
 }
 
 func (m model) selected() item {
-	if m.cursor < 0 || m.cursor >= len(m.items) {
+	p, ok := m.focusedPane()
+	if !ok || p.cursor < 0 || p.cursor >= len(p.items) {
 		return item{}
 	}
-	return m.items[m.cursor]
+	return p.items[p.cursor]
 }
 
 func (m model) mode() target.Mode {
@@ -165,16 +193,48 @@ func (m *model) cycleMode(delta int) {
 	if n < 2 {
 		return
 	}
-	m.modeIdx = ((m.modeIdx+delta)%n + n) % n
+	m.modeIdx = wrap(m.modeIdx+delta, n)
 }
 
-func (m *model) moveCursor(to int) tea.Cmd {
-	if to < 0 || to >= len(m.items) || to == m.cursor {
+func (m *model) moveCursor(delta int) tea.Cmd {
+	p, ok := m.focusedPane()
+	if !ok {
 		return nil
 	}
-	m.cursor = to
-	m.modeIdx = 0
+	if to := p.cursor + delta; to >= 0 && to < len(p.items) {
+		return m.focusItem(m.focus, to)
+	}
+
+	next := wrap(m.focus+delta, len(m.panes))
+	if delta < 0 {
+		return m.focusItem(next, len(m.panes[next].items)-1)
+	}
+	return m.focusItem(next, 0)
+}
+
+func (m *model) focusItem(inPane, cursor int) tea.Cmd {
+	if inPane < 0 || inPane >= len(m.panes) {
+		return nil
+	}
+	landed := m.panes[inPane]
+	landed.cursor = min(max(cursor, 0), max(len(landed.items)-1, 0))
+	if inPane == m.focus && landed.cursor == m.panes[inPane].cursor {
+		return nil
+	}
+
+	m.panes = append([]pane(nil), m.panes...)
+	m.panes[inPane] = landed
+	m.focus, m.modeIdx = inPane, 0
 	return m.onSelectionChange()
+}
+
+func (m *model) startTask(name, verb string, task tea.Cmd) tea.Cmd {
+	m.tasks[name], m.status = verb, ""
+	return tea.Batch(task, m.spinner.Tick)
+}
+
+func wrap(i, n int) int {
+	return ((i % n) + n) % n
 }
 
 type tickMsg struct{}
