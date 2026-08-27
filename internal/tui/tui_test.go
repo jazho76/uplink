@@ -355,21 +355,45 @@ func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	}
 }
 
-func TestCursorStopsAtPaneEdges(t *testing.T) {
+func TestCursorWrapsThroughPanes(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	for _, want := range []string{"forge", "tokyo", "host", "forge"} {
+		m = key(m, "down")
+		if got := m.selected().name(); got != want {
+			t.Fatalf("down should reach %q, got %q", want, got)
+		}
+	}
+	if got := m.focusedSection(); got != "vms" {
+		t.Errorf("spilling should carry the focus with it, got %q", got)
+	}
+
+	m = key(m, "up")
+	if got := m.selected().name(); got != "host" {
+		t.Fatalf("up from a pane's first item lands on the previous pane's last, got %q", got)
+	}
+	if got := m.focusedSection(); got != "local" {
+		t.Errorf("spilling upward should carry the focus too, got %q", got)
+	}
+}
+
+func TestSpillResetsTheMode(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(m, "forge")
 
-	m = key(m, "up")
-	if got := m.selected().name(); got != "forge" {
-		t.Fatalf("up at the top of a pane must not spill into its neighbour, got %q", got)
+	m = key(m, "tab")
+	if m.modeIdx == 0 {
+		t.Fatal("tab should leave the row off-default")
 	}
 
-	for i := 0; i < 10; i++ {
-		m = key(m, "down")
+	m = key(m, "up")
+	if got := m.selected().name(); got != "host" {
+		t.Fatalf("up should spill to host, got %q", got)
 	}
-	if got := m.selected().name(); got != "tokyo" {
-		t.Fatalf("down should clamp at the pane's last item, got %q", got)
+	if m.modeIdx != 0 {
+		t.Errorf("landing on another pane must reset the mode, got index %d", m.modeIdx)
 	}
 }
 

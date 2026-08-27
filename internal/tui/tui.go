@@ -206,7 +206,28 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	return m.selectItem(p.cursor + delta)
+	if to := p.cursor + delta; to >= 0 && to < len(p.items) {
+		return m.selectItem(to)
+	}
+	return m.spillPane(delta)
+}
+
+func (m *model) spillPane(delta int) tea.Cmd {
+	if len(m.panes) == 0 {
+		return nil
+	}
+	next := ((m.focus+delta)%len(m.panes) + len(m.panes)) % len(m.panes)
+
+	landed := m.panes[next]
+	landed.cursor = 0
+	if delta < 0 {
+		landed.cursor = max(len(landed.items)-1, 0)
+	}
+
+	m.panes = withPane(m.panes, next, landed)
+	m.focus = next
+	m.modeIdx = 0
+	return m.onSelectionChange()
 }
 
 func (m *model) selectItem(to int) tea.Cmd {
