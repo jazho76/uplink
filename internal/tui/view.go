@@ -127,11 +127,11 @@ func (m model) previewBody(width, height int) string {
 	b.WriteString("\n" + rule("spec", width))
 	b.WriteString(renderFields(m.specFields(it), width))
 
-	if m.logPeek != "" {
+	if logs := m.logsFor(it); logs != "" {
 		used := strings.Count(b.String(), "\n")
 		fit := height - used - 2
 		if fit > 0 {
-			lines := strings.Split(m.logPeek, "\n")
+			lines := strings.Split(logs, "\n")
 			if len(lines) > fit {
 				lines = lines[len(lines)-fit:]
 			}
@@ -142,6 +142,13 @@ func (m model) previewBody(width, height int) string {
 		}
 	}
 	return clampBlock(b.String(), width, height)
+}
+
+func (m model) logsFor(it item) string {
+	if m.logPeek.name != it.name() {
+		return ""
+	}
+	return m.logPeek.text
 }
 
 func (m model) renderLive(name string, width, height int) string {
@@ -273,6 +280,9 @@ func (m model) specFields(it item) []field {
 		fields = append(fields, field{"mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
 			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n)))})
 	}
+	if command := m.mode().Command(); command != "" {
+		fields = append(fields, field{"run", command})
+	}
 	for _, f := range it.t.Detail {
 		fields = append(fields, field{f.Key, f.Value})
 	}
@@ -314,15 +324,18 @@ func (m model) renderLogs() string {
 	header := titleStyle.Render("logs: " + m.logName)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
-	bodyH := max(m.height-2, 1)
-	lines := strings.Split(m.logView, "\n")
-	if len(lines) > bodyH {
-		lines = lines[len(lines)-bodyH:]
+	body := labelStyle.Render("no log output")
+	if m.logView != "" {
+		bodyH := max(m.height-2, 1)
+		lines := strings.Split(m.logView, "\n")
+		if len(lines) > bodyH {
+			lines = lines[len(lines)-bodyH:]
+		}
+		for i, line := range lines {
+			lines[i] = detailLogStyle.Render(clip(line, m.width))
+		}
+		body = strings.Join(lines, "\n")
 	}
-	for i, line := range lines {
-		lines[i] = detailLogStyle.Render(clip(line, m.width))
-	}
-	body := strings.Join(lines, "\n")
 
 	return lipgloss.JoinVertical(lipgloss.Left, truncate(header, m.width), body, footer)
 }

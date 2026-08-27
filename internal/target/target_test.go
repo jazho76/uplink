@@ -118,3 +118,19 @@ func TestModes(t *testing.T) {
 		t.Errorf("mode names = %v", t2.ModeNames())
 	}
 }
+
+func TestModeCommandQuotesPayloads(t *testing.T) {
+	for _, c := range []struct {
+		argv []string
+		want string
+	}{
+		{argv: []string{"tmux", "new-session", "-dA", "-s", "host", ";", "switch-client", "-t", "host"},
+			want: "tmux new-session -dA -s host ; switch-client -t host"},
+		{argv: []string{"/bin/bash", "-c", "make -j8 && ./run"}, want: `/bin/bash -c 'make -j8 && ./run'`},
+		{argv: nil, want: ""},
+	} {
+		if got := (Mode{Argv: c.argv}).Command(); got != c.want {
+			t.Errorf("Command() = %q, want %q", got, c.want)
+		}
+	}
+}

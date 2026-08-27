@@ -1,12 +1,14 @@
 package run
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 )
 
 func Stream(bin string, args ...string) error {
@@ -51,6 +53,17 @@ func Exec(bin string, args ...string) error {
 
 func Output(bin string, args ...string) (string, error) {
 	out, err := exec.Command(bin, args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", line(bin, args), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func OutputWithin(limit time.Duration, bin string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+
+	out, err := exec.CommandContext(ctx, bin, args...).Output()
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", line(bin, args), err)
 	}

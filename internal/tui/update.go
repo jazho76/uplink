@@ -24,8 +24,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen != screenLogs || m.logTailer == nil {
 			return m, nil
 		}
-		m.logView = m.logTailer.Tail(m.logName, logScreenLines)
-		return m, logTickCmd()
+		return m, tea.Batch(viewLogsCmd(m.logTailer, m.logName), logTickCmd())
+
+	case logPeekMsg:
+		if msg.name == m.selected().name() {
+			m.logPeek = peek{name: msg.name, text: msg.text, at: time.Now()}
+		}
+		return m, nil
+
+	case logViewMsg:
+		if m.screen == screenLogs && msg.name == m.logName {
+			m.logView = msg.text
+		}
+		return m, nil
 
 	case tickMsg:
 		return m, tea.Batch(m.loadCmd(), tickCmd())

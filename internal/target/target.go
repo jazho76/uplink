@@ -76,6 +76,18 @@ func (t Target) DefaultMode() Mode {
 	return t.Modes[0]
 }
 
+func (m Mode) Command() string {
+	parts := make([]string, 0, len(m.Argv))
+	for _, a := range m.Argv {
+		if a == "" || strings.ContainsAny(a, " \t'\"") {
+			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
+			continue
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " ")
+}
+
 func (t Target) Mode(name string) (Mode, bool) {
 	for _, m := range t.Modes {
 		if m.Name == name {

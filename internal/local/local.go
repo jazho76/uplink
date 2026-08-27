@@ -24,9 +24,10 @@ type Config struct {
 func (c Config) Validate() error { return target.ValidateSpecs(Section, c.Modes) }
 
 type Provider struct {
-	hostname string
-	kernel   string
-	modes    []target.Mode
+	hostname   string
+	kernel     string
+	modes      []target.Mode
+	hasJournal bool
 }
 
 func New(cfg Config) *Provider {
@@ -35,6 +36,7 @@ func New(cfg Config) *Provider {
 	if v, err := run.Output("uname", "-sr"); err == nil {
 		p.kernel = v
 	}
+	p.hasJournal = journalAvailable()
 	return p
 }
 

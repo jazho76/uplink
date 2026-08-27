@@ -26,10 +26,16 @@ func (f fakeHost) List() ([]target.Target, error) {
 		Provider: target.ProviderLocal,
 		Name:     "host",
 		Status:   target.StatusRunning,
-		Modes:    []target.Mode{{Name: "tmux", Argv: []string{"tmux"}}},
-		Detail:   []target.Field{{Key: "os", Value: "Linux"}},
+		Modes: []target.Mode{
+			{Name: "tmux", Argv: []string{"tmux"}},
+			{Name: "shell", Argv: []string{"/bin/sh"}},
+			{Name: "top", Argv: []string{"/bin/sh", "-c", "htop"}, Back: true},
+		},
+		Detail: []target.Field{{Key: "os", Value: "Linux"}},
 	}}, nil
 }
+
+func (fakeHost) Tail(string, int) string { return "journal line" }
 
 func (fakeHost) Probe(string) (probe.Stats, error) {
 	return probe.Stats{Cores: 8, Load: 0.42, MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
@@ -85,12 +91,15 @@ func newTestModel() (model, *fakeVMs) {
 	return m, vms
 }
 
-func allItems(m model) []item {
-	var all []item
+func itemNamed(m model, name string) item {
 	for _, p := range m.panes {
-		all = append(all, p.items...)
+		for _, it := range p.items {
+			if it.name() == name {
+				return it
+			}
+		}
 	}
-	return all
+	return item{}
 }
 
 func load(m model) model {
@@ -107,14 +116,15 @@ func sized(m model) model {
 func TestRebuildOrdersHostFirst(t *testing.T) {
 	m, _ := newTestModel()
 	m = load(m)
-	if len(allItems(m)) != 3 {
-		t.Fatalf("want 3 items (host + 2 vms), got %d", len(allItems(m)))
+	if len(m.panes) != 2 {
+		t.Fatalf("want a local and a vms pane, got %d", len(m.panes))
 	}
-	if allItems(m)[0].t.Provider != target.ProviderLocal {
-		t.Fatalf("first item should come from the local provider, got %q", allItems(m)[0].t.Provider)
+	local, vms := m.panes[0], m.panes[1]
+	if local.items[0].t.Provider != target.ProviderLocal {
+		t.Fatalf("the first pane should come from the local provider, got %q", local.items[0].t.Provider)
 	}
-	if allItems(m)[1].name() != "forge" || allItems(m)[2].name() != "tokyo" {
-		t.Fatalf("unexpected vm order: %q %q", allItems(m)[1].name(), allItems(m)[2].name())
+	if vms.items[0].name() != "forge" || vms.items[1].name() != "tokyo" {
+		t.Fatalf("unexpected vm order: %q %q", vms.items[0].name(), vms.items[1].name())
 	}
 }
 
@@ -122,12 +132,12 @@ func TestCapabilitiesFollowProvider(t *testing.T) {
 	m, _ := newTestModel()
 	m = load(m)
 
-	host, forge := allItems(m)[0], allItems(m)[1]
-	if host.caps.lifecycle || host.caps.autostart || host.caps.tail {
-		t.Errorf("host should expose no lifecycle, autostart, or logs: %+v", host.caps)
+	host, forge := itemNamed(m, "host"), itemNamed(m, "forge")
+	if host.caps.lifecycle || host.caps.autostart {
+		t.Errorf("host should expose no lifecycle or autostart: %+v", host.caps)
 	}
-	if !host.caps.probe {
-		t.Errorf("host should be probeable")
+	if !host.caps.probe || !host.caps.tail {
+		t.Errorf("host should be probeable and carry its journal: %+v", host.caps)
 	}
 	if !forge.caps.lifecycle || !forge.caps.autostart || !forge.caps.tail || !forge.caps.probe {
 		t.Errorf("vm should expose every capability: %+v", forge.caps)
@@ -140,10 +150,13 @@ func TestFooterTracksCapabilities(t *testing.T) {
 
 	m = focus(m, "host")
 	host := m.renderFooter()
-	for _, absent := range []string{"stop", "restart", "del", "logs"} {
+	for _, absent := range []string{"stop", "restart", "del"} {
 		if strings.Contains(host, absent) {
 			t.Errorf("host footer should not offer %q: %s", absent, host)
 		}
+	}
+	if !strings.Contains(host, "logs") {
+		t.Errorf("the host carries its journal, so its footer offers logs: %s", host)
 	}
 
 	m = focus(m, "forge")
@@ -160,11 +173,11 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "stopped")}
 	m = sized(load(m))
 
-	if !allItems(m)[1].running() {
-		t.Fatalf("forge should be running, got status %q", allItems(m)[1].t.Status)
+	if forge := itemNamed(m, "forge"); !forge.running() {
+		t.Fatalf("forge should be running, got status %q", forge.t.Status)
 	}
-	if allItems(m)[2].t.Status != target.StatusStopped {
-		t.Fatalf("tokyo should be stopped, got %q", allItems(m)[2].t.Status)
+	if tokyo := itemNamed(m, "tokyo"); tokyo.t.Status != target.StatusStopped {
+		t.Fatalf("tokyo should be stopped, got %q", tokyo.t.Status)
 	}
 
 	m = focus(m, "forge")
@@ -187,8 +200,8 @@ func TestProviderErrorKeepsTargets(t *testing.T) {
 
 	next, _ := m.Update(loadedMsg{targets: []target.Target{vm("forge", "running")}, err: errBoom{}})
 	m = next.(model)
-	if len(allItems(m)) != 1 {
-		t.Fatalf("targets from healthy providers should survive, got %d items", len(allItems(m)))
+	if len(m.panes) != 1 || len(m.panes[0].items) != 1 {
+		t.Fatalf("targets from healthy providers should survive, got %d panes", len(m.panes))
 	}
 	if !strings.Contains(m.status, "boom") {
 		t.Errorf("status should surface the provider error, got %q", m.status)
@@ -250,20 +263,6 @@ func TestModeResetsWhenCursorMoves(t *testing.T) {
 	m = key(m, "up")
 	if m.modeIdx != 0 {
 		t.Errorf("moving back must also reset, got index %d", m.modeIdx)
-	}
-}
-
-func TestSingleModeTargetIgnoresTab(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "host")
-
-	m = key(m, "tab")
-	if m.modeIdx != 0 {
-		t.Errorf("a one-mode target has nothing to cycle, got index %d", m.modeIdx)
-	}
-	if strings.Contains(m.renderFooter(), "tab") {
-		t.Errorf("footer should not advertise tab for a one-mode target")
 	}
 }
 
@@ -369,9 +368,9 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 
-	for _, want := range []string{"forge", "tokyo", "host", "forge"} {
+	for _, want := range []string{"shell", "top", "forge", "tokyo"} {
 		m = key(m, "down")
-		if got := m.selected().name(); got != want {
+		if got := m.selected().label(); got != want {
 			t.Fatalf("down should reach %q, got %q", want, got)
 		}
 	}
@@ -379,12 +378,17 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 		t.Errorf("spilling should carry the focus with it, got %q", got)
 	}
 
-	m = key(m, "up")
-	if got := m.selected().name(); got != "host" {
-		t.Fatalf("up from a pane's first item lands on the previous pane's last, got %q", got)
+	m = key(m, "down")
+	if got := m.selected().label(); got != "tmux" {
+		t.Fatalf("down from the last item wraps to the first, got %q", got)
 	}
 	if got := m.focusedSection(); got != "local" {
-		t.Errorf("spilling upward should carry the focus too, got %q", got)
+		t.Errorf("wrapping should carry the focus too, got %q", got)
+	}
+
+	m = key(m, "up")
+	if got := m.selected().label(); got != "tokyo" {
+		t.Fatalf("up from the first item lands on the last, got %q", got)
 	}
 }
 
@@ -918,6 +922,12 @@ func TestLogsScreenToggle(t *testing.T) {
 	if m.screen != screenList {
 		t.Fatalf("esc should close the log pager")
 	}
+
+	vms.logs = ""
+	m = key(m, "ctrl+l")
+	if !strings.Contains(m.View(), "no log output") {
+		t.Errorf("a target with nothing to tail should say so:\n%s", m.View())
+	}
 }
 
 func TestTerminalTooSmall(t *testing.T) {
@@ -1033,7 +1043,7 @@ func named(provider, section, name string) item {
 func focus(m model, name string) model {
 	for i, p := range m.panes {
 		for j, it := range p.items {
-			if it.name() == name {
+			if it.name() == name || it.label() == name {
 				m.focus, m.panes[i].cursor = i, j
 				return m
 			}
@@ -1043,7 +1053,23 @@ func focus(m model, name string) model {
 }
 
 func (m model) withSelectionRefreshed() model {
-	m.onSelectionChange()
+	return applyCmd(m, m.onSelectionChange())
+}
+
+func applyCmd(m model, cmd tea.Cmd) model {
+	if cmd == nil {
+		return m
+	}
+	switch msg := cmd().(type) {
+	case nil:
+	case tea.BatchMsg:
+		for _, queued := range msg {
+			m = applyCmd(m, queued)
+		}
+	default:
+		next, _ := m.Update(msg)
+		m = next.(model)
+	}
 	return m
 }
 
@@ -1067,4 +1093,136 @@ var specialKeys = map[string]tea.KeyType{
 	"ctrl+l":    tea.KeyCtrlL,
 	"ctrl+r":    tea.KeyCtrlR,
 	"ctrl+s":    tea.KeyCtrlS,
+}
+
+func TestLocalExpandsToOneRowPerMode(t *testing.T) {
+	m, _ := newTestModel()
+	m = load(m)
+
+	local := m.panes[0]
+	if len(local.items) != 3 {
+		t.Fatalf("each local mode should get a row, got %d", len(local.items))
+	}
+	for i, want := range []string{"tmux", "shell", "top"} {
+		row := local.items[i]
+		if row.label() != want {
+			t.Errorf("row %d should be labelled %q, got %q", i, want, row.label())
+		}
+		if row.name() != "host" {
+			t.Errorf("every row is the same machine, got %q", row.name())
+		}
+		if len(row.t.Modes) != 1 || row.t.Modes[0].Name != want {
+			t.Errorf("row %d should carry only its own mode, got %v", i, row.t.Modes)
+		}
+	}
+}
+
+func TestLaunchRowFixesItsMode(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "shell")
+
+	if got := m.mode().Name; got != "shell" {
+		t.Fatalf("a launch row selects its own mode, got %q", got)
+	}
+	m = key(m, "tab")
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("tab has nothing to cycle on a launch row, got %q", got)
+	}
+	if footer := m.renderFooter(); strings.Contains(footer, "tab") {
+		t.Errorf("a launch row should not advertise tab: %s", footer)
+	}
+	if badge := ansi.Strip(m.renderPanes(30, 20)); strings.Contains(badge, "[shell]") {
+		t.Errorf("the row is the mode, so it needs no badge:\n%s", badge)
+	}
+
+	if m = focus(m, "top"); !m.mode().Back {
+		t.Errorf("a back mode should still return to the dashboard")
+	}
+}
+
+func TestLaunchRowsWithoutModesSurvive(t *testing.T) {
+	bare := item{t: target.Target{Provider: target.ProviderLocal, Name: "host"}}
+	if rows := launcherRows(bare); len(rows) != 1 || rows[0].launcher {
+		t.Errorf("a modeless host stays one plain row, got %+v", rows)
+	}
+}
+
+func TestItemKeysComeFromRowLabels(t *testing.T) {
+	m, _ := newTestModel()
+	m = load(m)
+
+	for i, want := range []rune{'t', 's', 'o'} {
+		if got := m.panes[0].items[i].key; got != want {
+			t.Errorf("row %d should claim %q, got %q", i, want, got)
+		}
+	}
+}
+
+func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
+	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}, {launcher: true}}}
+	vms := pane{section: "vms", items: []item{{}, {}}}
+
+	rows := distributeRows([]pane{launcher, vms}, 20)
+	if rows[0] != len(launcher.items)+borderCells {
+		t.Errorf("a launcher pane cannot use extra rows, got %d", rows[0])
+	}
+	if rows[0]+rows[1] != 20 {
+		t.Errorf("the slack should still be spent, got %d of 20", rows[0]+rows[1])
+	}
+}
+
+func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
+	up := item{t: target.Target{Status: target.StatusRunning}, launcher: true}
+	if got := paneSummary(pane{items: []item{up, up, up}}); got != "" {
+		t.Errorf("launch rows are one machine, not three, got %q", got)
+	}
+}
+
+func TestPreviewShowsWhatEnterWillRun(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	tmux := ansi.Strip(m.previewBody(60, 30))
+	if !strings.Contains(tmux, "run") || !strings.Contains(tmux, "tmux") {
+		t.Fatalf("the preview should state the command:\n%s", tmux)
+	}
+
+	top := ansi.Strip(focus(m, "top").previewBody(60, 30))
+	if !strings.Contains(top, "htop") {
+		t.Errorf("the run line should follow the cursor:\n%s", top)
+	}
+	if tmux == top {
+		t.Errorf("moving between launch rows must change something:\n%s", top)
+	}
+}
+
+func TestLogPeekBelongsToItsTarget(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "running")}
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	next, _ := m.Update(logPeekMsg{name: "tokyo", text: "tokyo boot"})
+	if m = next.(model); m.logPeek.text != "" {
+		t.Errorf("a tail for another target must be dropped, got %q", m.logPeek.text)
+	}
+
+	next, _ = m.Update(logPeekMsg{name: "forge", text: "forge boot"})
+	if m = next.(model); m.logPeek.text != "forge boot" {
+		t.Errorf("the selected target's tail should land, got %q", m.logPeek.text)
+	}
+}
+
+func TestLogPeekIsThrottled(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	if cmd := m.peekLogs(); cmd == nil {
+		t.Fatalf("the first peek should fetch")
+	}
+	m.logPeek = peek{name: m.selected().name(), text: "journal line", at: time.Now()}
+	if cmd := m.peekLogs(); cmd != nil {
+		t.Errorf("a fresh peek should not refetch on every poll")
+	}
 }

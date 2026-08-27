@@ -29,11 +29,20 @@ type item struct {
 	t         target.Target
 	provider  target.Provider
 	autostart bool
+	launcher  bool
 	key       rune
 	caps      caps
 }
 
-func (i item) name() string  { return i.t.Name }
+func (i item) name() string { return i.t.Name }
+
+func (i item) label() string {
+	if i.launcher {
+		return i.t.DefaultMode().Name
+	}
+	return i.t.Name
+}
+
 func (i item) running() bool { return i.t.Running() }
 
 func (i item) worthProbing() bool {
@@ -63,11 +72,11 @@ type model struct {
 	logName     string
 	logView     string
 	logTailer   target.Tailer
+	logPeek     peek
 	hostName    string
 	hostStats   probe.Stats
 	hostHistory []float64
 	live        map[string]liveEntry
-	logPeek     string
 	tasks       map[string]string
 }
 
@@ -79,6 +88,12 @@ const (
 )
 
 func (m model) hasTask(name string) bool { return m.tasks[name] != "" }
+
+type peek struct {
+	name string
+	text string
+	at   time.Time
+}
 
 type liveEntry struct {
 	stats   probe.Stats
@@ -137,12 +152,27 @@ func (m *model) rebuild(targets []target.Target) {
 			it.caps.autostart = true
 			it.autostart = auto.Autostart(t.Name)
 		}
-		items = append(items, it)
+		items = append(items, launcherRows(it)...)
 	}
 
 	previouslyFocused := m.focusedSection()
 	m.panes = carryOverCursors(groupPanes(items), m.panes)
 	m.focus = paneIndex(m.panes, previouslyFocused)
+}
+
+func launcherRows(it item) []item {
+	if it.t.Provider != target.ProviderLocal || len(it.t.Modes) == 0 {
+		return []item{it}
+	}
+
+	rows := make([]item, 0, len(it.t.Modes))
+	for _, mode := range it.t.Modes {
+		row := it
+		row.t.Modes = []target.Mode{mode}
+		row.launcher = true
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func carryOverCursors(fresh, previous []pane) []pane {
@@ -241,6 +271,16 @@ type tickMsg struct{}
 type liveTickMsg struct{}
 type logTickMsg struct{}
 
+type logPeekMsg struct {
+	name string
+	text string
+}
+
+type logViewMsg struct {
+	name string
+	text string
+}
+
 type liveStatsMsg struct {
 	name  string
 	stats probe.Stats
@@ -311,12 +351,30 @@ func (m model) liveFetch() tea.Cmd {
 	return fetchLiveCmd(prober, it.name())
 }
 
-func (m *model) onSelectionChange() tea.Cmd {
+func (m model) onSelectionChange() tea.Cmd {
+	return tea.Batch(m.liveFetch(), m.peekLogs())
+}
+
+func (m model) peekLogs() tea.Cmd {
 	it := m.selected()
-	if tailer, ok := it.provider.(target.Tailer); ok {
-		m.logPeek = tailer.Tail(it.name(), maxLogPeek)
-	} else {
-		m.logPeek = ""
+	tailer, ok := it.provider.(target.Tailer)
+	if !ok {
+		return nil
 	}
-	return m.liveFetch()
+	if m.logPeek.name == it.name() && time.Since(m.logPeek.at) < liveInterval {
+		return nil
+	}
+	return peekLogsCmd(tailer, it.name())
+}
+
+func peekLogsCmd(tailer target.Tailer, name string) tea.Cmd {
+	return func() tea.Msg {
+		return logPeekMsg{name: name, text: tailer.Tail(name, maxLogPeek)}
+	}
+}
+
+func viewLogsCmd(tailer target.Tailer, name string) tea.Cmd {
+	return func() tea.Msg {
+		return logViewMsg{name: name, text: tailer.Tail(name, logScreenLines)}
+	}
 }

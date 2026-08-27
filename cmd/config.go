@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/run"
@@ -118,7 +117,7 @@ func checkConfig() error {
 			if mode.Back {
 				back = "  (returns to the dashboard)"
 			}
-			ui.Info("  %s %-10s %s%s", marker, mode.Name, argvForDisplay(mode.Argv), back)
+			ui.Info("  %s %-10s %s%s", marker, mode.Name, mode.Command(), back)
 		}
 	}
 
@@ -127,16 +126,4 @@ func checkConfig() error {
 		fmt.Println()
 	}
 	return problems
-}
-
-func argvForDisplay(argv []string) string {
-	parts := make([]string, 0, len(argv))
-	for _, a := range argv {
-		if a == "" || strings.ContainsAny(a, " \t'\"") {
-			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
-			continue
-		}
-		parts = append(parts, a)
-	}
-	return strings.Join(parts, " ")
 }
