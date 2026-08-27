@@ -752,6 +752,9 @@ func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	if got := paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
 		t.Errorf("one unprobed member must suppress the count, got %q", got)
 	}
+	if got := paneSummary(pane{items: []item{up}}); got != "" {
+		t.Errorf("a lone member is its own summary, got %q", got)
+	}
 	if got := paneSummary(pane{}); got != "" {
 		t.Errorf("an empty pane has nothing to count, got %q", got)
 	}

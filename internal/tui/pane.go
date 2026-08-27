@@ -159,7 +159,7 @@ func scrollHint(start, count, rows int) string {
 }
 
 func paneSummary(p pane) string {
-	if len(p.items) == 0 || !allStatusesKnown(p.items) {
+	if len(p.items) < 2 || !allStatusesKnown(p.items) {
 		return ""
 	}
 	running := 0
