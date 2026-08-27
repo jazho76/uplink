@@ -17,13 +17,13 @@ import (
 const (
 	minPreviewTextW = 10
 
-	gaugeGap     = 3
-	percentGap   = 2
-	percentWidth = len("100%")
-	hostBarGap   = 3
-	fieldGap     = 2
-	hostBarMeter = 10
-	minLiveBar   = 8
+	gaugeGap      = 3
+	percentGap    = 2
+	percentWidth  = len("100%")
+	minHostBarGap = 3
+	fieldGap      = 2
+	hostBarMeter  = 10
+	minLiveBar    = 8
 )
 
 var (
@@ -351,7 +351,8 @@ func (m model) renderFooter() string {
 }
 
 func (m model) renderHostBar(width int) string {
-	content := fitInReadingOrder(m.hostSegments(), width-chromeCells)
+	interior := width - chromeCells
+	content := spaceEvenly(fitInReadingOrder(m.hostSegments(), interior), interior)
 	return hostBarBorder.Width(width - borderCells).Render(content)
 }
 
@@ -378,7 +379,7 @@ func hostGauge(label, bar, reading string) string {
 	return labelStyle.Render(label+" ") + bar + " " + valueStyle.Render(reading)
 }
 
-func fitInReadingOrder(segments []barSegment, width int) string {
+func fitInReadingOrder(segments []barSegment, width int) []string {
 	order := make([]int, len(segments))
 	for i := range order {
 		order[i] = i
@@ -395,7 +396,7 @@ func fitInReadingOrder(segments []barSegment, width int) string {
 		}
 		cost := lipgloss.Width(segments[i].text)
 		if used > 0 {
-			cost += hostBarGap
+			cost += minHostBarGap
 		}
 		if used+cost > width {
 			continue
@@ -410,7 +411,31 @@ func fitInReadingOrder(segments []barSegment, width int) string {
 			kept = append(kept, s.text)
 		}
 	}
-	return truncate(strings.Join(kept, strings.Repeat(" ", hostBarGap)), width)
+	return kept
+}
+
+func spaceEvenly(parts []string, width int) string {
+	filled := 0
+	for _, p := range parts {
+		filled += lipgloss.Width(p)
+	}
+
+	gaps := len(parts) - 1
+	if gaps < 1 || filled >= width {
+		return truncate(strings.Join(parts, strings.Repeat(" ", minHostBarGap)), width)
+	}
+
+	slack := width - filled
+	var spaced strings.Builder
+	for i, p := range parts {
+		spaced.WriteString(p)
+		if remaining := gaps - i; remaining > 0 {
+			gap := slack / remaining
+			slack -= gap
+			spaced.WriteString(strings.Repeat(" ", gap))
+		}
+	}
+	return spaced.String()
 }
 
 func (m model) committedSummary() string {

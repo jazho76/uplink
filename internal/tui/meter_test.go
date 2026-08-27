@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -168,6 +169,43 @@ func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
 	}
 	if strings.Contains(narrow, "disk") {
 		t.Errorf("a narrow bar drops the lower-priority reading: %q", narrow)
+	}
+}
+
+func TestHostBarSegmentsShareTheSlackEvenly(t *testing.T) {
+	parts := []string{"host", "load", "ram", "disk"}
+	for _, width := range []int{20, 33, 40, 61} {
+		bar := spaceEvenly(parts, width)
+		if got := lipgloss.Width(bar); got != width {
+			t.Errorf("%d cols: spaced segments span %d", width, got)
+		}
+		if strings.HasPrefix(bar, " ") || strings.HasSuffix(bar, " ") {
+			t.Errorf("%d cols: the outer segments sit flush against the edges: %q", width, bar)
+		}
+
+		gaps := regexp.MustCompile(" +").FindAllString(bar, -1)
+		if len(gaps) != len(parts)-1 {
+			t.Fatalf("%d cols: %d gaps between %d segments: %q", width, len(gaps), len(parts), bar)
+		}
+		widest, narrowest := len(gaps[0]), len(gaps[0])
+		for _, gap := range gaps {
+			widest, narrowest = max(widest, len(gap)), min(narrowest, len(gap))
+		}
+		if widest-narrowest > 1 {
+			t.Errorf("%d cols: gaps range from %d to %d: %q", width, narrowest, widest, bar)
+		}
+	}
+}
+
+func TestHostBarReachesBothEdges(t *testing.T) {
+	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
+		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}}
+
+	for _, width := range []int{60, 100, 160} {
+		interior := strings.Split(ansi.Strip(m.renderHostBar(width)), "\n")[1]
+		if !strings.HasPrefix(interior, "│ G") || strings.HasSuffix(interior, "  │") {
+			t.Errorf("%d cols: content should span the whole bar: %q", width, interior)
+		}
 	}
 }
 
