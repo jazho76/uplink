@@ -1,204 +1,312 @@
-# uplink
+# Uplink
 
-A launcher for the shells you work in: your own host, isolated development VMs on
-top of [Lima](https://lima-vm.io/), and ssh remotes. One hotkey, one list, one
-keystroke to be inside any of them.
+**One shortcut. Every machine. The same tmux-native workflow everywhere.**
 
-Each target carries named launch modes, so the same machine can be a tmux session,
-a plain shell, or a one-off program depending on which you pick. VMs additionally
-get a full lifecycle: created from a template, started, stopped, and deleted from
-the dashboard.
+Uplink is the launcher I use to move between my local host, Lima VMs, and
+remote machines. One shortcut, choose where you want to work and land in
+tmux.
 
-![uplink dashboard](docs/dashboard.png)
+![Uplink dashboard](docs/dashboard.png)
 
-## Requirements
+## Why I built it
 
-- Linux (the prebuilt binary is `linux/amd64`)
-- [Lima](https://lima-vm.io/) (`limactl` on your `PATH`)
-- `git`
-- Optional, for global keybindings: GNOME and [Alacritty](https://alacritty.org/)
+I live almost entirely in the terminal. My browser is usually fullscreen on one
+desktop, Slack is fullscreen on another, and everything else happens in tmux.
+I care very little about desktop environments or tiling window managers because
+tmux is my tiling system. It is the main interface to my computers.
+
+As agents became a larger part of my workflow, I stopped running them on the
+local machine. I began giving them isolated VMs and using remote machines over
+SSH much more heavily. The environment changed, but the interface did not: tmux
+remained the same language everywhere.
+
+What was missing was a good way to get to the right machine without having to
+remember which VMs were running, manage a collection of terminal windows, or
+treat local, virtual, and remote environments as separate workflows. I wanted
+one starting point.
+
+That is Uplink. It binds to a global shortcut and the dashboard is where every
+terminal session begins. From there:
+
+- see the local host, Lima VMs, and SSH remotes together;
+- check which machines are running and what they are doing;
+- choose a launch mode, usually a persistent tmux session;
+- start a stopped VM automatically and enter it;
+- manage VM lifecycle without leaving the launcher.
+
+Uplink is not another layer to work inside, and it is not trying to replace
+tmux. It is the small piece of glue that gets you to the right tmux session and
+then gets out of the way.
 
 ## Install
+
+The release installer supports Linux on x86-64:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jazho76/uplink/main/scripts/install.sh | sh
 ```
 
-This drops `uplink` in `~/.local/bin`. If that is not on your `PATH`:
+It installs `uplink` to `~/.local/bin`. If necessary, add that directory to your
+`PATH`:
 
 ```sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Keep it current with `uplink upgrade`.
-
-## Quick start
+To build from source, install Go 1.26 or newer and run:
 
 ```sh
-# 1. Add a template (a git repo that defines a VM). Its name is the repo basename.
-uplink vm template add git@github.com:you/your_vm.git
-
-# 2. Create one or more instances from it. The name defaults to the template's.
-uplink vm create your_vm              # instance "your_vm"
-uplink vm create your_vm your_vm-2    # a second instance from the same template
-
-# 3. Open a shell on any target, starting it if stopped.
-uplink your_vm                        # or: uplink connect your_vm
-uplink your_vm:shell                  # a specific launch mode
-uplink host                           # your own machine
-
-# 4. Browse and control every target interactively.
-uplink                                # or: uplink dashboard
+git clone https://github.com/jazho76/uplink.git
+cd uplink
+make install
 ```
 
-## Concepts
+### Dependencies
 
-- **Target** - anything you can open a shell on. Your host, a Lima VM, and
-  (declared in config) an ssh remote. Each has a name you connect to.
-- **Mode** - one way to launch a target: a name plus a shell payload. Each
-  provider wraps that payload in its own transport, and a mode with no payload
-  lands you in that transport's plain interactive shell. Targets ship with a
-  `tmux` and a `shell` mode by default.
-- **Template** - a git repo containing a `template.yaml` (the Lima config),
-  plus `dotfiles/` and `provision/` scripts. Templates live in
-  `~/.local/share/vmm/templates/<name>`, where `<name>` is the repo basename.
-  A template is a recipe; you launch instances from it.
-- **Instance** - a Lima VM created from a template. One template can produce
-  many instances under different names; each instance remembers the template it
-  came from (Lima persists its `TemplateDir`).
+Only the integrations you use need to be installed.
 
-## Config
+| Feature | Requirement |
+| --- | --- |
+| Default local and VM workflow | `tmux` |
+| Lima VM discovery and management | `limactl` |
+| Remote targets | `ssh` |
+| Clipboard push | Wayland and `wl-paste` / `wl-copy` from `wl-clipboard` |
+| Built-in GNOME shortcuts | GNOME, `gsettings`, and Alacritty (just my opinionated stuff) |
 
-Optional, at `~/.config/uplink/config.yaml`. Every section can be omitted, in
-which case that provider falls back to its built-in defaults. `uplink config
-edit` opens it and checks it afterwards; `uplink config check` prints every
-target with the exact command each of its modes runs.
+## Make Uplink your entry point
+
+Run Uplink without arguments to open the dashboard:
+
+```sh
+uplink
+```
+
+The useful setup is to bind that command to a global shortcut. Then the path
+from anywhere on the desktop to any working environment becomes:
+
+1. Press the shortcut.
+2. Select a machine.
+3. Press Enter.
+4. Continue inside tmux.
+
+On GNOME, Uplink can register this workflow for you:
+
+```sh
+uplink install-shortcuts
+```
+
+This installs:
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Alt+T` | Open the Uplink dashboard in Alacritty |
+| `Ctrl+Alt+P` | Push the clipboard to the sole running VM |
+
+Remove the shortcuts with:
+
+```sh
+uplink uninstall-shortcuts
+```
+
+The dashboard itself is not tied to GNOME or Alacritty. On another desktop or
+terminal emulator, bind your preferred shortcut to:
+
+```text
+<terminal> -e uplink dashboard
+```
+
+## The dashboard
+
+Uplink discovers the local host and existing Lima instances automatically. SSH
+remotes appear after they are added to the config.
+
+The left side groups targets by environment. The right side shows the selected
+machine's status, launch mode, configuration, recent logs, and live load,
+memory, disk, and uptime data. The bottom bar keeps the host's resource usage
+visible while you browse other machines.
+
+The footer only shows actions supported by the selected target.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, `↓` / `↑` | Move between targets |
+| Highlighted letter | Jump directly to a pane or target |
+| `Tab` / `Shift+Tab` | Cycle through launch modes |
+| `Enter` | Enter the selected target using the selected mode |
+| `Ctrl+L` | Open a VM's logs |
+| `Ctrl+S` | Stop a VM |
+| `Ctrl+R` | Restart a VM |
+| `Ctrl+A` | Toggle VM autostart |
+| `Ctrl+X` | Delete a VM after typing its name |
+| `q`, `Esc`, `Ctrl+C` | Quit, or leave the log view |
+
+If a selected VM is stopped, pressing Enter starts it before connecting.
+
+## Targets and modes
+
+Uplink normalizes three kinds of environment into the same dashboard:
+
+| Target | How it is found | Default modes |
+| --- | --- | --- |
+| Local host | Always available as `host` | `tmux`, `shell` |
+| Lima VM | Discovered through `limactl` | `tmux`, `shell` |
+| SSH remote | Declared in the config | `shell` |
+
+A **mode** describes how you want to enter a target. `tmux` may attach to a
+persistent session, `shell` may open a plain login shell, and other modes can
+take you directly to a project, monitoring tool, or long-running process.
+
+The first mode is the default. Set `back: true` for commands such as `htop` that
+should return to the dashboard when they exit. Normal working modes close the
+launcher after handing over the terminal.
+
+## Configuration
+
+Open the config in `$VISUAL`, `$EDITOR`, or `vi`:
+
+```sh
+uplink config edit
+```
+
+The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`. Every
+section is optional.
 
 ```yaml
 local:
   modes:
-    - { name: tmux, run: tmux new-session -A -s host }
-    - { name: shell } # no payload = a plain interactive shell
-    - { name: top, run: htop, back: true }
+    - name: tmux
+      run: tmux new-session -A -s host
+    - name: shell
+    - name: top
+      run: htop
+      back: true
 
 lima:
   modes:
-    - { name: tmux, run: tmux new-session -A -s 0 }
-    - { name: shell }
+    - name: tmux
+      run: tmux new-session -A -s 0
+    - name: shell
 
 remotes:
-  - name: dojo
-    ssh: joe@dojo.com
-    identity: ~/.ssh/dojo # relative paths resolve against this file's dir
-    init: lc # runs first, joined to each mode with &&
+  - name: buildbox
+    # With no other fields, "buildbox" is resolved through ~/.ssh/config.
     modes:
-      - { name: tmux, run: tmux }
-      - { name: shell }
-      - { name: root, run: sudo env HOME=/home/joe tmux }
+      - name: tmux
+        run: tmux new-session -A -s 0
+      - name: shell
+
+  - name: prod
+    ssh: deploy@example.com
+    identity: ~/.ssh/prod_ed25519
+    port: 2222
+    sshArgs:
+      - -o
+      - ServerAliveInterval=30
+    init: cd /srv/app
+    modes:
+      - name: tmux
+        run: tmux new-session -A -s prod
+      - name: shell
 ```
 
-The first mode listed is the default. `back: true` returns to the dashboard when
-the program exits instead of closing the window, which suits a quick look at
-`htop` rather than a shell you intend to live in. A broken config never locks you
-out: uplink falls back to defaults and shows the problem in the status line.
+Local and Lima modes apply to every target from that provider. Each remote has
+its own modes because different machines may need different initialization or
+session names.
 
-## Connecting
+### Mode fields
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Name shown in the dashboard |
+| `run` | Shell command to run; omit it for a plain interactive shell |
+| `back` | Return to the dashboard when the command exits |
+
+### Remote fields
+
+Only `name` is required. When `ssh` is omitted, the name is passed directly to
+SSH, allowing `~/.ssh/config` to carry the connection details.
+
+| Field | Meaning |
+| --- | --- |
+| `ssh` | SSH destination, such as `user@host` |
+| `identity` | Private key; `~` and environment variables are expanded |
+| `port` | SSH port |
+| `sshArgs` | Additional arguments passed to `ssh` |
+| `shell` | Remote login shell used to start modes; defaults to `bash` |
+| `init` | Command run before every mode |
+| `modes` | Ways to enter this remote; defaults to a plain `shell` |
+
+Relative identity paths are resolved from the Uplink config directory, not the
+current working directory.
+
+Validate the config and inspect the exact command behind every target and mode:
 
 ```sh
-uplink <target>                    # default mode
-uplink <target>:<mode>             # a named mode
-uplink connect <target> --mode <mode>
+uplink config check
 ```
 
-## Remotes
+Target names must be unique across the host, VMs, and remotes.
 
-`remotes` is the only section that declares what exists, since there is nothing to
-discover. Every field but `name` is optional: with no `ssh` the name doubles as the
-destination, so a `Host` block in `~/.ssh/config` can carry the rest.
+## VM templates
 
-| Field      | Meaning                                                               |
-| ---------- | --------------------------------------------------------------------- |
-| `name`     | how you address it, and the ssh destination if `ssh` is omitted       |
-| `ssh`      | ssh destination, `user@host` or a `Host` alias                        |
-| `identity` | key path; implies `IdentitiesOnly=yes` so the agent cannot preempt it |
-| `port`     | ssh port                                                              |
-| `sshArgs`  | extra ssh flags, verbatim                                             |
-| `shell`    | login shell used to run `init` and payloads, `bash` by default        |
-| `init`     | runs first in the login shell, `&&`-joined to every mode's payload    |
-
-A remote's status stays `unknown` until you select it in the dashboard, at which
-point it is probed once and shows either live counters or `unreachable`. Nothing
-is probed in the background, so uplink never reaches out to a host you are not
-looking at. A key that is missing or has permissions ssh would reject shows up as
-a warning on the target rather than as a failure at launch.
-
-## Managing VMs
+Uplink can create Lima VMs from Git repositories containing a `template.yaml`.
+This is setup work rather than the main interaction: once a VM exists, it simply
+becomes another target in the dashboard.
 
 ```sh
-uplink vm create <template> [instance]   # create and provision an instance from a template
-uplink vm push-clipboard [instance]      # copy the host clipboard into an instance
-uplink vm refresh-externals <instance>   # re-fetch and re-apply the instance's externals
-
-uplink vm template add <git-url>         # clone a template into the templates dir (name = repo basename)
-uplink vm template list                  # show installed templates, origins, dirty state
-uplink vm template update [name]         # pull the latest version, fast-forward only (all if no name)
-uplink vm template remove <name>         # delete it (use --force to skip the prompt)
+uplink vm template add <git-url>
+uplink vm template list
+uplink vm create <template>             # use the template name for the VM
+uplink vm create <template> <instance>  # choose a different VM name
 ```
 
-`uplink vm create` is how you spin up an instance; the name defaults to the
-template's, and you pass a second argument to run more than one from the same
-template. Starting, stopping, restarting, autostart, and deletion live in the
-dashboard rather than the CLI.
+Creation provisions the VM and leaves it stopped. Selecting it in the dashboard
+starts it on demand.
 
-## Dashboard
-
-`uplink` bare, or `uplink dashboard`, is the interactive hub: a two-pane TUI over
-every target. It reads Lima directly, so instances created outside uplink show up
-too.
-
-| Key               | Action                         |
-| ----------------- | ------------------------------ |
-| `↑`/`k` `↓`/`j`   | move                           |
-| `1`-`9`           | connect to that target         |
-| `Enter`           | connect the selected target    |
-| `Tab`/`Shift-Tab` | cycle the selected launch mode |
-| `Ctrl-L`          | view logs                      |
-| `Ctrl-S`          | stop                           |
-| `Ctrl-R`          | restart                        |
-| `Ctrl-A`          | toggle autostart               |
-| `Ctrl-X`          | delete                         |
-| `q` / `Esc`       | quit                           |
-
-Keys appear only where they apply: a target whose provider has no lifecycle shows
-no stop, restart, or delete. Cycling a mode with `Tab` affects only the selected
-row, and resets as soon as you move the cursor.
-
-## Launcher
-
-On a GNOME session, register global keybindings so uplink behaves like a native
-app launcher: one hotkey pops the dashboard in an Alacritty window, no terminal
-needed.
+Manage installed templates with:
 
 ```sh
-uplink install-shortcuts     # Ctrl+Alt+T opens the dashboard, Ctrl+Alt+P pushes the clipboard
-uplink uninstall-shortcuts
+uplink vm template update             # update all templates
+uplink vm template update <name>
+uplink vm template remove <name>
 ```
 
-## Authoring a template
-
-A template is a git repo with this shape:
-
-```
-template.yaml        # Lima config; declares `param: TemplateDir` and mounts
-                     # host paths as {{.Param.TemplateDir}}/dotfiles, etc.
-dotfiles/            # mounted read-only into the guest
-provision/           # provisioning scripts referenced by template.yaml
-fetch-externals.sh   # optional: host-side step to pull externals before create
-```
-
-## From source
+A template cannot be removed while a VM still uses it. Templates that support
+refreshable external files can update an existing VM without recreating it:
 
 ```sh
-make install     # build and install to $GOBIN (or $(go env GOPATH)/bin)
-make uninstall   # remove it
+uplink vm refresh-externals <instance>
 ```
+
+## Push the clipboard into a VM
+
+Clipboard push removes a small but frequent boundary between the host desktop
+and VM-based work. On Wayland, copy something normally and run, ideally through
+a global shortcut:
+
+```sh
+uplink vm push-clipboard <vm>
+```
+
+If exactly one VM is running, its name is optional:
+
+```sh
+uplink vm push-clipboard
+```
+
+Plain text is copied to `/tmp/clipboard` inside the VM. Images and other file
+types receive a typed path such as `/tmp/clipboard-a1b2c3d4.png`; Uplink then
+places that remote path in the host clipboard so it can be pasted directly into
+a terminal command.
+
+## Upgrade
+
+Release builds can update themselves to the latest Linux x86-64 release:
+
+```sh
+uplink upgrade
+```
+
+For a source build, pull the repository and run `make install` again.
+
+Run `uplink --help` to explore the rest of the CLI.
