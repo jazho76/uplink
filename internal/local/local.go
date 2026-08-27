@@ -96,7 +96,7 @@ func (p *Provider) Probe(string) (probe.Stats, error) {
 
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
 		if f := strings.Fields(string(data)); len(f) > 0 {
-			s.Load = f[0]
+			s.Load, _ = strconv.ParseFloat(f[0], 64)
 		}
 	}
 

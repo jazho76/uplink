@@ -33,6 +33,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loadedMsg:
 		m.rebuild(msg.targets)
 		m.hostStats = msg.hostStats
+		m.hostHistory = appendSample(m.hostHistory, loadFraction(msg.hostStats.Load, msg.hostStats.Cores))
 		if msg.err != nil {
 			m.status = msg.err.Error()
 		}
@@ -42,7 +43,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.liveFetch(), liveTickCmd())
 
 	case liveStatsMsg:
-		m.live[msg.name] = liveEntry{stats: msg.stats, at: time.Now(), err: msg.err}
+		entry := liveEntry{stats: msg.stats, at: time.Now(), err: msg.err, history: m.live[msg.name].history}
+		if !msg.err {
+			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
+		}
+		m.live[msg.name] = entry
 		return m, nil
 
 	case actionMsg:

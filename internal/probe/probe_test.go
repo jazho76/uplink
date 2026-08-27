@@ -13,8 +13,8 @@ disk 18157756416 160953249792
 uptime 4416.90`
 
 	s := Parse(out)
-	if s.Load != "0.15" {
-		t.Errorf("load = %q", s.Load)
+	if s.Load != 0.15 {
+		t.Errorf("load = %v", s.Load)
 	}
 	if s.Cores != 6 {
 		t.Errorf("cores = %d", s.Cores)
@@ -45,8 +45,8 @@ func TestParseTolerantOfMissingLines(t *testing.T) {
 		})
 	}
 
-	if got := Parse("load 1.00\n").Load; got != "1.00" {
-		t.Errorf("partial output should still yield load, got %q", got)
+	if got := Parse("load 1.00\n").Load; got != 1 {
+		t.Errorf("partial output should still yield load, got %v", got)
 	}
 	if got := Parse("mem 100\n").MemTotal; got != 0 {
 		t.Errorf("a short mem line should be ignored, got %d", got)

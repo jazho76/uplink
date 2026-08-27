@@ -48,26 +48,27 @@ const (
 )
 
 type model struct {
-	self      string
-	reg       target.Registry
-	items     []item
-	panes     []pane
-	focus     int
-	modeIdx   int
-	width     int
-	height    int
-	status    string
-	spinner   spinner.Model
-	screen    screen
-	input     textinput.Model
-	logName   string
-	logView   string
-	logTailer target.Tailer
-	hostName  string
-	hostStats probe.Stats
-	live      map[string]liveEntry
-	logPeek   string
-	tasks     map[string]string
+	self        string
+	reg         target.Registry
+	items       []item
+	panes       []pane
+	focus       int
+	modeIdx     int
+	width       int
+	height      int
+	status      string
+	spinner     spinner.Model
+	screen      screen
+	input       textinput.Model
+	logName     string
+	logView     string
+	logTailer   target.Tailer
+	hostName    string
+	hostStats   probe.Stats
+	hostHistory []float64
+	live        map[string]liveEntry
+	logPeek     string
+	tasks       map[string]string
 }
 
 const (
@@ -80,9 +81,10 @@ const (
 func (m model) hasTask(name string) bool { return m.tasks[name] != "" }
 
 type liveEntry struct {
-	stats probe.Stats
-	at    time.Time
-	err   bool
+	stats   probe.Stats
+	history []float64
+	at      time.Time
+	err     bool
 }
 
 func Run(reg target.Registry, configWarning error) error {

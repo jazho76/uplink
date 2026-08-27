@@ -33,8 +33,8 @@ func TestProbeReadsHostCounters(t *testing.T) {
 	if s.DiskTotal == 0 || s.DiskUsed > s.DiskTotal {
 		t.Errorf("disk = %d/%d", s.DiskUsed, s.DiskTotal)
 	}
-	if s.Load == "" {
-		t.Errorf("load is empty")
+	if s.Cores <= 0 {
+		t.Errorf("cores = %d", s.Cores)
 	}
 	if s.Uptime <= 0 {
 		t.Errorf("uptime = %s", s.Uptime)

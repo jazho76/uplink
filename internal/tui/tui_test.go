@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -30,7 +31,7 @@ func (f fakeHost) List() ([]target.Target, error) {
 }
 
 func (fakeHost) Probe(string) (probe.Stats, error) {
-	return probe.Stats{Cores: 8, Load: "0.42", MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
+	return probe.Stats{Cores: 8, Load: 0.42, MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
 }
 
 type fakeVMs struct {
@@ -49,7 +50,7 @@ func (f *fakeVMs) Delete(string) error           { return nil }
 func (f *fakeVMs) Autostart(string) bool             { return false }
 func (f *fakeVMs) SetAutostart(string, bool) error   { return nil }
 func (f *fakeVMs) Tail(string, int) string           { return f.logs }
-func (f *fakeVMs) Probe(string) (probe.Stats, error) { return probe.Stats{Load: "0.10"}, nil }
+func (f *fakeVMs) Probe(string) (probe.Stats, error) { return probe.Stats{Load: 0.10}, nil }
 
 func vm(name, status string) target.Target {
 	return target.Target{
@@ -85,7 +86,7 @@ func newTestModel() (model, *fakeVMs) {
 
 func load(m model) model {
 	targets, _ := m.reg.All()
-	next, _ := m.Update(loadedMsg{targets: targets, hostStats: probe.Stats{Cores: 8, Load: "0.42"}})
+	next, _ := m.Update(loadedMsg{targets: targets, hostStats: probe.Stats{Cores: 8, Load: 0.42}})
 	return next.(model)
 }
 
@@ -551,6 +552,80 @@ func TestItemKeyExhaustionLeavesItemUnaddressable(t *testing.T) {
 	}
 	if _, ok := itemForKey(panes[0], "a"); !ok {
 		t.Errorf("the first claimant of a letter should still resolve")
+	}
+}
+
+func TestFieldGutterSizesToTheLongestKey(t *testing.T) {
+	block := ansi.Strip(renderFields([]field{
+		{"template", "kyoto_vm"},
+		{"cpus", "6"},
+		{"ssh", "127.0.0.1:38203"},
+	}, 60))
+
+	var starts []int
+	for _, line := range strings.Split(strings.TrimRight(block, "\n"), "\n") {
+		starts = append(starts, strings.Index(line, strings.TrimSpace(strings.SplitN(line, "  ", 2)[1])))
+	}
+	for i, at := range starts {
+		if at != starts[0] {
+			t.Errorf("line %d starts its value at column %d, want %d:\n%s", i, at, starts[0], block)
+		}
+	}
+	if !strings.HasPrefix(block, "template  kyoto_vm") {
+		t.Errorf("the longest key sets the gutter, got %q", block)
+	}
+}
+
+func TestFieldValuesNeverOverrunTheirWidth(t *testing.T) {
+	block := renderFields([]field{{"dir", "/home/jazho/.lima/kyoto/some/deep/path"}}, 20)
+	for _, line := range strings.Split(strings.TrimRight(block, "\n"), "\n") {
+		if w := lipgloss.Width(line); w > 20 {
+			t.Errorf("field line spans %d cells, want at most 20: %q", w, line)
+		}
+	}
+}
+
+func TestPreviewLeadsWithLiveData(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running")}
+	m = sized(load(m))
+	m = focus(m, "forge")
+	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+
+	preview := ansi.Strip(m.renderPreview(60, 30))
+	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
+	if live < 0 || spec < 0 {
+		t.Fatalf("preview should carry both sections:\n%s", preview)
+	}
+	if live > spec {
+		t.Errorf("changing data should lead the static detail:\n%s", preview)
+	}
+	for _, want := range []string{"load", "memory", "disk"} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("live block missing %q:\n%s", want, preview)
+		}
+	}
+}
+
+func TestStoppedTargetShowsNoStaleUptime(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running")}
+	m = sized(load(m))
+	m = focus(m, "forge")
+	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
+
+	if got := m.uptimeOf(m.selected()); got == "" {
+		t.Fatalf("a running target should report uptime")
+	}
+
+	vms.targets = []target.Target{vm("forge", "stopped")}
+	m = load(m)
+	m = focus(m, "forge")
+	if got := m.uptimeOf(m.selected()); got != "" {
+		t.Errorf("a stopped target must not show the uptime from its last run, got %q", got)
+	}
+	if strings.Contains(ansi.Strip(m.renderPreview(60, 20)), "live") {
+		t.Errorf("a stopped target has no live block, so its header has nothing to report")
 	}
 }
 

@@ -12,7 +12,15 @@ import (
 	"github.com/jazho76/uplink/internal/ui"
 )
 
-const minPreviewTextW = 10
+const (
+	minPreviewTextW = 10
+
+	gaugeGap        = 3
+	minGaugeReading = 16
+	liveGutter      = len("memory") + 2
+	minLiveBar      = 8
+	maxLiveBar      = 20
+)
 
 var (
 	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
@@ -113,23 +121,16 @@ func (m model) renderPreview(width, height int) string {
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %s %s\n\n", titleStyle.Render(it.name()), glyph(it), string(it.t.Status))
-
-	if n := len(it.t.Modes); n > 1 {
-		kv(&b, "mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
-			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n))))
-	}
-	for _, f := range it.t.Detail {
-		kv(&b, f.Key, f.Value)
-	}
-	if it.caps.autostart {
-		kv(&b, "auto", autostartLabel(it))
-	}
+	header := titleStyle.Render(it.name()) + "  " + glyph(it) + " " + string(it.t.Status)
+	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width) + "\n")
 
 	if it.worthProbing() {
 		b.WriteString("\n" + rule("live", width))
-		m.renderLive(&b, it.name())
+		b.WriteString(m.renderLive(it.name(), width))
 	}
+
+	b.WriteString("\n" + rule("spec", width))
+	b.WriteString(renderFields(m.specFields(it), width))
 
 	if m.logPeek != "" {
 		used := strings.Count(b.String(), "\n")
@@ -148,23 +149,75 @@ func (m model) renderPreview(width, height int) string {
 	return clampBlock(b.String(), width, height)
 }
 
-func (m model) renderLive(b *strings.Builder, name string) {
+func (m model) renderLive(name string, width int) string {
 	e, ok := m.live[name]
 	if !ok {
-		b.WriteString(labelStyle.Render("…") + "\n")
-		return
+		return labelStyle.Render("…") + "\n"
 	}
 	if e.err {
-		kv(b, "load", labelStyle.Render("unavailable"))
-		return
+		return renderFields([]field{{"load", labelStyle.Render("unavailable")}}, width)
 	}
+
 	s := e.stats
-	kv(b, "load", s.Load)
-	kv(b, "ram", fmt.Sprintf("%s / %s", humanize.Bytes(s.MemUsed), humanize.Bytes(s.MemTotal)))
-	kv(b, "used", fmt.Sprintf("%s / %s", humanize.Bytes(s.DiskUsed), humanize.Bytes(s.DiskTotal)))
-	if up := humanize.Duration(s.Uptime); up != "" {
-		kv(b, "up", up)
+	bar := liveBarWidth(width)
+	load := loadFraction(s.Load, s.Cores)
+	memory := usedFraction(s.MemUsed, s.MemTotal)
+	disk := usedFraction(s.DiskUsed, s.DiskTotal)
+
+	return renderFields([]field{
+		{"load", gauge(sparkline(e.history, bar, meterStyle(load)), fmt.Sprintf("%.2f", s.Load))},
+		{"memory", gauge(meter(memory, bar), amount(s.MemUsed, s.MemTotal))},
+		{"disk", gauge(meter(disk, bar), amount(s.DiskUsed, s.DiskTotal))},
+	}, width)
+}
+
+func gauge(bar, reading string) string {
+	if !visible(bar) {
+		return valueStyle.Render(reading)
 	}
+	return bar + strings.Repeat(" ", gaugeGap) + valueStyle.Render(reading)
+}
+
+func amount(used, total uint64) string {
+	return humanize.Bytes(used) + " / " + humanize.Bytes(total)
+}
+
+func liveBarWidth(width int) int {
+	bar := min(max(width/3, minLiveBar), maxLiveBar)
+	if !readingFits(width, bar) {
+		return 0
+	}
+	return bar
+}
+
+func readingFits(width, bar int) bool {
+	return width-liveGutter-bar-gaugeGap >= minGaugeReading
+}
+
+func (m model) uptimeOf(it item) string {
+	e, ok := m.live[it.name()]
+	if !it.worthProbing() || !ok || e.err {
+		return ""
+	}
+	if up := humanize.Duration(e.stats.Uptime); up != "" {
+		return "up " + up
+	}
+	return ""
+}
+
+func (m model) specFields(it item) []field {
+	var fields []field
+	if n := len(it.t.Modes); n > 1 {
+		fields = append(fields, field{"mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
+			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n)))})
+	}
+	for _, f := range it.t.Detail {
+		fields = append(fields, field{f.Key, f.Value})
+	}
+	if it.caps.autostart {
+		fields = append(fields, field{"auto", autostartLabel(it)})
+	}
+	return fields
 }
 
 func autostartLabel(it item) string {
@@ -174,8 +227,25 @@ func autostartLabel(it item) string {
 	return "off"
 }
 
-func kv(b *strings.Builder, key, value string) {
-	fmt.Fprintf(b, "%s %s\n", labelStyle.Render(fmt.Sprintf("%-6s", key)), value)
+type field struct{ key, value string }
+
+func widestKey(fields []field) int {
+	widest := 0
+	for _, f := range fields {
+		widest = max(widest, lipgloss.Width(f.key))
+	}
+	return widest
+}
+
+func renderFields(fields []field, width int) string {
+	gutter := widestKey(fields)
+
+	var b strings.Builder
+	for _, f := range fields {
+		label := labelStyle.Render(pad(f.key, gutter))
+		b.WriteString(truncate(label+"  "+f.value, width) + "\n")
+	}
+	return b.String()
 }
 
 func (m model) renderLogs() string {
@@ -252,7 +322,7 @@ func (m model) renderHostBar(width int) string {
 	left := strings.Join([]string{
 		titleStyle.Render(m.hostName),
 		seg("cores", strconv.Itoa(h.Cores)),
-		seg("load", h.Load),
+		seg("load", fmt.Sprintf("%.2f", h.Load)),
 		seg("ram", fmt.Sprintf("%s/%s", humanize.Bytes(h.MemUsed), humanize.Bytes(h.MemTotal))),
 	}, gap)
 
