@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -16,13 +17,13 @@ import (
 const (
 	minPreviewTextW = 10
 
-	gaugeGap        = 3
-	minGaugeReading = 16
-	hostBarGap      = 3
-	hostBarMeter    = 10
-	liveGutter      = len("memory") + 2
-	minLiveBar      = 8
-	maxLiveBar      = 20
+	gaugeGap     = 3
+	percentGap   = 2
+	percentWidth = len("100%")
+	hostBarGap   = 3
+	fieldGap     = 2
+	hostBarMeter = 10
+	minLiveBar   = 8
 )
 
 var (
@@ -125,7 +126,7 @@ func (m model) renderPreview(width, height int) string {
 
 	if it.worthProbing() {
 		b.WriteString("\n" + rule("live", width))
-		b.WriteString(m.renderLive(it.name(), width))
+		b.WriteString(m.renderLive(it.name(), width, height))
 	}
 
 	b.WriteString("\n" + rule("spec", width))
@@ -148,7 +149,7 @@ func (m model) renderPreview(width, height int) string {
 	return clampBlock(b.String(), width, height)
 }
 
-func (m model) renderLive(name string, width int) string {
+func (m model) renderLive(name string, width, height int) string {
 	e, ok := m.live[name]
 	if !ok {
 		return labelStyle.Render("…") + "\n"
@@ -158,16 +159,72 @@ func (m model) renderLive(name string, width int) string {
 	}
 
 	s := e.stats
-	bar := liveBarWidth(width)
 	load := loadFraction(s.Load, s.Cores)
-	memory := usedFraction(s.MemUsed, s.MemTotal)
-	disk := usedFraction(s.DiskUsed, s.DiskTotal)
+	gauges := []gaugeRow{
+		{"load", load, fmt.Sprintf("%.2f / %d", s.Load, s.Cores)},
+		{"memory", usedFraction(s.MemUsed, s.MemTotal), amount(s.MemUsed, s.MemTotal)},
+		{"disk", usedFraction(s.DiskUsed, s.DiskTotal), amount(s.DiskUsed, s.DiskTotal)},
+	}
 
-	return renderFields([]field{
-		{"load", gauge(sparkline(e.history, bar, meterStyle(load)), fmt.Sprintf("%.2f", s.Load))},
-		{"memory", gauge(meter(memory, bar), amount(s.MemUsed, s.MemTotal))},
-		{"disk", gauge(meter(disk, bar), amount(s.DiskUsed, s.DiskTotal))},
-	}, width)
+	fields := gaugeFields(gauges, width)
+	indent := widestKey(fields) + fieldGap
+	return renderFields(fields, width) + m.renderLoadChart(e, load, width-indent, height, indent)
+}
+
+type gaugeRow struct {
+	label    string
+	fraction float64
+	reading  string
+}
+
+func gaugeFields(gauges []gaugeRow, width int) []field {
+	labels, readings := 0, 0
+	for _, g := range gauges {
+		labels = max(labels, lipgloss.Width(g.label))
+		readings = max(readings, lipgloss.Width(g.reading))
+	}
+
+	bar := width - labels - fieldGap - gaugeGap - readings - percentGap - percentWidth
+	if bar < minLiveBar {
+		bar = 0
+	}
+
+	fields := make([]field, 0, len(gauges))
+	for _, g := range gauges {
+		reading := valueStyle.Render(pad(g.reading, readings, plainStyle))
+		percent := labelStyle.Render(fmt.Sprintf("%3.0f%%", g.fraction*100))
+		gap := strings.Repeat(" ", percentGap)
+		fields = append(fields, field{g.label, gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent)})
+	}
+	return fields
+}
+
+func (m model) renderLoadChart(e liveEntry, load float64, width, height, indent int) string {
+	if width < minChartSpan {
+		return ""
+	}
+	visible := newest(e.history, width)
+	ceiling := chartCeiling(visible)
+
+	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(load))
+	if len(plot) == 0 {
+		return ""
+	}
+
+	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
+	head := labelStyle.Render("load · last " + window)
+	peak := labelStyle.Render(fmt.Sprintf("peak %.2f", ceiling*float64(e.stats.Cores)))
+
+	gutter := strings.Repeat(" ", indent)
+	lines := append([]string{spread(head, peak, width, plainStyle)}, plot...)
+	lines = append(lines, labelStyle.Render(strings.Repeat(thinGlyphs.track, width)))
+
+	var b strings.Builder
+	b.WriteString("\n")
+	for _, line := range lines {
+		b.WriteString(gutter + line + "\n")
+	}
+	return b.String()
 }
 
 func gauge(bar, reading string) string {
@@ -187,18 +244,6 @@ func amount(used, total uint64) string {
 
 func unitOf(size string) string {
 	return strings.TrimLeft(size, "0123456789.")
-}
-
-func liveBarWidth(width int) int {
-	bar := min(max(width/3, minLiveBar), maxLiveBar)
-	if !readingFits(width, bar) {
-		return 0
-	}
-	return bar
-}
-
-func readingFits(width, bar int) bool {
-	return width-liveGutter-bar-gaugeGap >= minGaugeReading
 }
 
 func (m model) uptimeOf(it item) string {
@@ -250,7 +295,7 @@ func renderFields(fields []field, width int) string {
 	var b strings.Builder
 	for _, f := range fields {
 		label := labelStyle.Render(pad(f.key, gutter, plainStyle))
-		b.WriteString(truncate(label+"  "+f.value, width) + "\n")
+		b.WriteString(truncate(label+strings.Repeat(" ", fieldGap)+f.value, width) + "\n")
 	}
 	return b.String()
 }
@@ -322,8 +367,8 @@ func (m model) hostSegments() []barSegment {
 	return []barSegment{
 		{text: titleStyle.Render(m.hostName), priority: 0},
 		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
-		{text: hostGauge("ram", meter(usedFraction(h.MemUsed, h.MemTotal), hostBarMeter), amount(h.MemUsed, h.MemTotal)), priority: 2},
-		{text: hostGauge("disk", meter(usedFraction(h.DiskUsed, h.DiskTotal), hostBarMeter), amount(h.DiskUsed, h.DiskTotal)), priority: 4},
+		{text: hostGauge("ram", meter(usedFraction(h.MemUsed, h.MemTotal), hostBarMeter, thinGlyphs), amount(h.MemUsed, h.MemTotal)), priority: 2},
+		{text: hostGauge("disk", meter(usedFraction(h.DiskUsed, h.DiskTotal), hostBarMeter, thinGlyphs), amount(h.DiskUsed, h.DiskTotal)), priority: 4},
 		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
 		{text: m.committedSummary(), priority: 3},
 	}

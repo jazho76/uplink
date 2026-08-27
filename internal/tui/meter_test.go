@@ -14,11 +14,11 @@ import (
 
 func TestMeterSpansItsWidthAtEveryFraction(t *testing.T) {
 	for _, f := range []float64{-1, 0, 0.01, 0.33, 0.5, 0.99, 1, 4} {
-		if got := lipgloss.Width(meter(f, 20)); got != 20 {
+		if got := lipgloss.Width(meter(f, 20, thinGlyphs)); got != 20 {
 			t.Errorf("meter(%v, 20) spans %d cells, want 20", f, got)
 		}
 	}
-	if got := meter(0.5, 0); got != "" {
+	if got := meter(0.5, 0, thinGlyphs); got != "" {
 		t.Errorf("a meter with no room renders nothing, got %q", got)
 	}
 }
@@ -34,7 +34,7 @@ func TestMeterMarksThePartialCell(t *testing.T) {
 		{fraction: 1, want: "━━━━"},
 		{fraction: 2, want: "━━━━"},
 	} {
-		if got := ansi.Strip(meter(c.fraction, 4)); got != c.want {
+		if got := ansi.Strip(meter(c.fraction, 4, thinGlyphs)); got != c.want {
 			t.Errorf("meter(%v, 4) = %q, want %q", c.fraction, got, c.want)
 		}
 	}
@@ -64,7 +64,7 @@ func TestSparklineSharesTheMeterGeometry(t *testing.T) {
 	if got := lipgloss.Width(sparkline(nil, 12, plain)); got != 12 {
 		t.Errorf("an empty sparkline still spans its width, got %d", got)
 	}
-	if got := ansi.Strip(sparkline(nil, 4, plain)); got != strings.Repeat(meterTrack, 4) {
+	if got := ansi.Strip(sparkline(nil, 4, plain)); got != strings.Repeat(thinGlyphs.track, 4) {
 		t.Errorf("unfilled history backfills with the meter track, got %q", got)
 	}
 
@@ -94,17 +94,25 @@ func TestLiveHistoryKeepsTheNewestSamples(t *testing.T) {
 }
 
 func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
-	if got := liveBarWidth(12); got != 0 {
-		t.Errorf("a pane with no room for a reading draws no bar, got width %d", got)
+	gauges := []gaugeRow{{"memory", 0.5, "7.6/31GiB"}}
+
+	cramped := ansi.Strip(gaugeFields(gauges, 24)[0].value)
+	if strings.ContainsAny(cramped, blockGlyphs.fill+blockGlyphs.track) {
+		t.Errorf("a pane with no room for a reading draws no bar, got %q", cramped)
 	}
-	if got := liveBarWidth(58); got < minLiveBar {
-		t.Errorf("a roomy pane should draw a bar, got width %d", got)
+	if !strings.Contains(cramped, "7.6/31GiB") {
+		t.Errorf("the reading survives however narrow the pane, got %q", cramped)
+	}
+
+	roomy := ansi.Strip(gaugeFields(gauges, 70)[0].value)
+	if !strings.ContainsRune(roomy, []rune(blockGlyphs.fill)[0]) {
+		t.Errorf("a roomy pane should draw a bar, got %q", roomy)
 	}
 
 	if got := ansi.Strip(gauge("", "7.6GiB / 31GiB")); got != "7.6GiB / 31GiB" {
 		t.Errorf("an absent bar leaves the reading alone, got %q", got)
 	}
-	if got := ansi.Strip(gauge(meter(0.5, 4), "1.32")); got != "━━──   1.32" {
+	if got := ansi.Strip(gauge(meter(0.5, 4, thinGlyphs), "1.32")); got != "━━──   1.32" {
 		t.Errorf("a bar keeps its reading beside it, got %q", got)
 	}
 }
@@ -224,6 +232,83 @@ func visibleRuns(line string) []textRun {
 	}
 	flush()
 	return runs
+}
+
+func TestMeterRendersEitherGlyphSet(t *testing.T) {
+	for _, c := range []struct {
+		glyphs meterGlyphs
+		want   string
+	}{
+		{glyphs: thinGlyphs, want: "━━╸─"},
+		{glyphs: blockGlyphs, want: "██▓░"},
+	} {
+		if got := ansi.Strip(meter(0.6, 4, c.glyphs)); got != c.want {
+			t.Errorf("meter(0.6, 4, %v) = %q, want %q", c.glyphs, got, c.want)
+		}
+	}
+}
+
+func TestAreaChartFillsItsBox(t *testing.T) {
+	plain := lipgloss.NewStyle()
+	spiky := []float64{0.1, 0.9, 0.2, 0.8, 0.05}
+
+	for _, c := range []struct {
+		name    string
+		samples []float64
+	}{
+		{name: "spiky", samples: spiky},
+		{name: "flat", samples: []float64{0.3, 0.3, 0.3}},
+		{name: "zeroes", samples: []float64{0, 0, 0}},
+		{name: "empty", samples: nil},
+		{name: "overlong", samples: append(append([]float64{}, spiky...), spiky...)},
+	} {
+		plot := areaChart(c.samples, 8, 3, chartCeiling(c.samples), plain)
+		if len(plot) != 3 {
+			t.Errorf("%s: got %d rows, want 3", c.name, len(plot))
+		}
+		for r, line := range plot {
+			if got := lipgloss.Width(line); got != 8 {
+				t.Errorf("%s: row %d spans %d cells, want 8", c.name, r, got)
+			}
+		}
+	}
+
+	if got := areaChart(spiky, 0, 3, chartCeiling(spiky), plain); got != nil {
+		t.Errorf("a chart with no room renders nothing, got %v", got)
+	}
+}
+
+func TestAreaChartScalesToItsPeak(t *testing.T) {
+	plain := lipgloss.NewStyle()
+
+	quietWindow := []float64{0.01, 0.04, 0.02}
+	quiet := ansi.Strip(strings.Join(areaChart(quietWindow, 3, 2, chartCeiling(quietWindow), plain), "\n"))
+	if !strings.ContainsRune(quiet, sparkLevels[len(sparkLevels)-1]) {
+		t.Errorf("an idle window should still reach the top of the chart, got %q", quiet)
+	}
+
+	if got := chartCeiling(nil); got != minChartCeiling {
+		t.Errorf("an empty window falls back to the floor, got %v", got)
+	}
+	if got := chartCeiling([]float64{0, 0}); got != minChartCeiling {
+		t.Errorf("an all-zero window must not divide by zero, got %v", got)
+	}
+	if got := chartCeiling([]float64{0.1, 0.7, 0.3}); got != 0.7 {
+		t.Errorf("the ceiling is the window peak, got %v", got)
+	}
+}
+
+func TestChartHeightStaysWithinItsCap(t *testing.T) {
+	for _, c := range []struct{ available, want int }{
+		{available: 40, want: maxChartRows},
+		{available: 16, want: maxChartRows},
+		{available: 8, want: minChartRows},
+		{available: 2, want: minChartRows},
+	} {
+		if got := chartHeight(c.available); got != c.want {
+			t.Errorf("chartHeight(%d) = %d, want %d", c.available, got, c.want)
+		}
+	}
 }
 
 func TestFractionsGuardAgainstZeroTotals(t *testing.T) {

@@ -1,21 +1,31 @@
 package tui
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jazho76/uplink/internal/ui"
 )
 
-const (
-	meterFill    = "━"
-	meterPartial = "╸"
-	meterTrack   = "─"
+type meterGlyphs struct{ fill, partial, track string }
 
+var (
+	thinGlyphs  = meterGlyphs{fill: "━", partial: "╸", track: "─"}
+	blockGlyphs = meterGlyphs{fill: "█", partial: "▓", track: "░"}
+)
+
+const (
 	meterWarn     = 0.75
 	meterCritical = 0.90
 
-	maxLiveSamples = 32
+	maxLiveSamples = 180
+
+	minChartRows    = 2
+	maxChartRows    = 4
+	chartPaneShare  = 4
+	minChartSpan    = len("load · last 15m") + 1 + len("peak 123.45")
+	minChartCeiling = 0.02
 )
 
 var sparkLevels = []rune("▁▂▃▄▅▆▇█")
@@ -35,7 +45,7 @@ func meterStyle(fraction float64) lipgloss.Style {
 	}
 }
 
-func meter(fraction float64, width int) string {
+func meter(fraction float64, width int, glyphs meterGlyphs) string {
 	if width < 1 {
 		return ""
 	}
@@ -43,14 +53,63 @@ func meter(fraction float64, width int) string {
 
 	exact := fraction * float64(width)
 	filled := int(exact)
-	bar := strings.Repeat(meterFill, filled)
+	bar := strings.Repeat(glyphs.fill, filled)
 	if filled < width && exact > float64(filled) {
-		bar += meterPartial
+		bar += glyphs.partial
 		filled++
 	}
 
 	return meterStyle(fraction).Render(bar) +
-		labelStyle.Render(strings.Repeat(meterTrack, width-filled))
+		labelStyle.Render(strings.Repeat(glyphs.track, width-filled))
+}
+
+func chartCeiling(samples []float64) float64 {
+	ceiling := minChartCeiling
+	for _, s := range samples {
+		ceiling = max(ceiling, s)
+	}
+	return ceiling
+}
+
+func areaChart(samples []float64, width, height int, ceiling float64, fill lipgloss.Style) []string {
+	if width < 1 || height < 1 {
+		return nil
+	}
+	samples = newest(samples, width)
+
+	levels := len(sparkLevels)
+	rows := make([]strings.Builder, height)
+	for r := range rows {
+		rows[r].WriteString(strings.Repeat(" ", width-len(samples)))
+	}
+	for _, s := range samples {
+		reached := clampFraction(s/ceiling) * float64(height*levels)
+		for r := range rows {
+			rows[r].WriteRune(chartCell(reached, float64((height-1-r)*levels)))
+		}
+	}
+
+	out := make([]string, height)
+	for r := range rows {
+		out[r] = fill.Render(rows[r].String())
+	}
+	return out
+}
+
+func chartCell(reached, floor float64) rune {
+	levels := float64(len(sparkLevels))
+	switch {
+	case reached >= floor+levels:
+		return sparkLevels[len(sparkLevels)-1]
+	case reached > floor:
+		return sparkLevels[int(math.Ceil(reached-floor))-1]
+	default:
+		return ' '
+	}
+}
+
+func chartHeight(available int) int {
+	return min(maxChartRows, max(available/chartPaneShare, minChartRows))
 }
 
 func sparkline(samples []float64, width int, fill lipgloss.Style) string {
@@ -64,7 +123,7 @@ func sparkline(samples []float64, width int, fill lipgloss.Style) string {
 		trace.WriteRune(sparkLevels[int(clampFraction(s)*float64(len(sparkLevels)-1))])
 	}
 
-	return labelStyle.Render(strings.Repeat(meterTrack, width-len(samples))) +
+	return labelStyle.Render(strings.Repeat(thinGlyphs.track, width-len(samples))) +
 		fill.Render(trace.String())
 }
 

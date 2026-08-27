@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/humanize"
 	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -582,6 +583,108 @@ func TestFieldValuesNeverOverrunTheirWidth(t *testing.T) {
 		if w := lipgloss.Width(line); w > 20 {
 			t.Errorf("field line spans %d cells, want at most 20: %q", w, line)
 		}
+	}
+}
+
+func TestLiveGaugesAlignTheirPercentColumn(t *testing.T) {
+	block := ansi.Strip(renderFields(gaugeFields([]gaugeRow{
+		{"load", 0.34, "4.10 / 12"},
+		{"memory", 0.26, "8/31GiB"},
+		{"disk", 0.75, "112/150GiB"},
+	}, 12), 60))
+
+	var columns []int
+	for _, line := range strings.Split(strings.TrimRight(block, "\n"), "\n") {
+		columns = append(columns, strings.Index(line, "%"))
+	}
+	for i, at := range columns {
+		if at < 0 || at != columns[0] {
+			t.Errorf("row %d puts its percent at column %d, want %d:\n%s", i, at, columns[0], block)
+		}
+	}
+}
+
+func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
+	m, vms := newTestModel()
+	vms.targets = []target.Target{vm("forge", "running")}
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	var history []float64
+	for i := 0; i < 20; i++ {
+		history = appendSample(history, float64(i%7)/7)
+	}
+	m.live["forge"] = liveEntry{history: history,
+		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+
+	preview := ansi.Strip(m.renderPreview(70, 40))
+	gauges, chart := strings.Index(preview, "disk"), strings.Index(preview, "load · last")
+	if chart < 0 {
+		t.Fatalf("a roomy preview should carry the chart:\n%s", preview)
+	}
+	if gauges > chart {
+		t.Errorf("the chart belongs under the gauges:\n%s", preview)
+	}
+	if !strings.Contains(preview, "peak ") {
+		t.Errorf("the chart must state the ceiling it scaled to:\n%s", preview)
+	}
+
+	cramped := ansi.Strip(m.renderPreview(minChartSpan, 40))
+	if strings.Contains(cramped, "load · last") {
+		t.Errorf("a pane too narrow to plot drops the chart:\n%s", cramped)
+	}
+}
+
+func TestLoadChartSpansTheAvailableWidth(t *testing.T) {
+	e := liveEntry{stats: probe.Stats{Cores: 4, Load: 1}}
+	for i := 0; i < 20; i++ {
+		e.history = appendSample(e.history, float64(i%7)/7)
+	}
+
+	for _, width := range []int{minChartSpan, 40, 96} {
+		block := ansi.Strip((model{}).renderLoadChart(e, 0.25, width, 40, 0))
+		for i, line := range strings.Split(strings.Trim(block, "\n"), "\n") {
+			if got := lipgloss.Width(line); got != width {
+				t.Errorf("%d cols: chart line %d spans %d", width, i, got)
+			}
+		}
+	}
+}
+
+func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
+	e := liveEntry{stats: probe.Stats{Cores: 10}}
+	e.history = appendSample(e.history, 0.9)
+	for i := 0; i < 60; i++ {
+		e.history = appendSample(e.history, 0.2)
+	}
+
+	narrow := ansi.Strip((model{}).renderLoadChart(e, 0.2, minChartSpan, 40, 0))
+	if strings.Contains(narrow, "peak 9.00") {
+		t.Errorf("a spike scrolled off the chart must not be claimed as its peak:\n%s", narrow)
+	}
+	if !strings.Contains(narrow, "peak 2.00") {
+		t.Errorf("the peak should be the tallest column actually drawn:\n%s", narrow)
+	}
+
+	wide := ansi.Strip((model{}).renderLoadChart(e, 0.2, 100, 40, 0))
+	if !strings.Contains(wide, "peak 9.00") {
+		t.Errorf("a chart wide enough to include the spike should report it:\n%s", wide)
+	}
+}
+
+func TestLoadChartWindowFollowsWhatIsVisible(t *testing.T) {
+	e := liveEntry{stats: probe.Stats{Cores: 4}}
+	for i := 0; i < maxLiveSamples; i++ {
+		e.history = appendSample(e.history, 0.3)
+	}
+
+	wide := ansi.Strip((model{}).renderLoadChart(e, 0.3, 120, 40, 0))
+	narrow := ansi.Strip((model{}).renderLoadChart(e, 0.3, minChartSpan, 40, 0))
+	if wide == narrow {
+		t.Fatalf("a wider chart shows a longer window")
+	}
+	if !strings.Contains(narrow, humanize.Duration(time.Duration(minChartSpan)*liveInterval)) {
+		t.Errorf("the window must describe the visible samples, not the whole buffer:\n%s", narrow)
 	}
 }
 
