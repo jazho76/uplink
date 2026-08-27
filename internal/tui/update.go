@@ -79,9 +79,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "up", "k":
-		return m, m.moveCursor(m.cursor - 1)
+		cmd := m.moveCursor(-1)
+		return m, cmd
 	case "down", "j":
-		return m, m.moveCursor(m.cursor + 1)
+		cmd := m.moveCursor(1)
+		return m, cmd
 
 	case "tab":
 		m.cycleMode(1)
@@ -92,12 +94,6 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		return m.connect()
-
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		if idx := int(msg.String()[0] - '1'); idx < len(m.items) {
-			m.moveCursor(idx)
-			return m.connect()
-		}
 
 	case "ctrl+l":
 		if it := m.selected(); it.caps.tail {
@@ -134,6 +130,12 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.input.Placeholder = ""
 			m.input.Focus()
 			m.status = ""
+		}
+
+	default:
+		if i, ok := paneForKey(m.panes, msg.String()); ok {
+			cmd := m.focusPane(i)
+			return m, cmd
 		}
 	}
 	return m, nil

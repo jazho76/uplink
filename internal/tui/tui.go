@@ -50,7 +50,8 @@ type model struct {
 	self      string
 	reg       target.Registry
 	items     []item
-	cursor    int
+	panes     []pane
+	focus     int
 	modeIdx   int
 	width     int
 	height    int
@@ -137,19 +138,48 @@ func (m *model) rebuild(targets []target.Target) {
 		items = append(items, it)
 	}
 	m.items = items
-	if m.cursor >= len(m.items) {
-		m.cursor = len(m.items) - 1
+
+	previouslyFocused := m.focusedSection()
+	m.panes = carryOverCursors(groupPanes(items), m.panes)
+	m.focus = paneIndex(m.panes, previouslyFocused)
+}
+
+func carryOverCursors(fresh, previous []pane) []pane {
+	cursors := map[string]int{}
+	for _, p := range previous {
+		cursors[p.section] = p.cursor
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	for i := range fresh {
+		fresh[i].cursor = max(min(cursors[fresh[i].section], len(fresh[i].items)-1), 0)
 	}
+	return fresh
+}
+
+func paneIndex(panes []pane, section string) int {
+	for i, p := range panes {
+		if p.section == section {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m model) focusedSection() string {
+	if m.focus < 0 || m.focus >= len(m.panes) {
+		return ""
+	}
+	return m.panes[m.focus].section
 }
 
 func (m model) selected() item {
-	if m.cursor < 0 || m.cursor >= len(m.items) {
+	if m.focus < 0 || m.focus >= len(m.panes) {
 		return item{}
 	}
-	return m.items[m.cursor]
+	p := m.panes[m.focus]
+	if p.cursor < 0 || p.cursor >= len(p.items) {
+		return item{}
+	}
+	return p.items[p.cursor]
 }
 
 func (m model) mode() target.Mode {
@@ -168,11 +198,33 @@ func (m *model) cycleMode(delta int) {
 	m.modeIdx = ((m.modeIdx+delta)%n + n) % n
 }
 
-func (m *model) moveCursor(to int) tea.Cmd {
-	if to < 0 || to >= len(m.items) || to == m.cursor {
+func (m *model) moveCursor(delta int) tea.Cmd {
+	if m.focus < 0 || m.focus >= len(m.panes) {
 		return nil
 	}
-	m.cursor = to
+	moved := m.panes[m.focus]
+	to := moved.cursor + delta
+	if to < 0 || to >= len(moved.items) {
+		return nil
+	}
+	moved.cursor = to
+
+	m.panes = withPane(m.panes, m.focus, moved)
+	m.modeIdx = 0
+	return m.onSelectionChange()
+}
+
+func withPane(panes []pane, i int, p pane) []pane {
+	next := append([]pane(nil), panes...)
+	next[i] = p
+	return next
+}
+
+func (m *model) focusPane(i int) tea.Cmd {
+	if i < 0 || i >= len(m.panes) || i == m.focus {
+		return nil
+	}
+	m.focus = i
 	m.modeIdx = 0
 	return m.onSelectionChange()
 }

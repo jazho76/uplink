@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -127,7 +128,7 @@ func TestFooterTracksCapabilities(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 
-	m.cursor = 0
+	m = focus(m, "host")
 	host := m.renderFooter()
 	for _, absent := range []string{"stop", "restart", "del", "logs"} {
 		if strings.Contains(host, absent) {
@@ -135,7 +136,7 @@ func TestFooterTracksCapabilities(t *testing.T) {
 		}
 	}
 
-	m.cursor = 1
+	m = focus(m, "forge")
 	vmFooter := m.renderFooter()
 	for _, want := range []string{"connect", "logs", "stop", "restart", "auto", "del", "quit"} {
 		if !strings.Contains(vmFooter, want) {
@@ -156,7 +157,7 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 		t.Fatalf("tokyo should be stopped, got %q", m.items[2].t.Status)
 	}
 
-	m.cursor = 1
+	m = focus(m, "forge")
 	view := m.View()
 	for _, want := range []string{"forge", "tokyo", "host", "running", "template", "forge_vm", "vms"} {
 		if !strings.Contains(view, want) {
@@ -164,7 +165,7 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 		}
 	}
 
-	m.cursor = 0
+	m = focus(m, "host")
 	if !strings.Contains(m.View(), "testhost") {
 		t.Errorf("host bar missing hostname")
 	}
@@ -191,7 +192,7 @@ func (errBoom) Error() string { return "boom" }
 func TestModeCycling(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
 	if got := m.mode().Name; got != "tmux" {
 		t.Fatalf("a fresh row starts on its default mode, got %q", got)
@@ -223,7 +224,7 @@ func TestModeCycling(t *testing.T) {
 func TestModeResetsWhenCursorMoves(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
 	m = key(m, "tab")
 	if m.modeIdx == 0 {
@@ -245,7 +246,7 @@ func TestModeResetsWhenCursorMoves(t *testing.T) {
 func TestSingleModeTargetIgnoresTab(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 0
+	m = focus(m, "host")
 
 	m = key(m, "tab")
 	if m.modeIdx != 0 {
@@ -259,9 +260,9 @@ func TestSingleModeTargetIgnoresTab(t *testing.T) {
 func TestModeSurfacedInListAndPreview(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
-	if strings.Contains(m.renderList(), "[tmux]") {
+	if strings.Contains(m.renderPanes(30, 12), "[tmux]") {
 		t.Errorf("the default mode should stay out of the list row")
 	}
 	if !strings.Contains(m.renderFooter(), "tab") {
@@ -269,8 +270,8 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 	}
 
 	m = key(m, "tab")
-	if !strings.Contains(m.renderList(), "[shell]") {
-		t.Errorf("an off-default mode should be marked on the row: %s", m.renderList())
+	if !strings.Contains(m.renderPanes(30, 12), "[shell]") {
+		t.Errorf("an off-default mode should be marked on the row: %s", m.renderPanes(30, 12))
 	}
 	preview := m.renderPreview(50, 20)
 	for _, want := range []string{"mode", "shell", "2 of 3"} {
@@ -325,12 +326,12 @@ func TestUnknownStatusIsStillProbed(t *testing.T) {
 	}
 	m = sized(load(m))
 
-	m.cursor = 1
+	m = focus(m, "fresh")
 	if m.liveFetch() == nil {
 		t.Error("an unknown target must be probed, or its status can never resolve")
 	}
 
-	m.cursor = 2
+	m = focus(m, "off")
 	if m.liveFetch() != nil {
 		t.Error("a stopped target has nothing to probe")
 	}
@@ -354,27 +355,189 @@ func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	}
 }
 
-func TestCursorBounds(t *testing.T) {
+func TestCursorStopsAtPaneEdges(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
+	m = focus(m, "forge")
 
 	m = key(m, "up")
-	if m.cursor != 0 {
-		t.Fatalf("cursor should clamp at 0, got %d", m.cursor)
+	if got := m.selected().name(); got != "forge" {
+		t.Fatalf("up at the top of a pane must not spill into its neighbour, got %q", got)
 	}
 
 	for i := 0; i < 10; i++ {
 		m = key(m, "down")
 	}
-	if m.cursor != len(m.items)-1 {
-		t.Fatalf("cursor should clamp at %d, got %d", len(m.items)-1, m.cursor)
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("down should clamp at the pane's last item, got %q", got)
+	}
+}
+
+func TestPaneKeysDerivedFromSection(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	if len(m.panes) != 2 {
+		t.Fatalf("want one pane per section, got %d", len(m.panes))
+	}
+	if m.panes[0].section != "local" || m.panes[1].section != "vms" {
+		t.Fatalf("unexpected sections: %q %q", m.panes[0].section, m.panes[1].section)
+	}
+	if m.panes[0].key != 'l' || m.panes[1].key != 'v' {
+		t.Fatalf("unexpected pane keys: %q %q", m.panes[0].key, m.panes[1].key)
+	}
+	if !strings.Contains(m.View(), "local") {
+		t.Errorf("a sectionless target should land in a pane named for its provider")
+	}
+}
+
+func TestPaneFocusRemembersItsCursor(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+
+	m = key(m, "v")
+	m = key(m, "down")
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("v then down should land on tokyo, got %q", got)
+	}
+
+	m = key(m, "v")
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("re-pressing the focused pane's key must be a no-op, got %q", got)
+	}
+
+	m = key(m, "l")
+	if got := m.selected().name(); got != "host" {
+		t.Fatalf("l should focus the local pane, got %q", got)
+	}
+
+	m = key(m, "v")
+	if got := m.selected().name(); got != "tokyo" {
+		t.Fatalf("a pane should keep its own cursor across a focus change, got %q", got)
+	}
+}
+
+// Once a real terminal turns colour on, lipgloss renders an empty string as
+// bare escape codes: invisible, but not "". A caption test that compares
+// against "" then pads the corner away from the fill and the pane stops
+// looking closed. The suite runs without a TTY, so the profile hides it.
+func TestPaneEdgeIgnoresInvisibleCaptions(t *testing.T) {
+	const invisible = "\x1b[94m\x1b[0m"
+	closed := "╰" + strings.Repeat("─", 22) + "╯"
+
+	for _, c := range []struct{ name, left, right string }{
+		{name: "no captions"},
+		{name: "invisible right", right: invisible},
+		{name: "invisible left", left: invisible},
+		{name: "invisible both", left: invisible, right: invisible},
+	} {
+		edge := ansi.Strip(paneEdge("╰", "╯", c.left, c.right, 24, paneBorder))
+		if edge != closed {
+			t.Errorf("%s: edge did not close: %q", c.name, edge)
+		}
+	}
+
+	edge := ansi.Strip(paneEdge("╭", "╮", "vms", "2 up", 24, paneBorder))
+	if lipgloss.Width(edge) != 24 {
+		t.Errorf("a captioned edge must still span the pane, got %d: %q", lipgloss.Width(edge), edge)
+	}
+	if !strings.HasPrefix(edge, "╭ vms ") || !strings.HasSuffix(edge, " 2 up ╮") {
+		t.Errorf("captions should sit against the corners, got %q", edge)
+	}
+}
+
+func TestFirstFreeLetterSkipsTaken(t *testing.T) {
+	for _, c := range []struct {
+		word, taken string
+		want        rune
+	}{
+		{word: "vms", taken: reservedPaneKeys, want: 'v'},
+		{word: "remotes", taken: reservedPaneKeys + "r", want: 'e'},
+		{word: "Vms", taken: reservedPaneKeys, want: 'v'},
+		{word: "kqj", taken: reservedPaneKeys, want: 0},
+		{word: "42", taken: "", want: 0},
+	} {
+		if got := firstFreeLetter(c.word, c.taken); got != c.want {
+			t.Errorf("firstFreeLetter(%q, %q) = %q, want %q", c.word, c.taken, got, c.want)
+		}
+	}
+}
+
+func TestPaneKeysFallThroughOnCollision(t *testing.T) {
+	panes := []pane{{section: "remotes"}, {section: "rigs"}, {section: "queue"}}
+	assignPaneKeys(panes)
+
+	if panes[0].key != 'r' || panes[1].key != 'i' || panes[2].key != 'u' {
+		t.Errorf("keys should fall through collisions and reserved letters, got %q %q %q",
+			panes[0].key, panes[1].key, panes[2].key)
+	}
+}
+
+func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
+	up := item{t: target.Target{Status: target.StatusRunning}}
+	off := item{t: target.Target{Status: target.StatusStopped}}
+	unprobed := item{t: target.Target{Status: target.StatusUnknown}}
+
+	if got := paneSummary(pane{items: []item{up, off}}); got != "1 up" {
+		t.Errorf("want %q, got %q", "1 up", got)
+	}
+	if got := paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
+		t.Errorf("one unprobed member must suppress the count, got %q", got)
+	}
+	if got := paneSummary(pane{}); got != "" {
+		t.Errorf("an empty pane has nothing to count, got %q", got)
+	}
+}
+
+func TestClipMeasuresDisplayWidth(t *testing.T) {
+	if got := clip("日本語テスト", 4); lipgloss.Width(got) != 4 {
+		t.Errorf("clip should count display cells, got %q spanning %d", got, lipgloss.Width(got))
+	}
+	if got := clip("a\tb\x00c", 10); got != "a bc" {
+		t.Errorf("clip should flatten tabs and drop control bytes, got %q", got)
+	}
+}
+
+func TestPaneScrollFollowsCursor(t *testing.T) {
+	for _, c := range []struct{ cursor, count, rows, want int }{
+		{cursor: 0, count: 10, rows: 4, want: 0},
+		{cursor: 3, count: 10, rows: 4, want: 0},
+		{cursor: 4, count: 10, rows: 4, want: 1},
+		{cursor: 9, count: 10, rows: 4, want: 6},
+		{cursor: 2, count: 3, rows: 5, want: 0},
+	} {
+		if got := scrollOffset(c.cursor, c.count, c.rows); got != c.want {
+			t.Errorf("scrollOffset(%d, %d, %d) = %d, want %d", c.cursor, c.count, c.rows, got, c.want)
+		}
+	}
+}
+
+func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
+	panes := []pane{{items: make([]item, 1)}, {items: make([]item, 2)}, {items: make([]item, 2)}}
+
+	rows := distributeRows(panes, 20)
+	sum := 0
+	for _, r := range rows {
+		sum += r
+	}
+	if sum != 20 {
+		t.Fatalf("panes should fill the column, got %d of 20", sum)
+	}
+	if rows[0] != 6 || rows[1] != 7 || rows[2] != 7 {
+		t.Errorf("slack should spread evenly, got %v", rows)
+	}
+
+	for _, r := range distributeRows(panes, 8) {
+		if r < minPaneRows {
+			t.Errorf("an overfull column must not starve a pane, got %d", r)
+		}
 	}
 }
 
 func TestDeleteConfirmFlow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
 	m = key(m, "ctrl+x")
 	if m.screen != screenConfirm {
@@ -391,7 +554,7 @@ func TestDeleteConfirmFlow(t *testing.T) {
 func TestDeleteRejectedWithoutLifecycle(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 0
+	m = focus(m, "host")
 
 	m = key(m, "ctrl+x")
 	if m.screen != screenList {
@@ -403,7 +566,7 @@ func TestLogsScreenToggle(t *testing.T) {
 	m, vms := newTestModel()
 	vms.logs = "boot line"
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
 	m = key(m, "ctrl+l")
 	if m.screen != screenLogs {
@@ -432,13 +595,13 @@ func TestTerminalTooSmall(t *testing.T) {
 }
 
 func TestViewWithinBounds(t *testing.T) {
-	sizes := []struct{ w, h int }{{40, 14}, {80, 24}, {120, 40}, {52, 16}}
+	sizes := []struct{ w, h int }{{minWidth, minHeight}, {40, 14}, {80, 24}, {120, 40}, {52, 16}}
 	for _, sz := range sizes {
 		m, vms := newTestModel()
 		vms.logs = strings.Repeat("a log line that is quite long indeed\n", 20)
 		next, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
 		m = load(next.(model))
-		m.cursor = 1
+		m = focus(m, "forge")
 		m = m.withSelectionRefreshed()
 
 		lines := strings.Split(m.View(), "\n")
@@ -456,7 +619,7 @@ func TestViewWithinBounds(t *testing.T) {
 func TestConcurrentTaskGuards(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-	m.cursor = 1
+	m = focus(m, "forge")
 
 	m = key(m, "ctrl+r")
 	if m.tasks["forge"] != verbRestart {
@@ -484,16 +647,29 @@ func TestConcurrentTaskGuards(t *testing.T) {
 	}
 }
 
+func focus(m model, name string) model {
+	for i, p := range m.panes {
+		for j, it := range p.items {
+			if it.name() == name {
+				m.focus, m.panes[i].cursor = i, j
+				return m
+			}
+		}
+	}
+	return m
+}
+
 func (m model) withSelectionRefreshed() model {
 	m.onSelectionChange()
 	return m
 }
 
 func key(m model, s string) model {
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)})
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	if special, ok := specialKeys[s]; ok {
-		next, _ = m.Update(tea.KeyMsg{Type: special})
+		msg = tea.KeyMsg{Type: special}
 	}
+	next, _ := m.Update(msg)
 	return next.(model)
 }
 

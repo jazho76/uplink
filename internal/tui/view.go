@@ -12,10 +12,7 @@ import (
 	"github.com/jazho76/uplink/internal/ui"
 )
 
-const (
-	minWidth  = 40
-	minHeight = 14
-)
+const minPreviewTextW = 10
 
 var (
 	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
@@ -35,6 +32,12 @@ var (
 	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
 	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
 
+	paneBorder      = lipgloss.NewStyle().Foreground(ui.Comment)
+	paneBorderFocus = lipgloss.NewStyle().Foreground(ui.Cyan)
+	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
+	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
+	paneKeyStyle    = lipgloss.NewStyle().Foreground(ui.Magenta).Bold(true)
+
 	hostGlyph = lipgloss.NewStyle().Foreground(ui.Cyan).Render("⬢")
 
 	vmRunningGlyph = lipgloss.NewStyle().Foreground(ui.Green).Render("●")
@@ -44,10 +47,6 @@ var (
 	remoteUnprobedGlyph    = lipgloss.NewStyle().Foreground(ui.Comment).Render("◇")
 	remoteUnreachableGlyph = lipgloss.NewStyle().Foreground(ui.Red).Render("×")
 
-	listBorder = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ui.Comment).
-			Padding(0, 1)
 	previewBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ui.Comment).
@@ -95,67 +94,19 @@ func (m model) View() string {
 		return m.renderLogs()
 	}
 
-	listW := m.width * 38 / 100
-	if listW < 20 {
-		listW = 20
-	}
-	previewW := m.width - listW - 6
-	bodyH := m.height - 7
-	if bodyH < 5 {
-		bodyH = 5
-	}
+	l := computeLayout(m.width, m.height)
+	previewH := l.bodyOuterH - borderCells
 
-	list := listBorder.Width(listW).Height(bodyH).Render(clampBlock(m.renderList(), listW-4, bodyH))
-	preview := previewBorder.Width(previewW).Height(bodyH).Render(m.renderPreview(previewW, bodyH))
-	body := lipgloss.JoinHorizontal(lipgloss.Top, list, preview)
+	panes := m.renderPanes(l.paneColumnOuterW, l.bodyOuterH)
+	preview := previewBorder.Width(l.previewOuterW - borderCells).Height(previewH).
+		Render(m.renderPreview(l.previewOuterW-chromeCells, previewH))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, panes, preview)
 
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(), m.renderFooter())
-}
-
-func (m model) renderList() string {
-	var b strings.Builder
-	b.WriteString(titleStyle.Render("uplink") + "\n\n")
-
-	section := ""
-	for i, it := range m.items {
-		if it.t.Section != section {
-			section = it.t.Section
-			if section != "" {
-				fmt.Fprintf(&b, "   %s %s %s\n",
-					footerStyle.Render("──"), sectionStyle.Render(section), footerStyle.Render("──"))
-			}
-		}
-
-		label := " "
-		if i < 9 {
-			label = keyStyle.Render(strconv.Itoa(i + 1))
-		}
-		marker := "  "
-		name := dimRow.Render(it.name())
-		if i == m.cursor {
-			marker = pointerStyle.Render("▌ ")
-			name = selectedRow.Render(it.name())
-		}
-		trailing := ""
-		if i == m.cursor && m.modeIdx != 0 {
-			trailing += " " + modeMarker.Render("["+m.mode().Name+"]")
-		}
-		if it.autostart {
-			trailing += " " + autoMarker.Render("↻")
-		}
-		if verb := m.tasks[it.name()]; verb != "" {
-			trailing += " " + m.spinner.View() + " " + labelStyle.Render(verb)
-		}
-		fmt.Fprintf(&b, "%s %s%s %s%s\n", label, marker, glyph(it), name, trailing)
-	}
-	return b.String()
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(l.hostBarOuterW), m.renderFooter())
 }
 
 func (m model) renderPreview(width, height int) string {
-	cw := width - 4
-	if cw < 10 {
-		cw = 10
-	}
+	width = max(width, minPreviewTextW)
 
 	it := m.selected()
 	if it.name() == "" {
@@ -177,7 +128,7 @@ func (m model) renderPreview(width, height int) string {
 	}
 
 	if it.worthProbing() {
-		b.WriteString("\n" + rule("live", cw))
+		b.WriteString("\n" + rule("live", width))
 		m.renderLive(&b, it.name())
 	}
 
@@ -189,13 +140,13 @@ func (m model) renderPreview(width, height int) string {
 			if len(lines) > fit {
 				lines = lines[len(lines)-fit:]
 			}
-			b.WriteString("\n" + rule("logs", cw))
+			b.WriteString("\n" + rule("logs", width))
 			for _, line := range lines {
-				b.WriteString(detailLogStyle.Render(clip(line, cw)) + "\n")
+				b.WriteString(detailLogStyle.Render(clip(line, width)) + "\n")
 			}
 		}
 	}
-	return clampBlock(b.String(), cw, height)
+	return clampBlock(b.String(), width, height)
 }
 
 func (m model) renderLive(b *strings.Builder, name string) {
@@ -232,10 +183,7 @@ func (m model) renderLogs() string {
 	header := titleStyle.Render("logs: " + m.logName)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
-	bodyH := m.height - 2
-	if bodyH < 1 {
-		bodyH = 1
-	}
+	bodyH := max(m.height-2, 1)
 	lines := strings.Split(m.logView, "\n")
 	if len(lines) > bodyH {
 		lines = lines[len(lines)-bodyH:]
@@ -281,7 +229,7 @@ func (m model) renderFooter() string {
 	return keys + "\n" + truncate(statusStyle.Render(oneLine(m.status)), m.width)
 }
 
-func (m model) renderHostBar() string {
+func (m model) renderHostBar(width int) string {
 	h := m.hostStats
 	var running, vcpu int
 	var committedMem uint64
@@ -311,16 +259,13 @@ func (m model) renderHostBar() string {
 
 	committed := seg("committed", fmt.Sprintf("%d vCPU / %s across %d running", vcpu, humanize.Bytes(committedMem), running))
 
-	content := truncate(left+gap+committed, m.width-4)
-	return hostBarBorder.Width(m.width - 2).Render(content)
+	content := truncate(left+gap+committed, width-chromeCells)
+	return hostBarBorder.Width(width - borderCells).Render(content)
 }
 
 func rule(title string, width int) string {
 	head := sectionStyle.Render(title) + " "
-	dashes := width - lipgloss.Width(head)
-	if dashes < 0 {
-		dashes = 0
-	}
+	dashes := max(width-lipgloss.Width(head), 0)
 	return head + footerStyle.Render(strings.Repeat("─", dashes)) + "\n"
 }
 
@@ -329,7 +274,11 @@ func oneLine(s string) string {
 }
 
 func clip(s string, width int) string {
-	s = strings.Map(func(r rune) rune {
+	return truncate(stripControl(s), width)
+}
+
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\t':
 			return ' '
@@ -339,18 +288,20 @@ func clip(s string, width int) string {
 			return r
 		}
 	}, s)
-	r := []rune(s)
-	if len(r) > width {
-		r = r[:width]
+}
+
+func visible(s string) bool { return lipgloss.Width(s) > 0 }
+
+func spread(left, right string, width int) string {
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if !visible(right) || gap < 1 {
+		return truncate(left, width)
 	}
-	return string(r)
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func truncate(s string, width int) string {
-	if width < 0 {
-		width = 0
-	}
-	return ansi.Truncate(s, width, "")
+	return ansi.Truncate(s, max(width, 0), "")
 }
 
 func clampBlock(s string, width, height int) string {
