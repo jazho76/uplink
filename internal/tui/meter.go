@@ -2,6 +2,7 @@ package tui
 
 import (
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -76,34 +77,51 @@ func areaChart(samples []float64, width, height int, ceiling float64, fill lipgl
 	}
 	samples = newest(samples, width)
 
-	levels := len(sparkLevels)
-	rows := make([]strings.Builder, height)
+	window := slices.Repeat([]string{blockGlyphs.track}, width-len(samples))
+	rows := make([][]string, height)
 	for r := range rows {
-		rows[r].WriteString(strings.Repeat(" ", width-len(samples)))
+		rows[r] = append(make([]string, 0, width), window...)
 	}
 	for _, s := range samples {
-		reached := clampFraction(s/ceiling) * float64(height*levels)
+		reached := clampFraction(s/ceiling) * float64(height)
 		for r := range rows {
-			rows[r].WriteRune(chartCell(reached, float64((height-1-r)*levels)))
+			rows[r] = append(rows[r], areaCell(reached-float64(height-1-r)))
 		}
 	}
 
 	out := make([]string, height)
 	for r := range rows {
-		out[r] = fill.Render(rows[r].String())
+		out[r] = renderOverTrack(rows[r], fill)
 	}
 	return out
 }
 
-func chartCell(reached, floor float64) rune {
-	levels := float64(len(sparkLevels))
+func renderOverTrack(row []string, fill lipgloss.Style) string {
+	var b strings.Builder
+	for start := 0; start < len(row); {
+		track := row[start] == blockGlyphs.track
+		end := start + 1
+		for end < len(row) && (row[end] == blockGlyphs.track) == track {
+			end++
+		}
+		style := fill
+		if track {
+			style = labelStyle
+		}
+		b.WriteString(style.Render(strings.Join(row[start:end], "")))
+		start = end
+	}
+	return b.String()
+}
+
+func areaCell(covered float64) string {
 	switch {
-	case reached >= floor+levels:
-		return sparkLevels[len(sparkLevels)-1]
-	case reached > floor:
-		return sparkLevels[int(math.Ceil(reached-floor))-1]
+	case covered >= 1:
+		return blockGlyphs.fill
+	case covered > 0:
+		return blockGlyphs.partial
 	default:
-		return ' '
+		return blockGlyphs.track
 	}
 }
 
@@ -120,7 +138,7 @@ func sparkline(samples []float64, width int, fill lipgloss.Style) string {
 	var trace strings.Builder
 	for _, s := range samples {
 		reached := max(clampFraction(s)*float64(len(sparkLevels)), 1)
-		trace.WriteRune(chartCell(reached, 0))
+		trace.WriteRune(sparkLevels[int(math.Ceil(reached))-1])
 	}
 
 	return labelStyle.Render(strings.Repeat(thinGlyphs.track, width-len(samples))) +
