@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/jazho76/uplink/internal/run"
@@ -15,7 +14,7 @@ var connectMode string
 
 var connectCmd = &cobra.Command{
 	Use:   "connect <target>[:<mode>]",
-	Short: "Open a shell on a target, starting it if stopped",
+	Short: "Open a shell on a target",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return connect(args[0], connectMode)
@@ -33,12 +32,12 @@ func connect(spec, modeName string) error {
 		modeName = inline
 	}
 
-	reg, warn := registry()
+	resolved, warn := targets()
 	if warn != nil {
 		ui.Error("%s", warn)
 	}
 
-	t, provider, err := reg.Resolve(name)
+	t, err := target.Resolve(resolved, name)
 	if err != nil {
 		return err
 	}
@@ -46,14 +45,6 @@ func connect(spec, modeName string) error {
 	mode, err := pickMode(t, modeName)
 	if err != nil {
 		return err
-	}
-
-	if !t.Running() {
-		if lifecycle, ok := provider.(target.Lifecycle); ok {
-			if err := lifecycle.Start(name, os.Stdout); err != nil {
-				return err
-			}
-		}
 	}
 
 	return run.Exec(mode.Argv[0], mode.Argv[1:]...)

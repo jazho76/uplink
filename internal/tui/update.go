@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/uplink/internal/target"
 )
 
 const (
@@ -21,10 +20,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logTickMsg:
-		if m.screen != screenLogs || m.logTailer == nil {
+		if m.screen != screenLogs {
 			return m, nil
 		}
-		return m, tea.Batch(viewLogsCmd(m.logTailer, m.logName), logTickCmd())
+		return m, tea.Batch(viewLogsCmd(m.backend, m.logTarget), logTickCmd())
 
 	case logPeekMsg:
 		if msg.name == m.selected().name() {
@@ -33,7 +32,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logViewMsg:
-		if m.screen == screenLogs && msg.name == m.logName {
+		if m.screen == screenLogs && msg.name == m.logTarget.Name {
 			m.logView = msg.text
 		}
 		return m, nil
@@ -42,13 +41,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.loadCmd(), tickCmd())
 
 	case loadedMsg:
-		m.rebuild(msg.listings)
 		m.hostStats = msg.hostStats
 		m.hostHistory = appendSample(m.hostHistory, loadFraction(msg.hostStats.Load, msg.hostStats.Cores))
-		if msg.err != nil {
-			m.status = msg.err.Error()
-		}
-		return m, m.onSelectionChange()
+		return m, nil
 
 	case liveTickMsg:
 		return m, tea.Batch(m.liveFetch(), liveTickCmd())
@@ -59,37 +54,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
 		}
 		m.live[msg.name] = entry
+		if !msg.local {
+			m.recordStatus(msg.name, !msg.err)
+		}
 		return m, nil
 
-	case actionMsg:
-		delete(m.tasks, msg.name)
-		m.status = msg.status
-		return m, m.loadCmd()
+	case reachMsg:
+		m.live[msg.name] = liveEntry{at: time.Now(), err: !msg.reached}
+		m.recordStatus(msg.name, msg.reached)
+		return m, nil
 
 	case execDoneMsg:
 		m.status = msg.status
 		if msg.quit {
 			return m, tea.Quit
 		}
-		return m, m.loadCmd()
+		return m, m.onSelectionChange()
 
 	case tea.KeyMsg:
-		switch m.screen {
-		case screenConfirm:
-			return m.updateConfirm(msg)
-		case screenLogs:
+		if m.screen == screenLogs {
 			return m.updateLogs(msg)
-		default:
-			return m.updateList(msg)
 		}
+		return m.updateList(msg)
 	}
-
-	var cmd tea.Cmd
-	m.spinner, cmd = m.spinner.Update(msg)
-	if len(m.tasks) == 0 {
-		return m, nil
-	}
-	return m, cmd
+	return m, nil
 }
 
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -116,39 +104,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "ctrl+l":
 		if it := m.selected(); it.caps.tail {
-			tailer, ok := it.provider.(target.Tailer)
-			if !ok {
-				return m, nil
-			}
 			m.screen = screenLogs
-			m.logName = it.name()
-			m.logTailer = tailer
+			m.logTarget = it.t
 			m.status = ""
-			m.logView = tailer.Tail(it.name(), logScreenLines)
+			m.logView = m.backend.Logs(it.t, logScreenLines)
 			return m, logTickCmd()
-		}
-	case "ctrl+s":
-		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
-			cmd := m.startTask(it.name(), verbStop, stopCmd(it.provider, it.name()))
-			return m, cmd
-		}
-	case "ctrl+r":
-		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
-			cmd := m.startTask(it.name(), verbRestart, restartCmd(it.provider, it.name()))
-			return m, cmd
-		}
-	case "ctrl+a":
-		if it := m.selected(); it.caps.autostart && !m.hasTask(it.name()) {
-			cmd := m.startTask(it.name(), verbAuto, autostartCmd(it.provider, it.name(), !it.autostart))
-			return m, cmd
-		}
-	case "ctrl+x":
-		if it := m.selected(); it.caps.lifecycle && !m.hasTask(it.name()) {
-			m.screen = screenConfirm
-			m.input.SetValue("")
-			m.input.Placeholder = ""
-			m.input.Focus()
-			m.status = ""
 		}
 
 	default:
@@ -163,30 +123,6 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
-}
-
-func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "ctrl+c":
-		m.screen = screenList
-		m.input.Blur()
-		m.status = "aborted"
-		return m, nil
-	case "enter":
-		it := m.selected()
-		confirmed := m.input.Value() == it.name()
-		m.screen = screenList
-		m.input.Blur()
-		if !confirmed {
-			m.status = "aborted"
-			return m, nil
-		}
-		cmd := m.startTask(it.name(), verbDelete, deleteCmd(it.provider, it.name()))
-		return m, cmd
-	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
 }
 
 func (m model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -216,65 +152,4 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 		}
 		return execDoneMsg{quit: !back}
 	})
-}
-
-func stopCmd(provider target.Provider, name string) tea.Cmd {
-	return func() tea.Msg {
-		lifecycle, ok := provider.(target.Lifecycle)
-		if !ok {
-			return actionMsg{name, "stop unsupported for " + name}
-		}
-		if err := lifecycle.Stop(name); err != nil {
-			return actionMsg{name, fmt.Sprintf("stop failed: %v", err)}
-		}
-		return actionMsg{name, "stopped " + name}
-	}
-}
-
-func restartCmd(provider target.Provider, name string) tea.Cmd {
-	return func() tea.Msg {
-		lifecycle, ok := provider.(target.Lifecycle)
-		if !ok {
-			return actionMsg{name, "restart unsupported for " + name}
-		}
-		_ = lifecycle.Stop(name)
-		if err := lifecycle.Start(name, nil); err != nil {
-			return actionMsg{name, fmt.Sprintf("restart failed: %v", err)}
-		}
-		return actionMsg{name, "restarted " + name}
-	}
-}
-
-func autostartCmd(provider target.Provider, name string, on bool) tea.Cmd {
-	return func() tea.Msg {
-		auto, ok := provider.(target.Autostarter)
-		if !ok {
-			return actionMsg{name, "autostart unsupported for " + name}
-		}
-		if err := auto.SetAutostart(name, on); err != nil {
-			return actionMsg{name, fmt.Sprintf("autostart failed: %v", err)}
-		}
-		state := "off"
-		if on {
-			state = "on"
-		}
-		return actionMsg{name, fmt.Sprintf("autostart %s for %s", state, name)}
-	}
-}
-
-func deleteCmd(provider target.Provider, name string) tea.Cmd {
-	return func() tea.Msg {
-		if auto, ok := provider.(target.Autostarter); ok && auto.Autostart(name) {
-			_ = auto.SetAutostart(name, false)
-		}
-		lifecycle, ok := provider.(target.Lifecycle)
-		if !ok {
-			return actionMsg{name, "delete unsupported for " + name}
-		}
-		_ = lifecycle.Stop(name)
-		if err := lifecycle.Delete(name); err != nil {
-			return actionMsg{name, fmt.Sprintf("delete failed: %v", err)}
-		}
-		return actionMsg{name, "deleted " + name}
-	}
 }

@@ -3,7 +3,6 @@ package run
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -22,26 +21,6 @@ func Stream(bin string, args ...string) error {
 	return nil
 }
 
-func StreamTo(w io.Writer, bin string, args ...string) error {
-	cmd := exec.Command(bin, args...)
-	cmd.Stdout = w
-	cmd.Stderr = w
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w", line(bin, args), err)
-	}
-	return nil
-}
-
-func Feed(stdin, bin string, args ...string) (string, error) {
-	cmd := exec.Command(bin, args...)
-	cmd.Stdin = strings.NewReader(stdin)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", line(bin, args), err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
 func Exec(bin string, args ...string) error {
 	path, err := exec.LookPath(bin)
 	if err != nil {
@@ -51,19 +30,24 @@ func Exec(bin string, args ...string) error {
 	return syscall.Exec(path, argv, os.Environ())
 }
 
-func Output(bin string, args ...string) (string, error) {
-	out, err := exec.Command(bin, args...).Output()
+func NonInteractive(limit time.Duration, stdin, bin string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	cmd.Env = append(os.Environ(), "SSH_ASKPASS_REQUIRE=never")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", line(bin, args), err)
+		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w", line(bin, args), err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-func OutputWithin(limit time.Duration, bin string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
-	defer cancel()
-
-	out, err := exec.CommandContext(ctx, bin, args...).Output()
+func Output(bin string, args ...string) (string, error) {
+	out, err := exec.Command(bin, args...).Output()
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", line(bin, args), err)
 	}

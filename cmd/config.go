@@ -8,38 +8,46 @@ import (
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
-const configTemplate = `# uplink config. Every section is optional; drop one and its
-# provider falls back to built-in defaults.
+const configTemplate = `# uplink config. Each target is a machine you can open a shell on.
 #
-# A mode is a name plus a shell payload. The provider supplies the transport,
-# and an empty run lands you in that transport's plain interactive shell.
+# kind   local, vm or remote; only picks the pane and glyph. Exactly one
+#        target is local: this machine, reached without via.
+# via    command that reaches the target. uplink appends one argument, the
+#        mode's shell command, so argv-style tools end in "sh -c".
+# logs   host command whose output fills the log view (ctrl+l).
+# stats  false skips the load, memory and disk probe.
+# modes  ways to enter; the first is the default. A mode without run opens
+#        via alone; back: true returns to the dashboard when it exits.
+#
+# A profile holds shared fields; {name} becomes the target's name.
 
-# local:
-#   modes:
-#     - { name: tmux, run: tmux new-session -A -s host }
-#     - { name: shell }
-#     - { name: top, run: htop, back: true }
-
-# lima:
-#   modes:
-#     - { name: tmux, run: tmux new-session -A -s 0 }
-#     - { name: shell }
-
-# Remotes are the one section that declares what exists. Everything but name is
-# optional: with no ssh the name is used as the destination, so a Host block in
-# ~/.ssh/config can carry the details. A relative identity resolves against this
-# directory, never the working directory.
-# remotes:
-#   - name: box
-#     ssh: me@box.example
-#     identity: ~/.ssh/box
-#     init: <runs first in the login shell, joined to each mode with &&>
+# profiles:
+#   lima:
+#     kind: vm
+#     via: ssh -t -F ~/.lima/{name}/ssh.config lima-{name}
+#     logs: tail -n 500 ~/.lima/{name}/serial.log
 #     modes:
-#       - { name: tmux, run: tmux }
+#       - { name: tmux, run: tmux new-session -A -s 0 }
+#       - { name: shell }
+
+# targets:
+#   - name: host
+#     kind: local
+#     modes:
+#       - { name: tmux, run: tmux new-session -A -s host }
+#       - { name: shell }
+#       - { name: top, run: htop, back: true }
+#   - { name: devbox, profile: lima }
+#   - name: box
+#     kind: remote
+#     via: ssh -t me@box.example
+#     modes:
+#       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
 `
 
@@ -94,20 +102,25 @@ func editor() string {
 
 func checkConfig() error {
 	cfg, loadErr := config.Load()
-	state := "not found, using defaults"
+	state := "not found, only the default host"
 	if cfg.Exists() {
 		state = "loaded"
 	}
 	if loadErr != nil {
-		state = "unreadable, using defaults"
+		state = "unreadable"
 	}
 	ui.Info("config %s (%s)", cfg.Path, state)
 
-	reg, warn := registryFrom(cfg)
-	targets, listErr := reg.All()
-	for _, t := range targets {
+	resolved, problems := target.Load(cfg)
+	for _, t := range resolved {
 		fmt.Println()
-		ui.Info("%s  %s  %s", t.Name, t.Provider, t.Status)
+		ui.Info("%s  %s", t.Name, t.Kind)
+		if len(t.Via) > 0 {
+			ui.Info("  via   %s", target.Quote(t.Via))
+		}
+		if t.Logs != "" {
+			ui.Info("  logs  %s", t.Logs)
+		}
 		for i, mode := range t.Modes {
 			marker := " "
 			if i == 0 {
@@ -121,7 +134,7 @@ func checkConfig() error {
 		}
 	}
 
-	problems := errors.Join(loadErr, warn, listErr)
+	problems = errors.Join(loadErr, problems)
 	if problems != nil {
 		fmt.Println()
 	}

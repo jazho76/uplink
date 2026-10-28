@@ -1,184 +1,324 @@
 package target
 
 import (
-	"errors"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/jazho76/uplink/internal/config"
 )
 
-type stub struct {
-	id      string
-	targets []Target
-	err     error
-}
+const host = `
+  - name: host
+    kind: local
+    modes:
+      - { name: shell }
+`
 
-func (s stub) ID() string { return s.id }
-
-func (s stub) List() ([]Target, error) { return s.targets, s.err }
-
-func named(provider, name string) Target {
-	return Target{Provider: provider, Name: name, Status: StatusRunning}
-}
-
-func TestAllKeepsProviderOrder(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "local", targets: []Target{named("local", "host")}},
-		stub{id: "lima", targets: []Target{named("lima", "forge"), named("lima", "tokyo")}},
-		stub{id: "remote", targets: []Target{named("remote", "dojo")}},
-	)
-	all, err := reg.All()
+func load(t *testing.T, body string) ([]Target, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadFrom(path)
 	if err != nil {
-		t.Fatalf("all: %v", err)
+		t.Fatalf("load config: %v", err)
 	}
-	var got []string
-	for _, target := range all {
-		got = append(got, target.Name)
-	}
-	if want := "host forge tokyo dojo"; strings.Join(got, " ") != want {
-		t.Errorf("order = %q, want %q", strings.Join(got, " "), want)
-	}
+	return Load(cfg)
 }
 
-func TestAllReportsDuplicatesWithoutDroppingTheRest(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "lima", targets: []Target{named("lima", "dojo")}},
-		stub{id: "remote", targets: []Target{named("remote", "dojo"), named("remote", "other")}},
-	)
-	all, err := reg.All()
-	if err == nil {
-		t.Fatal("a name collision must be reported")
-	}
-	if !strings.Contains(err.Error(), "dojo") {
-		t.Errorf("error should name the collision, got %v", err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("want the first claim plus the non-colliding target, got %d", len(all))
-	}
-	if all[0].Provider != "lima" || all[1].Name != "other" {
-		t.Errorf("unexpected survivors: %+v", all)
-	}
-}
-
-func TestAllSurvivesAFailingProvider(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "lima", err: errors.New("limactl exploded")},
-		stub{id: "remote", targets: []Target{named("remote", "dojo")}},
-	)
-	all, err := reg.All()
-	if err == nil || !strings.Contains(err.Error(), "limactl exploded") {
-		t.Fatalf("provider failure should surface, got %v", err)
-	}
-	if len(all) != 1 || all[0].Name != "dojo" {
-		t.Fatalf("healthy providers should still contribute, got %+v", all)
-	}
-}
-
-func TestResolve(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "local", targets: []Target{named("local", "host")}},
-		stub{id: "lima", targets: []Target{named("lima", "forge")}},
-	)
-
-	found, provider, err := reg.Resolve("forge")
+func mustLoad(t *testing.T, body string) []Target {
+	t.Helper()
+	targets, err := load(t, body)
 	if err != nil {
-		t.Fatalf("resolve: %v", err)
+		t.Fatalf("load: %v", err)
 	}
-	if found.Name != "forge" || provider.ID() != "lima" {
-		t.Errorf("resolved %q from %q", found.Name, provider.ID())
-	}
-
-	_, _, err = reg.Resolve("nope")
-	if err == nil {
-		t.Fatal("resolving an unknown target must fail")
-	}
-	for _, want := range []string{"nope", "forge", "host"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q, got %v", want, err)
-		}
-	}
+	return targets
 }
 
-func TestModes(t *testing.T) {
-	bare := Target{}
-	if bare.DefaultMode().Name != "" {
-		t.Errorf("a target with no modes has an empty default")
+func find(t *testing.T, targets []Target, name string) Target {
+	t.Helper()
+	found, err := Resolve(targets, name)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	t2 := Target{Modes: []Mode{{Name: "tmux"}, {Name: "shell"}}}
-	if t2.DefaultMode().Name != "tmux" {
-		t.Errorf("the first mode is the default, got %q", t2.DefaultMode().Name)
-	}
-	if _, ok := t2.Mode("shell"); !ok {
-		t.Errorf("shell should be found by name")
-	}
-	if _, ok := t2.Mode("nope"); ok {
-		t.Errorf("unknown mode must not resolve")
-	}
-	if strings.Join(t2.ModeNames(), ",") != "tmux,shell" {
-		t.Errorf("mode names = %v", t2.ModeNames())
-	}
+	return found
 }
 
-func TestModeCommandQuotesPayloads(t *testing.T) {
+func TestShellWords(t *testing.T) {
 	for _, c := range []struct {
-		argv []string
-		want string
+		in   string
+		want []string
 	}{
-		{argv: []string{"tmux", "new-session", "-dA", "-s", "host", ";", "switch-client", "-t", "host"},
-			want: "tmux new-session -dA -s host ; switch-client -t host"},
-		{argv: []string{"/bin/bash", "-c", "make -j8 && ./run"}, want: `/bin/bash -c 'make -j8 && ./run'`},
-		{argv: nil, want: ""},
+		{in: "ssh -t box", want: []string{"ssh", "-t", "box"}},
+		{in: "  ssh\t box  ", want: []string{"ssh", "box"}},
+		{in: `ssh -o 'ProxyCommand=nc %h %p' box`, want: []string{"ssh", "-o", "ProxyCommand=nc %h %p", "box"}},
+		{in: `docker exec "my box" sh -c`, want: []string{"docker", "exec", "my box", "sh", "-c"}},
+		{in: `a\ b 'it'\''s' ""`, want: []string{"a b", "it's", ""}},
+		{in: "", want: nil},
 	} {
-		if got := (Mode{Argv: c.argv}).Command(); got != c.want {
-			t.Errorf("Command() = %q, want %q", got, c.want)
+		got, err := ShellWords(c.in)
+		if err != nil {
+			t.Errorf("ShellWords(%q): %v", c.in, err)
+			continue
+		}
+		if !slices.Equal(got, c.want) {
+			t.Errorf("ShellWords(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	for _, broken := range []string{`ssh 'box`, `ssh "box`, `ssh box\`} {
+		if _, err := ShellWords(broken); err == nil {
+			t.Errorf("ShellWords(%q) should reject the unterminated input", broken)
 		}
 	}
 }
 
-type sectionedStub struct {
-	stub
-	section Section
-}
-
-func (s sectionedStub) Section() Section { return s.section }
-
-func TestListingsKeepASectionWithNoTargets(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "local", targets: []Target{named("local", "host")}},
-		sectionedStub{stub: stub{id: "lima"}, section: Section{Name: "vms", Placeholder: []string{"no vms"}}},
-	)
-
-	listings := reg.Listings()
-	if len(listings) != 2 {
-		t.Fatalf("every provider gets a listing, got %d", len(listings))
+func TestMissingTargetsFallBackToTheHost(t *testing.T) {
+	targets := mustLoad(t, "")
+	if len(targets) != 1 || !targets[0].Local() || targets[0].Name != "host" {
+		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
-	if got := listings[0].Section.Name; got != "" {
-		t.Errorf("a provider that declares no section has none, got %q", got)
-	}
-
-	vms := listings[1]
-	if vms.Section.Name != "vms" || len(vms.Targets) != 0 {
-		t.Fatalf("a declared section should outlive its targets, got %+v", vms)
-	}
-	if len(vms.Section.Placeholder) != 1 {
-		t.Errorf("the section carries its own placeholder, got %v", vms.Section.Placeholder)
+	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
+		t.Errorf("default host modes = %v", got)
 	}
 }
 
-func TestListingsKeepErrorsWithTheirProvider(t *testing.T) {
-	reg := NewRegistry(
-		stub{id: "lima", err: errors.New("limactl exploded")},
-		stub{id: "remote", targets: []Target{named("remote", "dojo")}},
-	)
+func TestProfileFillsWhatTheTargetLeavesOut(t *testing.T) {
+	targets := mustLoad(t, `
+profiles:
+  lima:
+    kind: vm
+    via: ssh -F ~/.lima/{name}/ssh.config lima-{name}
+    logs: tail ~/.lima/{name}/serial.log
+    modes:
+      - { name: tmux, run: "tmux new-session -A -s {name}" }
+      - { name: shell }
+targets:`+host+`
+  - { name: forge, profile: lima }
+  - name: tokyo
+    profile: lima
+    logs: echo own
+    stats: false
+    modes:
+      - { name: top, run: htop, back: true }
+`)
+	home, _ := os.UserHomeDir()
 
-	listings := reg.Listings()
-	if listings[0].Err == nil || !strings.Contains(listings[0].Err.Error(), "limactl exploded") {
-		t.Errorf("the failing provider should own its error, got %v", listings[0].Err)
+	forge := find(t, targets, "forge")
+	if forge.Kind != KindVM || !forge.Stats {
+		t.Errorf("forge should inherit kind and default to stats, got %+v", forge)
 	}
-	if listings[1].Err != nil {
-		t.Errorf("a healthy provider should stay clean, got %v", listings[1].Err)
+	wantVia := []string{"ssh", "-F", filepath.Join(home, ".lima/forge/ssh.config"), "lima-forge"}
+	if !slices.Equal(forge.Via, wantVia) {
+		t.Errorf("via = %q, want %q", forge.Via, wantVia)
 	}
-	if err := listings.Err(); err == nil || !strings.Contains(err.Error(), "lima") {
-		t.Errorf("the joined error should name the provider, got %v", err)
+	if forge.Logs != "tail ~/.lima/forge/serial.log" {
+		t.Errorf("logs should interpolate the name and leave ~ to the shell, got %q", forge.Logs)
+	}
+	if got := forge.DefaultMode().Argv; !slices.Equal(got, append(wantVia, "tmux new-session -A -s forge")) {
+		t.Errorf("tmux argv = %q", got)
+	}
+	if shell, _ := forge.Mode("shell"); !slices.Equal(shell.Argv, wantVia) {
+		t.Errorf("a mode without run opens via alone, got %q", shell.Argv)
+	}
+
+	tokyo := find(t, targets, "tokyo")
+	if tokyo.Logs != "echo own" || tokyo.Stats {
+		t.Errorf("target fields override the profile, got logs %q stats %v", tokyo.Logs, tokyo.Stats)
+	}
+	if got := tokyo.ModeNames(); !slices.Equal(got, []string{"top"}) {
+		t.Errorf("target modes replace the profile's wholesale, got %v", got)
+	}
+	if top, _ := tokyo.Mode("top"); !top.Back {
+		t.Errorf("back should survive the merge")
+	}
+}
+
+func TestLocalModesRunThroughTheLoginShell(t *testing.T) {
+	t.Setenv("SHELL", "/bin/zsh")
+	targets := mustLoad(t, `
+targets:
+  - name: host
+    kind: local
+    modes:
+      - { name: tmux, run: tmux new-session -A -s host }
+      - { name: shell }
+`)
+	local := find(t, targets, "host")
+	if local.Status != StatusUp {
+		t.Errorf("the local target is always up, got %q", local.Status)
+	}
+	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"/bin/zsh", "-c", "tmux new-session -A -s host"}) {
+		t.Errorf("tmux argv = %q", got)
+	}
+	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"/bin/zsh"}) {
+		t.Errorf("shell argv = %q", shell.Argv)
+	}
+}
+
+func TestModeCommandTravelsAsOneArgument(t *testing.T) {
+	targets := mustLoad(t, `
+targets:`+host+`
+  - name: dojo
+    kind: remote
+    via: ssh -t dojo
+    modes:
+      - { name: tmux, run: "bash -lc 'lc && tmux'" }
+`)
+	argv := find(t, targets, "dojo").DefaultMode().Argv
+	if want := []string{"ssh", "-t", "dojo", "bash -lc 'lc && tmux'"}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %q, want %q", argv, want)
+	}
+	if got := Quote(argv); got != `ssh -t dojo 'bash -lc '\''lc && tmux'\'''` {
+		t.Errorf("the printed command must paste back into a shell, got %s", got)
+	}
+}
+
+func TestInvalidTargetsAreSkippedAndReported(t *testing.T) {
+	targets, err := load(t, `
+targets:`+host+`
+  - name: good
+    kind: remote
+    via: ssh good
+    modes: [{ name: shell }]
+  - name: nokind
+    via: ssh x
+    modes: [{ name: shell }]
+  - name: novia
+    kind: vm
+    modes: [{ name: shell }]
+  - name: noprofile
+    profile: missing
+  - name: nomodes
+    kind: remote
+    via: ssh x
+  - name: dupmodes
+    kind: remote
+    via: ssh x
+    modes: [{ name: a }, { name: a }]
+  - name: badquote
+    kind: remote
+    via: ssh 'x
+    modes: [{ name: shell }]
+  - name: good
+    kind: remote
+    via: ssh other
+    modes: [{ name: shell }]
+  - kind: remote
+    via: ssh x
+    modes: [{ name: shell }]
+`)
+	if err == nil {
+		t.Fatal("every broken target must be reported")
+	}
+	for _, want := range []string{"nokind", "novia", "unknown profile", "nomodes", `duplicate mode "a"`,
+		"badquote", `duplicate target "good"`, "#10"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q:\n%v", want, err)
+		}
+	}
+	var names []string
+	for _, target := range targets {
+		names = append(names, target.Name)
+	}
+	if !slices.Equal(names, []string{"host", "good"}) {
+		t.Errorf("valid targets must survive, got %v", names)
+	}
+	if find(t, targets, "good").Via[1] != "good" {
+		t.Errorf("the first claim on a name wins")
+	}
+}
+
+func TestExactlyOneLocalTarget(t *testing.T) {
+	if _, err := load(t, `
+targets:
+  - name: box
+    kind: remote
+    via: ssh box
+    modes: [{ name: shell }]
+`); err == nil || !strings.Contains(err.Error(), "no target is local") {
+		t.Errorf("a config without the host must be reported, got %v", err)
+	}
+
+	targets, err := load(t, `
+targets:`+host+`
+  - name: other
+    kind: local
+    modes: [{ name: shell }]
+`)
+	if err == nil || !strings.Contains(err.Error(), "only one target can be local") {
+		t.Errorf("a second local target must be reported, got %v", err)
+	}
+	if len(targets) != 1 {
+		t.Errorf("the first local target should survive, got %d", len(targets))
+	}
+
+	if _, err := load(t, `
+targets:
+  - name: host
+    kind: local
+    via: ssh host
+    modes: [{ name: shell }]
+`); err == nil || !strings.Contains(err.Error(), "takes no via") {
+		t.Errorf("a local target with via must be reported, got %v", err)
+	}
+}
+
+func TestLegacySectionsPointAtTheMigration(t *testing.T) {
+	_, err := load(t, `
+lima:
+  modes: [{ name: shell }]
+remotes:
+  - name: box
+`)
+	if err == nil {
+		t.Fatal("legacy sections must be reported")
+	}
+	for _, want := range []string{`"lima"`, `"remotes"`, "README"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %s:\n%v", want, err)
+		}
+	}
+}
+
+func TestResolveListsKnownTargets(t *testing.T) {
+	targets := mustLoad(t, "")
+	if _, err := Resolve(targets, "nope"); err == nil || !strings.Contains(err.Error(), "host") {
+		t.Errorf("an unknown name should list the known targets, got %v", err)
+	}
+}
+
+func TestLogsAreSanitizedAndTrimmed(t *testing.T) {
+	out := System{}.Logs(Target{Logs: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}, 2)
+	if out != "two x\nthree" {
+		t.Errorf("logs = %q", out)
+	}
+	if got := (System{}).Logs(Target{}, 5); got != "" {
+		t.Errorf("a target without logs yields nothing, got %q", got)
+	}
+}
+
+func TestReachableUsesVia(t *testing.T) {
+	up := Target{Kind: KindRemote, Via: []string{"sh", "-c"}}
+	if err := (System{}).Reachable(up); err != nil {
+		t.Errorf("sh -c true should be reachable: %v", err)
+	}
+	down := Target{Kind: KindRemote, Via: []string{"false"}}
+	if err := (System{}).Reachable(down); err == nil {
+		t.Errorf("a failing transport is unreachable")
+	}
+}
+
+func TestStatsFlowThroughVia(t *testing.T) {
+	stats, err := System{}.Stats(Target{Kind: KindRemote, Via: []string{"sh", "-c", "exec sh"}})
+	if err != nil {
+		t.Fatalf("stats through a local shell: %v", err)
+	}
+	if stats.Cores < 1 || stats.MemTotal == 0 {
+		t.Errorf("the probe script should report this machine, got %+v", stats)
 	}
 }

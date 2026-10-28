@@ -25,11 +25,11 @@ awk '/^MemTotal:/{t=$2}/^MemAvailable:/{a=$2}END{print "mem", (t-a)*1024, t*1024
 df -B1 --output=used,size / 2>/dev/null | tail -1 | awk '{print "disk", $1, $2}'
 read u _ < /proc/uptime; echo "uptime $u"`
 
-func Run(transport ...string) (Stats, error) {
+func Run(limit time.Duration, transport ...string) (Stats, error) {
 	if len(transport) == 0 {
 		return Stats{}, errors.New("probe: no transport given")
 	}
-	out, err := run.Feed(script, transport[0], transport[1:]...)
+	out, err := run.NonInteractive(limit, script, transport[0], transport[1:]...)
 	if err != nil {
 		return Stats{}, err
 	}

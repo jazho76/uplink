@@ -26,12 +26,10 @@ const (
 )
 
 var (
-	plainStyle   = lipgloss.NewStyle()
-	rowFill      = lipgloss.NewStyle().Background(ui.Selection)
-	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
+	plainStyle = lipgloss.NewStyle()
+	rowFill    = lipgloss.NewStyle().Background(ui.Selection)
 
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
-	autoMarker = lipgloss.NewStyle().Foreground(ui.Magenta)
 	modeMarker = lipgloss.NewStyle().Foreground(ui.Yellow)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
@@ -60,13 +58,13 @@ func glyph(it item, base lipgloss.Style) string {
 }
 
 func glyphOf(it item) (string, lipgloss.TerminalColor) {
-	switch it.t.Provider {
-	case target.ProviderLocal:
+	switch it.t.Kind {
+	case target.KindLocal:
 		return "⬢", ui.Cyan
-	case target.ProviderRemote:
+	case target.KindRemote:
 		return remoteGlyphOf(it.t.Status)
 	default:
-		if it.running() {
+		if it.up() {
 			return "●", ui.Green
 		}
 		return "○", ui.Comment
@@ -75,9 +73,9 @@ func glyphOf(it item) (string, lipgloss.TerminalColor) {
 
 func remoteGlyphOf(status target.Status) (string, lipgloss.TerminalColor) {
 	switch status {
-	case target.StatusRunning:
+	case target.StatusUp:
 		return "◆", ui.Green
-	case target.StatusUnreachable:
+	case target.StatusDown:
 		return "×", ui.Red
 	default:
 		return "◇", ui.Comment
@@ -283,20 +281,10 @@ func (m model) specFields(it item) []field {
 	if command := m.mode().Command(); command != "" {
 		fields = append(fields, field{"run", command})
 	}
-	for _, f := range it.t.Detail {
-		fields = append(fields, field{f.Key, f.Value})
-	}
-	if it.caps.autostart {
-		fields = append(fields, field{"auto", autostartLabel(it)})
+	if it.t.Logs != "" {
+		fields = append(fields, field{"logs", it.t.Logs})
 	}
 	return fields
-}
-
-func autostartLabel(it item) string {
-	if it.autostart {
-		return autoMarker.Render("↻ on")
-	}
-	return "off"
 }
 
 type field struct{ key, value string }
@@ -321,7 +309,7 @@ func renderFields(fields []field, width int) string {
 }
 
 func (m model) renderLogs() string {
-	header := titleStyle.Render("logs: " + m.logName)
+	header := titleStyle.Render("logs: " + m.logTarget.Name)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
 	body := labelStyle.Render("no log output")
@@ -341,11 +329,6 @@ func (m model) renderLogs() string {
 }
 
 func (m model) renderFooter() string {
-	if m.screen == screenConfirm {
-		prompt := statusStyle.Render(fmt.Sprintf("delete %s? type the name: ", m.selected().name()))
-		return prompt + m.input.View() + "\n"
-	}
-
 	it := m.selected()
 	pairs := [][2]string{{"↵", "connect"}}
 	if len(it.t.Modes) > 1 {
@@ -353,15 +336,6 @@ func (m model) renderFooter() string {
 	}
 	if it.caps.tail {
 		pairs = append(pairs, [2]string{"^l", "logs"})
-	}
-	if it.caps.lifecycle {
-		pairs = append(pairs, [2]string{"^s", "stop"}, [2]string{"^r", "restart"})
-	}
-	if it.caps.autostart {
-		pairs = append(pairs, [2]string{"^a", "auto"})
-	}
-	if it.caps.lifecycle {
-		pairs = append(pairs, [2]string{"^x", "del"})
 	}
 	pairs = append(pairs, [2]string{"q", "quit"})
 
@@ -393,8 +367,7 @@ func (m model) hostSegments() []barSegment {
 		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
 		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
 		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
-		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
-		{text: m.committedSummary(), priority: 3},
+		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 3},
 	}
 }
 
@@ -459,25 +432,6 @@ func spaceEvenly(parts []string, width int) string {
 	}
 	spaced.WriteString(parts[gaps])
 	return spaced.String()
-}
-
-func (m model) committedSummary() string {
-	var vcpu int
-	var memory uint64
-	for _, p := range m.panes {
-		for _, it := range p.items {
-			if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
-				continue
-			}
-			vcpu += it.t.CPUs
-			memory += it.t.Memory
-		}
-	}
-	if vcpu == 0 && memory == 0 {
-		return ""
-	}
-	return labelStyle.Render("committed ") + valueStyle.Render(
-		fmt.Sprintf("%d vCPU · %s", vcpu, humanize.Bytes(memory)))
 }
 
 func rule(title string, width int) string {
