@@ -49,6 +49,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.liveFetch(), liveTickCmd())
 
 	case liveStatsMsg:
+		delete(m.probing, msg.name)
 		entry := liveEntry{stats: msg.stats, at: time.Now(), err: msg.err, history: m.live[msg.name].history}
 		if !msg.err {
 			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
@@ -60,6 +61,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case reachMsg:
+		delete(m.probing, msg.name)
 		m.live[msg.name] = liveEntry{at: time.Now(), err: !msg.reached}
 		m.recordStatus(msg.name, msg.reached)
 		return m, nil

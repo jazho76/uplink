@@ -62,6 +62,7 @@ type model struct {
 	targets     []target.Target
 	backend     target.Backend
 	statuses    map[string]target.Status
+	probing     map[string]bool
 	panes       []pane
 	focus       int
 	modeIdx     int
@@ -114,6 +115,7 @@ func newModel(targets []target.Target, backend target.Backend) model {
 		targets:  targets,
 		backend:  backend,
 		statuses: map[string]target.Status{},
+		probing:  map[string]bool{},
 		live:     map[string]liveEntry{},
 	}
 	m.rebuild()
@@ -364,16 +366,18 @@ func reachCmd(backend target.Backend, t target.Target) tea.Cmd {
 
 func (m model) liveFetch() tea.Cmd {
 	it := m.selected()
-	if it.name() == "" {
+	if it.name() == "" || m.probing[it.name()] {
 		return nil
 	}
 	if e, ok := m.live[it.name()]; ok && time.Since(e.at) < liveInterval {
 		return nil
 	}
-	if it.worthProbing() {
+	switch {
+	case it.worthProbing():
+		m.probing[it.name()] = true
 		return fetchLiveCmd(m.backend, it.t)
-	}
-	if !it.t.Local() {
+	case !it.t.Local():
+		m.probing[it.name()] = true
 		return reachCmd(m.backend, it.t)
 	}
 	return nil

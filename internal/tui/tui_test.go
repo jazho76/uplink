@@ -362,6 +362,25 @@ func TestEveryStatusIsProbed(t *testing.T) {
 	}
 }
 
+func TestSlowProbesNeverStack(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	if m.liveFetch() == nil {
+		t.Fatal("the first probe should go out")
+	}
+	if m.liveFetch() != nil {
+		t.Error("a probe still running must not be joined by another")
+	}
+
+	m = probed(m, "forge", true)
+	m.live = map[string]liveEntry{}
+	if m.liveFetch() == nil {
+		t.Error("once the result lands, the next probe may go out")
+	}
+}
+
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
