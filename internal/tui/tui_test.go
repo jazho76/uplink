@@ -386,6 +386,41 @@ func TestSlowProbesNeverStack(t *testing.T) {
 	}
 }
 
+func TestPendingProbeShowsNoReadings(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+	m.liveFetch()
+
+	preview := ansi.Strip(m.previewBody(60, 30))
+	if strings.Contains(preview, "0.00") || !strings.Contains(preview, "…") {
+		t.Errorf("a probe in flight has no readings yet:\n%s", preview)
+	}
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+		t.Errorf("a probe in flight leaves the status unknown, got %q", got)
+	}
+}
+
+func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
+	m, backend := newTestModel()
+	backend.logs["forge"] = "fresh"
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	m = key(m, "ctrl+l")
+	stale := m.logRound
+	m = key(key(m, "esc"), "ctrl+l")
+
+	next, tick := m.Update(logViewMsg{round: stale, text: "stale"})
+	m = next.(model)
+	if m.logView == "stale" || tick != nil {
+		t.Errorf("a reply from a closed log view must neither land nor reschedule")
+	}
+	if _, tick = m.Update(logTickMsg{round: stale}); tick != nil {
+		t.Errorf("a tick from a closed log view must not fetch again")
+	}
+}
+
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
@@ -656,7 +691,7 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		history = appendSample(history, float64(i%7)/7)
 	}
-	m.live["forge"] = liveEntry{history: history,
+	m.live["forge"] = liveEntry{at: time.Now(), history: history,
 		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
@@ -735,7 +770,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
@@ -756,7 +791,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
+	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
 
 	if got := m.uptimeOf(m.selected()); got == "" {
 		t.Fatalf("a reachable target should report uptime")

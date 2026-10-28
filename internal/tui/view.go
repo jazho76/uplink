@@ -142,8 +142,8 @@ func (m model) logsFor(it item) string {
 }
 
 func (m model) renderLive(name string, width, height int) string {
-	e, ok := m.live[name]
-	if !ok {
+	e := m.live[name]
+	if e.at.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
 	if e.err {
@@ -254,8 +254,8 @@ func unitOf(size string) string {
 }
 
 func (m model) uptimeOf(it item) string {
-	e, ok := m.live[it.name()]
-	if !it.t.Stats || !ok || e.err {
+	e := m.live[it.name()]
+	if !it.t.Stats || e.at.IsZero() || e.err {
 		return ""
 	}
 	if up := humanize.Duration(e.stats.Uptime); up != "" {

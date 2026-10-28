@@ -30,21 +30,15 @@ func Exec(bin string, args ...string) error {
 	return syscall.Exec(path, argv, os.Environ())
 }
 
-func NonInteractive(stdin, bin string, args ...string) (string, error) {
-	return nonInteractive(context.Background(), stdin, bin, args...)
-}
-
-func NonInteractiveWithin(limit time.Duration, stdin, bin string, args ...string) (string, error) {
+func NonInteractive(limit time.Duration, stdin, bin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
-	return nonInteractive(ctx, stdin, bin, args...)
-}
 
-func nonInteractive(ctx context.Context, stdin, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdin = strings.NewReader(stdin)
 	cmd.Env = append(os.Environ(), "SSH_ASKPASS_REQUIRE=never")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
 	if err != nil {

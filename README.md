@@ -233,9 +233,10 @@ target's name. Inside a flow mapping, quote values that contain `{name}`:
 
 Stats come from a small POSIX script piped through `via` into `sh`, so the
 target needs `/proc`; set `stats: false` otherwise, and Uplink only checks that
-`via true` succeeds. Probes and logs run without a terminal and give up after a
-few seconds, so a transport that wants a password shows the target as down
-instead of prompting.
+`via true` succeeds. Probes and logs run without a terminal, so a transport that
+wants a password shows the target as down instead of prompting. Logs give up
+after 2 seconds and probes after 30; add `-o ConnectTimeout=2` to an ssh `via`
+to report an unreachable host sooner.
 
 ### Checking the config
 
@@ -245,8 +246,8 @@ Validate the config and inspect the exact command behind every target and mode:
 uplink config check
 ```
 
-Target names must be unique. An invalid target is skipped and reported, and the
-rest still load.
+Target names must be unique and may only hold letters, digits, `.`, `_`, and
+`-`. An invalid target is skipped and reported, and the rest still load.
 
 ## Upgrade
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -17,7 +18,10 @@ const (
 	namePlaceholder = "{name}"
 )
 
-var legacySections = []string{"local", "lima", "remotes"}
+var (
+	legacySections = []string{"local", "lima", "remotes"}
+	namePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+)
 
 type ModeSpec struct {
 	Name string `yaml:"name"`
@@ -73,12 +77,14 @@ func Load(cfg *config.File) ([]Target, error) {
 
 func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 	var (
-		targets []Target
-		errs    []error
-		seen    = map[string]bool{}
-		locals  int
+		targets       []Target
+		errs          []error
+		seen          = map[string]bool{}
+		locals        int
+		declaredLocal bool
 	)
 	for i, spec := range specs {
+		declaredLocal = declaredLocal || spec.mergedKind(profiles) == KindLocal
 		t, err := resolve(spec, profiles)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), err))
@@ -98,7 +104,7 @@ func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 		seen[t.Name] = true
 		targets = append(targets, t)
 	}
-	if locals == 0 {
+	if !declaredLocal {
 		errs = append(errs, fmt.Errorf("no target is %s; declare the host machine", KindLocal))
 	}
 	return targets, errors.Join(errs...)
@@ -111,9 +117,19 @@ func label(spec Spec, index int) string {
 	return fmt.Sprintf("#%d", index+1)
 }
 
+func (s Spec) mergedKind(profiles map[string]Spec) Kind {
+	if s.Kind == "" {
+		return profiles[s.Profile].Kind
+	}
+	return s.Kind
+}
+
 func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	if spec.Name == "" {
 		return Target{}, errors.New("no name")
+	}
+	if !namePattern.MatchString(spec.Name) {
+		return Target{}, errors.New("name may only hold letters, digits, '.', '_' and '-'")
 	}
 	if spec.Profile != "" {
 		profile, ok := profiles[spec.Profile]
@@ -137,6 +153,9 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	via, err := shellWords(spec.Via)
 	if err != nil {
 		return Target{}, fmt.Errorf("via: %w", err)
+	}
+	if spec.Kind != KindLocal && len(via) == 0 {
+		return Target{}, errors.New("via is required to reach it")
 	}
 
 	t := Target{

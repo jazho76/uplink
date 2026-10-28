@@ -25,15 +25,12 @@ func shellWords(s string) ([]string, error) {
 			} else {
 				current.WriteByte(c)
 			}
+		case quote == '"' && c == '"':
+			quote = 0
+		case quote == '"' && c == '\\' && i+1 < len(s) && strings.IndexByte("$`\"\\\n", s[i+1]) >= 0:
+			escaped = true
 		case quote == '"':
-			switch c {
-			case '"':
-				quote = 0
-			case '\\':
-				escaped = true
-			default:
-				current.WriteByte(c)
-			}
+			current.WriteByte(c)
 		case c == '\\':
 			escaped, inWord = true, true
 		case c == '\'' || c == '"':

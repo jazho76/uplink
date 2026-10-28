@@ -64,6 +64,7 @@ type model struct {
 	status    string
 	screen    screen
 	logTarget target.Target
+	logRound  int
 	logView   string
 	logPeek   peek
 	hostName  string
@@ -256,7 +257,7 @@ func wrap(i, n int) int {
 
 type tickMsg struct{}
 type liveTickMsg struct{}
-type logTickMsg struct{}
+type logTickMsg struct{ round int }
 
 type logPeekMsg struct {
 	name string
@@ -264,8 +265,8 @@ type logPeekMsg struct {
 }
 
 type logViewMsg struct {
-	name string
-	text string
+	round int
+	text  string
 }
 
 type liveStatsMsg struct {
@@ -292,8 +293,8 @@ func liveTickCmd() tea.Cmd {
 	return tea.Tick(liveInterval, func(time.Time) tea.Msg { return liveTickMsg{} })
 }
 
-func logTickCmd() tea.Cmd {
-	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{} })
+func logTickCmd(round int) tea.Cmd {
+	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{round: round} })
 }
 
 func (m model) localTarget() (target.Target, bool) {
@@ -368,8 +369,9 @@ func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
 	}
 }
 
-func viewLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
+func (m model) viewLogsCmd() tea.Cmd {
+	backend, t, round := m.backend, m.logTarget, m.logRound
 	return func() tea.Msg {
-		return logViewMsg{name: t.Name, text: backend.Logs(t, logScreenLines)}
+		return logViewMsg{round: round, text: backend.Logs(t, logScreenLines)}
 	}
 }

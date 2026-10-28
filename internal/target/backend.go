@@ -9,7 +9,10 @@ import (
 	"github.com/jazho76/uplink/internal/run"
 )
 
-const logsTimeout = 2 * time.Second
+const (
+	probeCeiling = 30 * time.Second
+	logsTimeout  = 2 * time.Second
+)
 
 type Backend interface {
 	Stats(Target) (probe.Stats, error)
@@ -23,7 +26,7 @@ func (System) Stats(t Target) (probe.Stats, error) {
 	if t.Local() {
 		return probe.Local(), nil
 	}
-	return probe.Run(t.ArgvFor("sh")...)
+	return probe.Run(probeCeiling, t.ArgvFor("sh")...)
 }
 
 func (System) Reachable(t Target) error {
@@ -31,7 +34,7 @@ func (System) Reachable(t Target) error {
 		return nil
 	}
 	argv := t.ArgvFor("true")
-	_, err := run.NonInteractive("", argv[0], argv[1:]...)
+	_, err := run.NonInteractive(probeCeiling, "", argv[0], argv[1:]...)
 	return err
 }
 
@@ -39,7 +42,7 @@ func (System) Logs(t Target, lines int) string {
 	if t.Logs == "" {
 		return ""
 	}
-	out, err := run.NonInteractiveWithin(logsTimeout, "", "sh", "-c", t.Logs)
+	out, err := run.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs)
 	if err != nil && out == "" {
 		return ""
 	}

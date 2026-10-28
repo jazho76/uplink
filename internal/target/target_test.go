@@ -58,6 +58,7 @@ func TestShellWords(t *testing.T) {
 		{in: `ssh -o 'ProxyCommand=nc %h %p' box`, want: []string{"ssh", "-o", "ProxyCommand=nc %h %p", "box"}},
 		{in: `docker exec "my box" sh -c`, want: []string{"docker", "exec", "my box", "sh", "-c"}},
 		{in: `a\ b 'it'\''s' ""`, want: []string{"a b", "it's", ""}},
+		{in: `"proxy\:1080" "say \"hi\" \\ \$HOME"`, want: []string{`proxy\:1080`, `say "hi" \ $HOME`}},
 		{in: "", want: nil},
 	} {
 		got, err := shellWords(c.in)
@@ -227,6 +228,47 @@ targets:`+host+`
 	}
 	if find(t, targets, "good").Via[1] != "good" {
 		t.Errorf("the first claim on a name wins")
+	}
+}
+
+func TestMalformedNamesAndViaAreRejected(t *testing.T) {
+	_, err := load(t, `
+targets:`+host+`
+  - name: "db:prod"
+    kind: remote
+    via: ssh db
+    modes: [{ name: shell }]
+  - name: "my box"
+    kind: remote
+    via: ssh box
+    modes: [{ name: shell }]
+  - name: blank
+    kind: remote
+    via: "   "
+    modes: [{ name: shell }]
+`)
+	if err == nil {
+		t.Fatal("malformed targets must be reported")
+	}
+	for _, want := range []string{`"db:prod"`, `"my box"`, `"blank": via is required`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %s:\n%v", want, err)
+		}
+	}
+}
+
+func TestBrokenHostIsNotReportedAsMissing(t *testing.T) {
+	_, err := load(t, `
+targets:
+  - name: host
+    kind: local
+    modes: [{ name: a }, { name: a }]
+`)
+	if err == nil || !strings.Contains(err.Error(), "duplicate mode") {
+		t.Fatalf("the real problem must be reported, got %v", err)
+	}
+	if strings.Contains(err.Error(), "declare the host") {
+		t.Errorf("a declared but broken host is not a missing one:\n%v", err)
 	}
 }
 

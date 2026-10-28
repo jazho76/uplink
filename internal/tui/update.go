@@ -20,10 +20,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logTickMsg:
-		if m.screen != screenLogs {
+		if m.screen != screenLogs || msg.round != m.logRound {
 			return m, nil
 		}
-		return m, viewLogsCmd(m.backend, m.logTarget)
+		return m, m.viewLogsCmd()
 
 	case logPeekMsg:
 		if msg.name == m.selected().name() {
@@ -32,11 +32,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logViewMsg:
-		if m.screen != screenLogs || msg.name != m.logTarget.Name {
+		if m.screen != screenLogs || msg.round != m.logRound {
 			return m, nil
 		}
 		m.logView = msg.text
-		return m, logTickCmd()
+		return m, logTickCmd(m.logRound)
 
 	case tickMsg:
 		return m, tea.Batch(m.hostCmd(), tickCmd())
@@ -94,9 +94,10 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if it := m.selected(); it.t.Logs != "" {
 			m.screen = screenLogs
 			m.logTarget = it.t
+			m.logRound++
 			m.status = ""
 			m.logView = m.logsFor(it)
-			return m, viewLogsCmd(m.backend, it.t)
+			return m, m.viewLogsCmd()
 		}
 
 	default:
