@@ -56,9 +56,6 @@ func splitTargetAndMode(spec string) (name, mode string) {
 }
 
 func pickMode(t target.Target, name string) (target.Mode, error) {
-	if len(t.Modes) == 0 {
-		return target.Mode{}, fmt.Errorf("target %q has no launch mode", t.Name)
-	}
 	if name == "" {
 		return t.DefaultMode(), nil
 	}
@@ -66,9 +63,6 @@ func pickMode(t target.Target, name string) (target.Mode, error) {
 	if !ok {
 		return target.Mode{}, fmt.Errorf("target %q has no mode %q; available: %s",
 			t.Name, name, strings.Join(t.ModeNames(), ", "))
-	}
-	if len(mode.Argv) == 0 {
-		return target.Mode{}, fmt.Errorf("mode %q of %q resolves to nothing", name, t.Name)
 	}
 	return mode, nil
 }

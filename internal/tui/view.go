@@ -52,33 +52,25 @@ var (
 			Padding(0, 1)
 )
 
-func glyph(it item, base lipgloss.Style) string {
-	mark, color := glyphOf(it)
+func (m model) glyph(it item, base lipgloss.Style) string {
+	mark, color := glyphOf(it.t.Kind, m.statusOf(it.t))
 	return base.Foreground(color).Render(mark)
 }
 
-func glyphOf(it item) (string, lipgloss.TerminalColor) {
-	switch it.t.Kind {
-	case target.KindLocal:
+func glyphOf(kind target.Kind, s status) (string, lipgloss.TerminalColor) {
+	switch {
+	case kind == target.KindLocal:
 		return "⬢", ui.Cyan
-	case target.KindRemote:
-		return remoteGlyphOf(it.t.Status)
-	default:
-		if it.up() {
-			return "●", ui.Green
-		}
-		return "○", ui.Comment
-	}
-}
-
-func remoteGlyphOf(status target.Status) (string, lipgloss.TerminalColor) {
-	switch status {
-	case target.StatusUp:
+	case kind == target.KindRemote && s == statusUp:
 		return "◆", ui.Green
-	case target.StatusDown:
+	case kind == target.KindRemote && s == statusDown:
 		return "×", ui.Red
-	default:
+	case kind == target.KindRemote:
 		return "◇", ui.Comment
+	case s == statusUp:
+		return "●", ui.Green
+	default:
+		return "○", ui.Comment
 	}
 }
 
@@ -114,10 +106,10 @@ func (m model) previewBody(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := titleStyle.Render(it.name()) + "  " + glyph(it, plainStyle) + " " + string(it.t.Status)
+	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
 	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
 
-	if it.worthProbing() {
+	if it.t.Stats {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.name(), width, height))
 	}
@@ -263,7 +255,7 @@ func unitOf(size string) string {
 
 func (m model) uptimeOf(it item) string {
 	e, ok := m.live[it.name()]
-	if !it.worthProbing() || !ok || e.err {
+	if !it.t.Stats || !ok || e.err {
 		return ""
 	}
 	if up := humanize.Duration(e.stats.Uptime); up != "" {
@@ -334,7 +326,7 @@ func (m model) renderFooter() string {
 	if len(it.t.Modes) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
-	if it.caps.tail {
+	if it.t.Logs != "" {
 		pairs = append(pairs, [2]string{"^l", "logs"})
 	}
 	pairs = append(pairs, [2]string{"q", "quit"})
@@ -359,12 +351,13 @@ type barSegment struct {
 }
 
 func (m model) hostSegments() []barSegment {
-	h := m.hostStats
+	host := m.hostEntry()
+	h := host.stats
 	load := loadFraction(h.Load, h.Cores)
 
 	return []barSegment{
 		{text: titleStyle.Render(m.hostName), priority: 0},
-		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
+		{text: hostGauge("load", sparkline(host.history, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
 		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
 		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
 		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 3},

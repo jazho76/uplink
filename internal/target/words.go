@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-func ShellWords(s string) ([]string, error) {
+func shellWords(s string) ([]string, error) {
 	var (
 		words   []string
 		current strings.Builder

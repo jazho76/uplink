@@ -23,7 +23,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.screen != screenLogs {
 			return m, nil
 		}
-		return m, tea.Batch(viewLogsCmd(m.backend, m.logTarget), logTickCmd())
+		return m, viewLogsCmd(m.backend, m.logTarget)
 
 	case logPeekMsg:
 		if msg.name == m.selected().name() {
@@ -32,38 +32,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case logViewMsg:
-		if m.screen == screenLogs && msg.name == m.logTarget.Name {
-			m.logView = msg.text
+		if m.screen != screenLogs || msg.name != m.logTarget.Name {
+			return m, nil
 		}
-		return m, nil
+		m.logView = msg.text
+		return m, logTickCmd()
 
 	case tickMsg:
-		return m, tea.Batch(m.loadCmd(), tickCmd())
-
-	case loadedMsg:
-		m.hostStats = msg.hostStats
-		m.hostHistory = appendSample(m.hostHistory, loadFraction(msg.hostStats.Load, msg.hostStats.Cores))
-		return m, nil
+		return m, tea.Batch(m.hostCmd(), tickCmd())
 
 	case liveTickMsg:
 		return m, tea.Batch(m.liveFetch(), liveTickCmd())
 
 	case liveStatsMsg:
-		delete(m.probing, msg.name)
 		entry := liveEntry{stats: msg.stats, at: time.Now(), err: msg.err, history: m.live[msg.name].history}
 		if !msg.err {
 			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
 		}
 		m.live[msg.name] = entry
-		if !msg.local {
-			m.recordStatus(msg.name, !msg.err)
-		}
-		return m, nil
-
-	case reachMsg:
-		delete(m.probing, msg.name)
-		m.live[msg.name] = liveEntry{at: time.Now(), err: !msg.reached}
-		m.recordStatus(msg.name, msg.reached)
 		return m, nil
 
 	case execDoneMsg:
@@ -105,12 +91,12 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.connect()
 
 	case "ctrl+l":
-		if it := m.selected(); it.caps.tail {
+		if it := m.selected(); it.t.Logs != "" {
 			m.screen = screenLogs
 			m.logTarget = it.t
 			m.status = ""
-			m.logView = m.backend.Logs(it.t, logScreenLines)
-			return m, logTickCmd()
+			m.logView = m.logsFor(it)
+			return m, viewLogsCmd(m.backend, it.t)
 		}
 
 	default:

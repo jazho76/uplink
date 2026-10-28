@@ -15,7 +15,6 @@ var (
 )
 
 var (
-	stepStyle  = lipgloss.NewStyle().Bold(true).Foreground(Blue)
 	infoStyle  = lipgloss.NewStyle()
 	errorStyle = lipgloss.NewStyle().Foreground(Red)
 )

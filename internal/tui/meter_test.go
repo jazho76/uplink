@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -133,9 +134,16 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 	}
 }
 
+func glados() model {
+	host := hostTarget()
+	return model{hostName: "GLaDOS", targets: []target.Target{host}, live: map[string]liveEntry{
+		host.Name: {stats: probe.Stats{Cores: 12, Load: 4.1,
+			MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}},
+	}}
+}
+
 func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
-	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
-		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}}
+	m := glados()
 
 	for _, width := range []int{minWidth, 60, 80, 100, 140} {
 		bar := m.renderHostBar(width)
@@ -193,8 +201,7 @@ func TestHostBarSegmentsShareTheSlackEvenly(t *testing.T) {
 }
 
 func TestHostBarReachesBothEdges(t *testing.T) {
-	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
-		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}}
+	m := glados()
 
 	for _, width := range []int{60, 100, 160} {
 		interior := strings.Split(ansi.Strip(m.renderHostBar(width)), "\n")[1]
@@ -207,9 +214,8 @@ func TestHostBarReachesBothEdges(t *testing.T) {
 func TestSelectedRowFillsEveryCell(t *testing.T) {
 	stylingEnabled(t)
 
-	m := model{modeIdx: 0}
-	it := item{t: target.Target{Kind: target.KindVM, Name: "kyoto",
-		Status: target.StatusUp}, key: 'k'}
+	m := model{live: map[string]liveEntry{"kyoto": {at: time.Now()}}}
+	it := item{t: target.Target{Kind: target.KindVM, Name: "kyoto"}, key: 'k'}
 
 	const width = 30
 	filled := m.paneRow(it, true, true, width)

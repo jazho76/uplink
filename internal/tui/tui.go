@@ -16,25 +16,24 @@ const (
 	maxLogPeek   = 300
 )
 
-var kindTitles = []struct {
-	kind  target.Kind
-	title string
-}{
-	{target.KindLocal, "local"},
-	{target.KindVM, "vms"},
-	{target.KindRemote, "remotes"},
+var kindTitles = map[target.Kind]string{
+	target.KindLocal:  "local",
+	target.KindVM:     "vms",
+	target.KindRemote: "remotes",
 }
 
-type caps struct {
-	tail  bool
-	probe bool
-}
+type status string
+
+const (
+	statusUnknown status = "unknown"
+	statusUp      status = "up"
+	statusDown    status = "down"
+)
 
 type item struct {
 	t        target.Target
 	launcher bool
 	key      rune
-	caps     caps
 }
 
 func (i item) name() string { return i.t.Name }
@@ -46,10 +45,6 @@ func (i item) label() string {
 	return i.t.Name
 }
 
-func (i item) up() bool { return i.t.Up() }
-
-func (i item) worthProbing() bool { return i.caps.probe }
-
 type screen int
 
 const (
@@ -58,25 +53,21 @@ const (
 )
 
 type model struct {
-	self        string
-	targets     []target.Target
-	backend     target.Backend
-	statuses    map[string]target.Status
-	probing     map[string]bool
-	panes       []pane
-	focus       int
-	modeIdx     int
-	width       int
-	height      int
-	status      string
-	screen      screen
-	logTarget   target.Target
-	logView     string
-	logPeek     peek
-	hostName    string
-	hostStats   probe.Stats
-	hostHistory []float64
-	live        map[string]liveEntry
+	self      string
+	targets   []target.Target
+	backend   target.Backend
+	panes     []pane
+	focus     int
+	modeIdx   int
+	width     int
+	height    int
+	status    string
+	screen    screen
+	logTarget target.Target
+	logView   string
+	logPeek   peek
+	hostName  string
+	live      map[string]liveEntry
 }
 
 type peek struct {
@@ -90,6 +81,7 @@ type liveEntry struct {
 	history []float64
 	at      time.Time
 	err     bool
+	pending bool
 }
 
 func Run(targets []target.Target, backend target.Backend, configWarning error) error {
@@ -112,44 +104,52 @@ func Run(targets []target.Target, backend target.Backend, configWarning error) e
 
 func newModel(targets []target.Target, backend target.Backend) model {
 	m := model{
-		targets:  targets,
-		backend:  backend,
-		statuses: map[string]target.Status{},
-		probing:  map[string]bool{},
-		live:     map[string]liveEntry{},
+		targets: targets,
+		backend: backend,
+		live:    map[string]liveEntry{},
 	}
 	m.rebuild()
 	return m
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), m.onSelectionChange(), tickCmd(), liveTickCmd())
+	return tea.Batch(m.hostCmd(), m.onSelectionChange(), tickCmd(), liveTickCmd())
 }
 
 func (m *model) rebuild() {
-	groups := make([]group, 0, len(kindTitles))
-	for _, k := range kindTitles {
-		g := group{section: k.title}
+	var panes []pane
+	for _, kind := range target.Kinds {
+		p := pane{section: kindTitles[kind]}
 		for _, t := range m.targets {
-			if t.Kind != k.kind {
-				continue
+			if t.Kind == kind {
+				p.items = append(p.items, launcherRows(item{t: t})...)
 			}
-			if status, ok := m.statuses[t.Name]; ok {
-				t.Status = status
-			}
-			g.items = append(g.items, rowsFor(t)...)
 		}
-		groups = append(groups, g)
+		if len(p.items) > 0 {
+			panes = append(panes, p)
+		}
 	}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
 
 	previouslyFocused := m.focusedSection()
-	m.panes = carryOverCursors(groupPanes(groups), m.panes)
+	m.panes = carryOverCursors(panes, m.panes)
 	m.focus = paneToFocus(m.panes, previouslyFocused)
 }
 
-func rowsFor(t target.Target) []item {
-	it := item{t: t, caps: caps{tail: t.Logs != "", probe: t.Stats}}
-	return launcherRows(it)
+func (m model) statusOf(t target.Target) status {
+	if t.Local() {
+		return statusUp
+	}
+	e, ok := m.live[t.Name]
+	switch {
+	case !ok || e.at.IsZero():
+		return statusUnknown
+	case e.err:
+		return statusDown
+	default:
+		return statusUp
+	}
 }
 
 func launcherRows(it item) []item {
@@ -179,12 +179,7 @@ func carryOverCursors(fresh, previous []pane) []pane {
 }
 
 func paneToFocus(panes []pane, section string) int {
-	if i := slices.IndexFunc(panes, func(p pane) bool {
-		return p.section == section && len(p.items) > 0
-	}); i >= 0 {
-		return i
-	}
-	return max(slices.IndexFunc(panes, func(p pane) bool { return len(p.items) > 0 }), 0)
+	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
 }
 
 func (m model) focusedPane() (pane, bool) {
@@ -232,24 +227,11 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 		return m.focusItem(m.focus, to)
 	}
 
-	next, ok := nextPaneWithItems(m.panes, m.focus, delta)
-	if !ok {
-		return nil
-	}
+	next := wrap(m.focus+delta, len(m.panes))
 	if delta < 0 {
 		return m.focusItem(next, len(m.panes[next].items)-1)
 	}
 	return m.focusItem(next, 0)
-}
-
-func nextPaneWithItems(panes []pane, from, step int) (int, bool) {
-	for moved := 1; moved <= len(panes); moved++ {
-		next := wrap(from+moved*step, len(panes))
-		if len(panes[next].items) > 0 {
-			return next, true
-		}
-	}
-	return 0, false
 }
 
 func (m *model) focusItem(inPane, cursor int) tea.Cmd {
@@ -266,18 +248,6 @@ func (m *model) focusItem(inPane, cursor int) tea.Cmd {
 	m.panes[inPane] = landed
 	m.focus, m.modeIdx = inPane, 0
 	return m.onSelectionChange()
-}
-
-func (m *model) recordStatus(name string, reached bool) {
-	status := target.StatusDown
-	if reached {
-		status = target.StatusUp
-	}
-	if m.statuses[name] == status {
-		return
-	}
-	m.statuses[name] = status
-	m.rebuild()
 }
 
 func wrap(i, n int) int {
@@ -300,7 +270,6 @@ type logViewMsg struct {
 
 type liveStatsMsg struct {
 	name  string
-	local bool
 	stats probe.Stats
 	err   bool
 }
@@ -308,10 +277,6 @@ type liveStatsMsg struct {
 type reachMsg struct {
 	name    string
 	reached bool
-}
-
-type loadedMsg struct {
-	hostStats probe.Stats
 }
 
 type execDoneMsg struct {
@@ -339,48 +304,47 @@ func (m model) localTarget() (target.Target, bool) {
 	return m.targets[i], true
 }
 
-func (m model) loadCmd() tea.Cmd {
+func (m model) hostCmd() tea.Cmd {
 	host, ok := m.localTarget()
 	if !ok {
 		return nil
 	}
-	backend := m.backend
-	return func() tea.Msg {
-		stats, _ := backend.Stats(host)
-		return loadedMsg{hostStats: stats}
-	}
+	return fetchLiveCmd(m.backend, host)
+}
+
+func (m model) hostEntry() liveEntry {
+	host, _ := m.localTarget()
+	return m.live[host.Name]
 }
 
 func fetchLiveCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
 		stats, err := backend.Stats(t)
-		return liveStatsMsg{name: t.Name, local: t.Local(), stats: stats, err: err != nil}
+		return liveStatsMsg{name: t.Name, stats: stats, err: err != nil}
 	}
 }
 
 func reachCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		return reachMsg{name: t.Name, reached: backend.Reachable(t) == nil}
+		return liveStatsMsg{name: t.Name, err: backend.Reachable(t) != nil}
 	}
 }
 
 func (m model) liveFetch() tea.Cmd {
 	it := m.selected()
-	if it.name() == "" || m.probing[it.name()] {
+	if it.name() == "" || it.t.Local() {
 		return nil
 	}
-	if e, ok := m.live[it.name()]; ok && time.Since(e.at) < liveInterval {
+	e := m.live[it.name()]
+	if e.pending || time.Since(e.at) < liveInterval {
 		return nil
 	}
-	switch {
-	case it.worthProbing():
-		m.probing[it.name()] = true
+	e.pending = true
+	m.live[it.name()] = e
+	if it.t.Stats {
 		return fetchLiveCmd(m.backend, it.t)
-	case !it.t.Local():
-		m.probing[it.name()] = true
-		return reachCmd(m.backend, it.t)
 	}
-	return nil
+	return reachCmd(m.backend, it.t)
 }
 
 func (m model) onSelectionChange() tea.Cmd {
@@ -389,7 +353,7 @@ func (m model) onSelectionChange() tea.Cmd {
 
 func (m model) peekLogs() tea.Cmd {
 	it := m.selected()
-	if !it.caps.tail {
+	if it.t.Logs == "" {
 		return nil
 	}
 	if m.logPeek.name == it.name() && time.Since(m.logPeek.at) < liveInterval {

@@ -1,10 +1,10 @@
 package target
 
 import (
-	"regexp"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/run"
 )
@@ -43,25 +43,7 @@ func (System) Logs(t Target, lines int) string {
 	if err != nil && out == "" {
 		return ""
 	}
-	return lastLines(sanitize(out), lines)
-}
-
-var ansiRe = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b[@-Z\\\\-_]")
-
-func sanitize(s string) string {
-	s = ansiRe.ReplaceAllString(s, "")
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\n':
-			return r
-		case r == '\t':
-			return ' '
-		case r < 0x20 || r == 0x7f:
-			return -1
-		default:
-			return r
-		}
-	}, s)
+	return ansi.Strip(lastLines(out, lines))
 }
 
 func lastLines(s string, n int) string {

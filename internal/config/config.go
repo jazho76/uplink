@@ -61,8 +61,6 @@ func (f *File) Section(name string, into any) (bool, error) {
 	return true, nil
 }
 
-func (f *File) Dir() string { return filepath.Dir(f.Path) }
-
 func (f *File) Exists() bool {
 	_, err := os.Stat(f.Path)
 	return err == nil

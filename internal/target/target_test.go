@@ -60,19 +60,19 @@ func TestShellWords(t *testing.T) {
 		{in: `a\ b 'it'\''s' ""`, want: []string{"a b", "it's", ""}},
 		{in: "", want: nil},
 	} {
-		got, err := ShellWords(c.in)
+		got, err := shellWords(c.in)
 		if err != nil {
-			t.Errorf("ShellWords(%q): %v", c.in, err)
+			t.Errorf("shellWords(%q): %v", c.in, err)
 			continue
 		}
 		if !slices.Equal(got, c.want) {
-			t.Errorf("ShellWords(%q) = %q, want %q", c.in, got, c.want)
+			t.Errorf("shellWords(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 
 	for _, broken := range []string{`ssh 'box`, `ssh "box`, `ssh box\`} {
-		if _, err := ShellWords(broken); err == nil {
-			t.Errorf("ShellWords(%q) should reject the unterminated input", broken)
+		if _, err := shellWords(broken); err == nil {
+			t.Errorf("shellWords(%q) should reject the unterminated input", broken)
 		}
 	}
 }
@@ -149,9 +149,6 @@ targets:
       - { name: shell }
 `)
 	local := find(t, targets, "host")
-	if local.Status != StatusUp {
-		t.Errorf("the local target is always up, got %q", local.Status)
-	}
 	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"/bin/zsh", "-c", "tmux new-session -A -s host"}) {
 		t.Errorf("tmux argv = %q", got)
 	}
@@ -292,9 +289,9 @@ func TestResolveListsKnownTargets(t *testing.T) {
 	}
 }
 
-func TestLogsAreSanitizedAndTrimmed(t *testing.T) {
+func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
 	out := System{}.Logs(Target{Logs: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}, 2)
-	if out != "two x\nthree" {
+	if out != "two\tx\nthree" {
 		t.Errorf("logs = %q", out)
 	}
 	if got := (System{}).Logs(Target{}, 5); got != "" {

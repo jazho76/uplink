@@ -3,10 +3,8 @@ package probe
 import (
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
-	"time"
 )
 
 func Local() Stats {
@@ -14,7 +12,7 @@ func Local() Stats {
 
 	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
 		if f := strings.Fields(string(data)); len(f) > 0 {
-			s.Load, _ = strconv.ParseFloat(f[0], 64)
+			s.Load = atof(f[0])
 		}
 	}
 
@@ -27,9 +25,9 @@ func Local() Stats {
 			}
 			switch f[0] {
 			case "MemTotal:":
-				total = kib(f[1])
+				total = atou(f[1]) * 1024
 			case "MemAvailable:":
-				avail = kib(f[1])
+				avail = atou(f[1]) * 1024
 			}
 		}
 		s.MemTotal = total
@@ -47,16 +45,9 @@ func Local() Stats {
 
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
 		if f := strings.Fields(string(data)); len(f) > 0 {
-			if secs, err := strconv.ParseFloat(f[0], 64); err == nil {
-				s.Uptime = time.Duration(secs) * time.Second
-			}
+			s.Uptime = seconds(f[0])
 		}
 	}
 
 	return s
-}
-
-func kib(s string) uint64 {
-	n, _ := strconv.ParseUint(s, 10, 64)
-	return n * 1024
 }

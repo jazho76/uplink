@@ -40,11 +40,10 @@ func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name
 
 func hostTarget() target.Target {
 	return target.Target{
-		Name:   "host",
-		Kind:   target.KindLocal,
-		Logs:   "journalctl",
-		Stats:  true,
-		Status: target.StatusUp,
+		Name:  "host",
+		Kind:  target.KindLocal,
+		Logs:  "journalctl",
+		Stats: true,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
@@ -56,12 +55,11 @@ func hostTarget() target.Target {
 func vm(name string) target.Target {
 	via := []string{"ssh", "lima-" + name}
 	return target.Target{
-		Name:   name,
-		Kind:   target.KindVM,
-		Via:    via,
-		Logs:   "tail serial.log",
-		Stats:  true,
-		Status: target.StatusUnknown,
+		Name:  name,
+		Kind:  target.KindVM,
+		Via:   via,
+		Logs:  "tail serial.log",
+		Stats: true,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: append(via, "tmux")},
 			{Name: "shell", Argv: via},
@@ -109,7 +107,7 @@ func itemNamed(m model, name string) item {
 }
 
 func load(m model) model {
-	next, _ := m.Update(loadedMsg{hostStats: probe.Stats{Cores: 8, Load: 0.42}})
+	next, _ := m.Update(liveStatsMsg{name: "host", stats: probe.Stats{Cores: 8, Load: 0.42}})
 	return next.(model)
 }
 
@@ -139,12 +137,16 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	quiet.Logs, quiet.Stats = "", false
 	m = load(withTargets(m, vm("forge"), quiet))
 
-	host, forge, dojo := itemNamed(m, "host"), itemNamed(m, "forge"), itemNamed(m, "dojo")
-	if !host.caps.probe || !host.caps.tail || !forge.caps.probe || !forge.caps.tail {
-		t.Errorf("targets with logs and stats expose both: host %+v, forge %+v", host.caps, forge.caps)
+	m = sized(focus(m, "forge"))
+	if !strings.Contains(m.renderFooter(), "logs") || !strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
+		t.Errorf("a target with logs and stats offers both")
 	}
-	if dojo.caps.probe || dojo.caps.tail {
-		t.Errorf("a target without logs or stats exposes neither: %+v", dojo.caps)
+	m = focus(m, "dojo")
+	if strings.Contains(m.renderFooter(), "logs") || strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
+		t.Errorf("a target without logs or stats offers neither")
+	}
+	if m.liveFetch() == nil {
+		t.Errorf("a target without stats is still checked for reachability")
 	}
 }
 
@@ -177,16 +179,16 @@ func TestProbeResultSetsStatus(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 
-	if forge := itemNamed(m, "forge"); forge.t.Status != target.StatusUnknown {
-		t.Fatalf("an unprobed target is unknown, got %q", forge.t.Status)
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+		t.Fatalf("an unprobed target is unknown, got %q", got)
 	}
 	m = probed(m, "forge", true)
 	m = probed(m, "tokyo", false)
-	if forge := itemNamed(m, "forge"); !forge.up() {
-		t.Fatalf("a successful probe marks forge up, got %q", forge.t.Status)
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUp {
+		t.Fatalf("a successful probe marks forge up, got %q", got)
 	}
-	if tokyo := itemNamed(m, "tokyo"); tokyo.t.Status != target.StatusDown {
-		t.Fatalf("a failed probe marks tokyo down, got %q", tokyo.t.Status)
+	if got := m.statusOf(itemNamed(m, "tokyo").t); got != statusDown {
+		t.Fatalf("a failed probe marks tokyo down, got %q", got)
 	}
 
 	m = focus(m, "forge")
@@ -211,8 +213,8 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	m = focus(m, "dojo")
 
 	m = m.withSelectionRefreshed()
-	if !itemNamed(m, "dojo").up() {
-		t.Fatalf("a reachable target without stats is up, got %q", itemNamed(m, "dojo").t.Status)
+	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusUp {
+		t.Fatalf("a reachable target without stats is up, got %q", got)
 	}
 	if strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
 		t.Errorf("a target without stats has no live block")
@@ -221,7 +223,7 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	backend.down["dojo"] = true
 	m.live = map[string]liveEntry{}
 	m = m.withSelectionRefreshed()
-	if got := itemNamed(m, "dojo").t.Status; got != target.StatusDown {
+	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusDown {
 		t.Errorf("an unreachable target is down, got %q", got)
 	}
 }
@@ -309,16 +311,17 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 }
 
 func TestGlyphDistinguishesKindAndState(t *testing.T) {
-	shape := func(kind target.Kind, status target.Status) string {
-		return glyph(item{t: target.Target{Kind: kind, Status: status}}, plainStyle)
+	shape := func(kind target.Kind, s status) string {
+		mark, _ := glyphOf(kind, s)
+		return mark
 	}
 
-	host := shape(target.KindLocal, target.StatusUp)
-	vmUp := shape(target.KindVM, target.StatusUp)
-	vmOff := shape(target.KindVM, target.StatusDown)
-	remoteUp := shape(target.KindRemote, target.StatusUp)
-	remoteDown := shape(target.KindRemote, target.StatusDown)
-	remoteUnprobed := shape(target.KindRemote, target.StatusUnknown)
+	host := shape(target.KindLocal, statusUp)
+	vmUp := shape(target.KindVM, statusUp)
+	vmOff := shape(target.KindVM, statusDown)
+	remoteUp := shape(target.KindRemote, statusUp)
+	remoteDown := shape(target.KindRemote, statusDown)
+	remoteUnprobed := shape(target.KindRemote, statusUnknown)
 
 	distinct := map[string]string{
 		"host vs vm":                  host + vmUp,
@@ -375,9 +378,11 @@ func TestSlowProbesNeverStack(t *testing.T) {
 	}
 
 	m = probed(m, "forge", true)
-	m.live = map[string]liveEntry{}
+	landed := m.live["forge"]
+	landed.at = time.Now().Add(-liveInterval)
+	m.live["forge"] = landed
 	if m.liveFetch() == nil {
-		t.Error("once the result lands, the next probe may go out")
+		t.Error("once the result lands and goes stale, the next probe may go out")
 	}
 }
 
@@ -542,11 +547,13 @@ func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 }
 
 func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
-	panes := groupPanes([]group{
+	panes := []pane{
 		{section: "local", items: []item{named("host")}},
 		{section: "vms", items: []item{named("vault")}},
 		{section: "remotes", items: []item{named("riga"), named("lisbon")}},
-	})
+	}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
 
 	keys := map[string]rune{}
 	for _, p := range panes {
@@ -765,20 +772,20 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 }
 
 func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
-	up := item{t: target.Target{Status: target.StatusUp}}
-	off := item{t: target.Target{Status: target.StatusDown}}
-	unprobed := item{t: target.Target{Status: target.StatusUnknown}}
+	m, _ := newTestModel()
+	up, off, unprobed := item{t: remote("up")}, item{t: remote("off")}, item{t: remote("new")}
+	m = probed(probed(m, "up", true), "off", false)
 
-	if got := paneSummary(pane{items: []item{up, off}}); got != "1 up" {
+	if got := m.paneSummary(pane{items: []item{up, off}}); got != "1 up" {
 		t.Errorf("want %q, got %q", "1 up", got)
 	}
-	if got := paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
+	if got := m.paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
 		t.Errorf("one unprobed member must suppress the count, got %q", got)
 	}
-	if got := paneSummary(pane{items: []item{up}}); got != "" {
+	if got := m.paneSummary(pane{items: []item{up}}); got != "" {
 		t.Errorf("a lone member is its own summary, got %q", got)
 	}
-	if got := paneSummary(pane{}); got != "" {
+	if got := m.paneSummary(pane{}); got != "" {
 		t.Errorf("an empty pane has nothing to count, got %q", got)
 	}
 }
@@ -896,7 +903,7 @@ func TestLogsScreenToggle(t *testing.T) {
 	m = sized(load(m))
 	m = focus(m, "forge")
 
-	m = key(m, "ctrl+l")
+	m = keyThenApply(m, "ctrl+l")
 	if m.screen != screenLogs {
 		t.Fatalf("ctrl+l on a vm should open the log pager")
 	}
@@ -913,7 +920,7 @@ func TestLogsScreenToggle(t *testing.T) {
 	}
 
 	backend.logs["forge"] = ""
-	m = key(m, "ctrl+l")
+	m = keyThenApply(m, "ctrl+l")
 	if !strings.Contains(m.View(), "no log output") {
 		t.Errorf("a target with nothing to tail should say so:\n%s", m.View())
 	}
@@ -964,7 +971,10 @@ func named(name string) item {
 }
 
 func panesOf(items ...item) []pane {
-	return groupPanes([]group{{section: "pane", items: items}})
+	panes := []pane{{section: "pane", items: items}}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
+	return panes
 }
 
 func focus(m model, name string) model {
@@ -998,6 +1008,11 @@ func applyCmd(m model, cmd tea.Cmd) model {
 		m = next.(model)
 	}
 	return m
+}
+
+func keyThenApply(m model, s string) model {
+	next, cmd := m.Update(tea.KeyMsg{Type: specialKeys[s]})
+	return applyCmd(next.(model), cmd)
 }
 
 func key(m model, s string) model {
@@ -1097,8 +1112,9 @@ func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
 }
 
 func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
-	up := item{t: target.Target{Status: target.StatusUp}, launcher: true}
-	if got := paneSummary(pane{items: []item{up, up, up}}); got != "" {
+	m, _ := newTestModel()
+	up := item{t: hostTarget(), launcher: true}
+	if got := m.paneSummary(pane{items: []item{up, up, up}}); got != "" {
 		t.Errorf("launch rows are one machine, not three, got %q", got)
 	}
 }

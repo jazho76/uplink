@@ -3,7 +3,7 @@ package target
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -15,34 +15,22 @@ const (
 	KindRemote Kind = "remote"
 )
 
-var kinds = []Kind{KindLocal, KindVM, KindRemote}
-
-type Status string
-
-const (
-	StatusUnknown Status = "unknown"
-	StatusUp      Status = "up"
-	StatusDown    Status = "down"
-)
+var Kinds = []Kind{KindLocal, KindVM, KindRemote}
 
 type Mode struct {
 	Name string
-	Run  string
 	Argv []string
 	Back bool
 }
 
 type Target struct {
-	Name   string
-	Kind   Kind
-	Via    []string
-	Logs   string
-	Stats  bool
-	Modes  []Mode
-	Status Status
+	Name  string
+	Kind  Kind
+	Via   []string
+	Logs  string
+	Stats bool
+	Modes []Mode
 }
-
-func (t Target) Up() bool { return t.Status == StatusUp }
 
 func (t Target) Local() bool { return t.Kind == KindLocal }
 
@@ -107,15 +95,13 @@ func Quote(argv []string) string {
 }
 
 func Resolve(targets []Target, name string) (Target, error) {
-	for _, t := range targets {
-		if t.Name == name {
-			return t, nil
-		}
+	if i := slices.IndexFunc(targets, func(t Target) bool { return t.Name == name }); i >= 0 {
+		return targets[i], nil
 	}
 	names := make([]string, 0, len(targets))
 	for _, t := range targets {
 		names = append(names, t.Name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return Target{}, fmt.Errorf("no such target %q; known targets: %s", name, strings.Join(names, ", "))
 }

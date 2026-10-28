@@ -124,7 +124,7 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	}
 	spec = spec.interpolate()
 
-	if !slices.Contains(kinds, spec.Kind) {
+	if !slices.Contains(Kinds, spec.Kind) {
 		return Target{}, fmt.Errorf("kind must be one of %s", kindList())
 	}
 	if spec.Kind == KindLocal && spec.Via != "" {
@@ -134,21 +134,17 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 		return Target{}, errors.New("via is required to reach it")
 	}
 
-	via, err := ShellWords(spec.Via)
+	via, err := shellWords(spec.Via)
 	if err != nil {
 		return Target{}, fmt.Errorf("via: %w", err)
 	}
 
 	t := Target{
-		Name:   spec.Name,
-		Kind:   spec.Kind,
-		Via:    expandHome(via),
-		Logs:   spec.Logs,
-		Stats:  spec.Stats == nil || *spec.Stats,
-		Status: StatusUnknown,
-	}
-	if t.Local() {
-		t.Status = StatusUp
+		Name:  spec.Name,
+		Kind:  spec.Kind,
+		Via:   expandHome(via),
+		Logs:  spec.Logs,
+		Stats: spec.Stats == nil || *spec.Stats,
 	}
 
 	modes, err := t.modes(spec.Modes)
@@ -204,7 +200,7 @@ func (t Target) modes(specs []ModeSpec) ([]Mode, error) {
 			return nil, fmt.Errorf("duplicate mode %q", s.Name)
 		}
 		seen[s.Name] = true
-		modes = append(modes, Mode{Name: s.Name, Run: s.Run, Argv: t.ArgvFor(s.Run), Back: s.Back})
+		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(s.Run), Back: s.Back})
 	}
 	return modes, nil
 }
@@ -228,8 +224,8 @@ func expandHome(words []string) []string {
 }
 
 func kindList() string {
-	names := make([]string, len(kinds))
-	for i, k := range kinds {
+	names := make([]string, len(Kinds))
+	for i, k := range Kinds {
 		names[i] = string(k)
 	}
 	return strings.Join(names, ", ")
