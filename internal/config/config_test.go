@@ -131,21 +131,6 @@ func TestWrongSectionShapeNamesTheSection(t *testing.T) {
 	}
 }
 
-func TestDirIsWhereRelativePathsResolve(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, fileName)
-	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	f, err := LoadFrom(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f.Dir() != dir {
-		t.Errorf("Dir() = %q, want %q", f.Dir(), dir)
-	}
-}
-
 func TestPathHonorsXDGConfigHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if got, want := Path(), filepath.Join("/xdg", "uplink", fileName); got != want {

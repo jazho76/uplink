@@ -2,13 +2,10 @@ package tui
 
 import (
 	"errors"
-	"io"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -17,82 +14,85 @@ import (
 	"github.com/jazho76/uplink/internal/target"
 )
 
-type fakeHost struct{}
+type fakeBackend struct {
+	logs map[string]string
+	down map[string]bool
+}
 
-func (fakeHost) ID() string { return target.ProviderLocal }
+func (f *fakeBackend) Stats(t target.Target) (probe.Stats, error) {
+	if f.down[t.Name] {
+		return probe.Stats{}, errBoom{}
+	}
+	if t.Local() {
+		return probe.Stats{Cores: 8, Load: 0.42, MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
+	}
+	return probe.Stats{Load: 0.10}, nil
+}
 
-func (f fakeHost) List() ([]target.Target, error) {
-	return []target.Target{{
-		Provider: target.ProviderLocal,
-		Name:     "host",
-		Status:   target.StatusRunning,
+func (f *fakeBackend) Reachable(t target.Target) error {
+	if f.down[t.Name] {
+		return errBoom{}
+	}
+	return nil
+}
+
+func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name] }
+
+func hostTarget() target.Target {
+	return target.Target{
+		Name:  "host",
+		Kind:  target.KindLocal,
+		Logs:  "journalctl",
+		Stats: true,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
 			{Name: "top", Argv: []string{"/bin/sh", "-c", "htop"}, Back: true},
 		},
-		Detail: []target.Field{{Key: "os", Value: "Linux"}},
-	}}, nil
+	}
 }
 
-func (fakeHost) Tail(string, int) string { return "journal line" }
-
-func (fakeHost) Probe(string) (probe.Stats, error) {
-	return probe.Stats{Cores: 8, Load: 0.42, MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
-}
-
-type fakeVMs struct {
-	targets []target.Target
-	logs    string
-}
-
-func (fakeVMs) ID() string { return target.ProviderLima }
-
-func (*fakeVMs) Section() target.Section {
-	return target.Section{Name: "vms", Placeholder: []string{"no vms", "uplink vm create <template>"}}
-}
-
-func (f *fakeVMs) List() ([]target.Target, error) { return f.targets, nil }
-
-func (f *fakeVMs) Start(string, io.Writer) error { return nil }
-func (f *fakeVMs) Stop(string) error             { return nil }
-func (f *fakeVMs) Delete(string) error           { return nil }
-
-func (f *fakeVMs) Autostart(string) bool             { return false }
-func (f *fakeVMs) SetAutostart(string, bool) error   { return nil }
-func (f *fakeVMs) Tail(string, int) string           { return f.logs }
-func (f *fakeVMs) Probe(string) (probe.Stats, error) { return probe.Stats{Load: 0.10}, nil }
-
-func vm(name, status string) target.Target {
+func vm(name string) target.Target {
+	via := []string{"ssh", "lima-" + name}
 	return target.Target{
-		Provider: target.ProviderLima,
-		Section:  "vms",
-		Name:     name,
-		Status:   target.Status(status),
-		CPUs:     6,
-		Memory:   12 << 30,
+		Name:  name,
+		Kind:  target.KindVM,
+		Via:   via,
+		Logs:  "tail serial.log",
+		Stats: true,
 		Modes: []target.Mode{
-			{Name: "tmux", Argv: []string{"limactl", "shell", name}},
-			{Name: "shell", Argv: []string{"limactl", "shell", name}},
-			{Name: "top", Argv: []string{"limactl", "shell", name, "--", "htop"}, Back: true},
+			{Name: "tmux", Argv: append(via, "tmux")},
+			{Name: "shell", Argv: via},
+			{Name: "top", Argv: append(via, "htop"), Back: true},
 		},
-		Detail: []target.Field{{Key: "template", Value: name + "_vm"}},
 	}
 }
 
-func newTestModel() (model, *fakeVMs) {
-	vms := &fakeVMs{targets: []target.Target{vm("forge", "stopped"), vm("tokyo", "stopped")}}
-	m := model{
-		self:     "/tmp/uplink",
-		reg:      target.NewRegistry(fakeHost{}, vms),
-		spinner:  spinner.New(),
-		input:    textinput.New(),
-		hostName: "testhost",
-		live:     map[string]liveEntry{},
-		tasks:    map[string]string{},
+func remote(name string) target.Target {
+	t := vm(name)
+	t.Kind = target.KindRemote
+	return t
+}
+
+func newTestModel() (model, *fakeBackend) {
+	backend := &fakeBackend{
+		logs: map[string]string{"host": "journal line"},
+		down: map[string]bool{},
 	}
-	m.rebuild(nil)
-	return m, vms
+	m := newModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
+	m.self, m.hostName = "/tmp/uplink", "testhost"
+	return m, backend
+}
+
+func withTargets(m model, targets ...target.Target) model {
+	m.targets = append([]target.Target{hostTarget()}, targets...)
+	m.rebuild()
+	return m
+}
+
+func probed(m model, name string, up bool) model {
+	next, _ := m.Update(liveStatsMsg{name: name, stats: probe.Stats{Cores: 4}, err: !up})
+	return next.(model)
 }
 
 func itemNamed(m model, name string) item {
@@ -107,16 +107,8 @@ func itemNamed(m model, name string) item {
 }
 
 func load(m model) model {
-	next, _ := m.Update(loadedMsg{listings: m.reg.Listings(), hostStats: probe.Stats{Cores: 8, Load: 0.42}})
+	next, _ := m.Update(liveStatsMsg{name: "host", stats: probe.Stats{Cores: 8, Load: 0.42}})
 	return next.(model)
-}
-
-func listed(targets ...target.Target) target.Listings {
-	return target.Listings{{Provider: target.ProviderLima, Targets: targets}}
-}
-
-func panesOf(items ...item) []pane {
-	return groupPanes([]group{{items: items}})
 }
 
 func sized(m model) model {
@@ -131,69 +123,77 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 		t.Fatalf("want a local and a vms pane, got %d", len(m.panes))
 	}
 	local, vms := m.panes[0], m.panes[1]
-	if local.items[0].t.Provider != target.ProviderLocal {
-		t.Fatalf("the first pane should come from the local provider, got %q", local.items[0].t.Provider)
+	if !local.items[0].t.Local() {
+		t.Fatalf("the first pane should hold the local target, got %q", local.items[0].t.Kind)
 	}
 	if vms.items[0].name() != "forge" || vms.items[1].name() != "tokyo" {
 		t.Fatalf("unexpected vm order: %q %q", vms.items[0].name(), vms.items[1].name())
 	}
 }
 
-func TestCapabilitiesFollowProvider(t *testing.T) {
+func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m, _ := newTestModel()
-	m = load(m)
+	quiet := remote("dojo")
+	quiet.Logs, quiet.Stats = "", false
+	m = load(withTargets(m, vm("forge"), quiet))
 
-	host, forge := itemNamed(m, "host"), itemNamed(m, "forge")
-	if host.caps.lifecycle || host.caps.autostart {
-		t.Errorf("host should expose no lifecycle or autostart: %+v", host.caps)
+	m = sized(focus(m, "forge"))
+	if !strings.Contains(m.renderFooter(), "logs") || !strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
+		t.Errorf("a target with logs and stats offers both")
 	}
-	if !host.caps.probe || !host.caps.tail {
-		t.Errorf("host should be probeable and carry its journal: %+v", host.caps)
+	m = focus(m, "dojo")
+	if strings.Contains(m.renderFooter(), "logs") || strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
+		t.Errorf("a target without logs or stats offers neither")
 	}
-	if !forge.caps.lifecycle || !forge.caps.autostart || !forge.caps.tail || !forge.caps.probe {
-		t.Errorf("vm should expose every capability: %+v", forge.caps)
+	if m.liveFetch() == nil {
+		t.Errorf("a target without stats is still checked for reachability")
 	}
 }
 
 func TestFooterTracksCapabilities(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
-
-	m = focus(m, "host")
-	host := m.renderFooter()
-	for _, absent := range []string{"stop", "restart", "del"} {
-		if strings.Contains(host, absent) {
-			t.Errorf("host footer should not offer %q: %s", absent, host)
-		}
-	}
-	if !strings.Contains(host, "logs") {
-		t.Errorf("the host carries its journal, so its footer offers logs: %s", host)
-	}
+	quiet := remote("dojo")
+	quiet.Logs = ""
+	m = sized(load(withTargets(m, vm("forge"), quiet)))
 
 	m = focus(m, "forge")
 	vmFooter := m.renderFooter()
-	for _, want := range []string{"connect", "logs", "stop", "restart", "auto", "del", "quit"} {
+	for _, want := range []string{"connect", "logs", "quit"} {
 		if !strings.Contains(vmFooter, want) {
 			t.Errorf("vm footer missing %q: %s", want, vmFooter)
 		}
 	}
+	for _, gone := range []string{"stop", "restart", "auto", "del"} {
+		if strings.Contains(vmFooter, gone) {
+			t.Errorf("lifecycle lives outside uplink, footer offers %q: %s", gone, vmFooter)
+		}
+	}
+
+	m = focus(m, "dojo")
+	if strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf("a target without logs should not offer them: %s", m.renderFooter())
+	}
 }
 
-func TestLoadedMsgSetsStatus(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "stopped")}
+func TestProbeResultSetsStatus(t *testing.T) {
+	m, _ := newTestModel()
 	m = sized(load(m))
 
-	if forge := itemNamed(m, "forge"); !forge.running() {
-		t.Fatalf("forge should be running, got status %q", forge.t.Status)
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+		t.Fatalf("an unprobed target is unknown, got %q", got)
 	}
-	if tokyo := itemNamed(m, "tokyo"); tokyo.t.Status != target.StatusStopped {
-		t.Fatalf("tokyo should be stopped, got %q", tokyo.t.Status)
+	m = probed(m, "forge", true)
+	m = probed(m, "tokyo", false)
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUp {
+		t.Fatalf("a successful probe marks forge up, got %q", got)
+	}
+	if got := m.statusOf(itemNamed(m, "tokyo").t); got != statusDown {
+		t.Fatalf("a failed probe marks tokyo down, got %q", got)
 	}
 
 	m = focus(m, "forge")
 	view := m.View()
-	for _, want := range []string{"forge", "tokyo", "host", "running", "template", "forge_vm", "vms"} {
+	for _, want := range []string{"forge", "tokyo", "host", "up", "lima-forge", "vms"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}
@@ -205,17 +205,26 @@ func TestLoadedMsgSetsStatus(t *testing.T) {
 	}
 }
 
-func TestProviderErrorKeepsTargets(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
+func TestReachabilityStandsInForStats(t *testing.T) {
+	m, backend := newTestModel()
+	quiet := remote("dojo")
+	quiet.Stats = false
+	m = sized(load(withTargets(m, quiet)))
+	m = focus(m, "dojo")
 
-	next, _ := m.Update(loadedMsg{listings: listed(vm("forge", "running")), err: errBoom{}})
-	m = next.(model)
-	if len(m.panes) != 1 || len(m.panes[0].items) != 1 {
-		t.Fatalf("targets from healthy providers should survive, got %d panes", len(m.panes))
+	m = m.withSelectionRefreshed()
+	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusUp {
+		t.Fatalf("a reachable target without stats is up, got %q", got)
 	}
-	if !strings.Contains(m.status, "boom") {
-		t.Errorf("status should surface the provider error, got %q", m.status)
+	if strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
+		t.Errorf("a target without stats has no live block")
+	}
+
+	backend.down["dojo"] = true
+	m.live = map[string]liveEntry{}
+	m = m.withSelectionRefreshed()
+	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusDown {
+		t.Errorf("an unreachable target is down, got %q", got)
 	}
 }
 
@@ -302,16 +311,17 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 }
 
 func TestGlyphDistinguishesKindAndState(t *testing.T) {
-	shape := func(provider string, status target.Status) string {
-		return glyph(item{t: target.Target{Provider: provider, Status: status}}, plainStyle)
+	shape := func(kind target.Kind, s status) string {
+		mark, _ := glyphOf(kind, s)
+		return mark
 	}
 
-	host := shape(target.ProviderLocal, target.StatusRunning)
-	vmUp := shape(target.ProviderLima, target.StatusRunning)
-	vmOff := shape(target.ProviderLima, target.StatusStopped)
-	remoteUp := shape(target.ProviderRemote, target.StatusRunning)
-	remoteDown := shape(target.ProviderRemote, target.StatusUnreachable)
-	remoteUnprobed := shape(target.ProviderRemote, target.StatusUnknown)
+	host := shape(target.KindLocal, statusUp)
+	vmUp := shape(target.KindVM, statusUp)
+	vmOff := shape(target.KindVM, statusDown)
+	remoteUp := shape(target.KindRemote, statusUp)
+	remoteDown := shape(target.KindRemote, statusDown)
+	remoteUnprobed := shape(target.KindRemote, statusUnknown)
 
 	distinct := map[string]string{
 		"host vs vm":                  host + vmUp,
@@ -338,34 +348,83 @@ func TestGlyphDistinguishesKindAndState(t *testing.T) {
 	}
 }
 
-func TestUnknownStatusIsStillProbed(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{
-		{Provider: target.ProviderLima, Name: "fresh", Status: target.StatusUnknown},
-		{Provider: target.ProviderLima, Name: "off", Status: target.StatusStopped},
-	}
+func TestEveryStatusIsProbed(t *testing.T) {
+	m, _ := newTestModel()
 	m = sized(load(m))
+	m = probed(m, "tokyo", false)
 
-	m = focus(m, "fresh")
+	m = focus(m, "forge")
 	if m.liveFetch() == nil {
 		t.Error("an unknown target must be probed, or its status can never resolve")
 	}
 
-	m = focus(m, "off")
+	m = focus(m, "tokyo")
+	m.live = map[string]liveEntry{}
+	if m.liveFetch() == nil {
+		t.Error("a down target must be probed again, or it can never come back up")
+	}
+}
+
+func TestSlowProbesNeverStack(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	if m.liveFetch() == nil {
+		t.Fatal("the first probe should go out")
+	}
 	if m.liveFetch() != nil {
-		t.Error("a stopped target has nothing to probe")
+		t.Error("a probe still running must not be joined by another")
+	}
+
+	m = probed(m, "forge", true)
+	landed := m.live["forge"]
+	landed.at = time.Now().Add(-liveInterval)
+	m.live["forge"] = landed
+	if m.liveFetch() == nil {
+		t.Error("once the result lands and goes stale, the next probe may go out")
+	}
+}
+
+func TestPendingProbeShowsNoReadings(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = focus(m, "forge")
+	m.liveFetch()
+
+	preview := ansi.Strip(m.previewBody(60, 30))
+	if strings.Contains(preview, "0.00") || !strings.Contains(preview, "…") {
+		t.Errorf("a probe in flight has no readings yet:\n%s", preview)
+	}
+	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+		t.Errorf("a probe in flight leaves the status unknown, got %q", got)
+	}
+}
+
+func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
+	m, backend := newTestModel()
+	backend.logs["forge"] = "fresh"
+	m = sized(load(m))
+	m = focus(m, "forge")
+
+	m = key(m, "ctrl+l")
+	stale := m.logRound
+	m = key(key(m, "esc"), "ctrl+l")
+
+	next, tick := m.Update(logViewMsg{round: stale, text: "stale"})
+	m = next.(model)
+	if m.logView == "stale" || tick != nil {
+		t.Errorf("a reply from a closed log view must neither land nor reschedule")
+	}
+	if _, tick = m.Update(logTickMsg{round: stale}); tick != nil {
+		t.Errorf("a tick from a closed log view must not fetch again")
 	}
 }
 
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
-
-	next, _ := m.Update(loadedMsg{
-		listings: listed(vm("forge", "running")),
-		err:      errors.Join(errBoom{}, errBoom{}),
-	})
-	m = next.(model)
+	m.status = errors.Join(errBoom{}, errBoom{}).Error()
 
 	if lines := strings.Count(m.renderFooter(), "\n"); lines != 1 {
 		t.Errorf("footer must stay two rows regardless of error count, got %d newlines", lines)
@@ -436,7 +495,7 @@ func TestPaneKeysDerivedFromSection(t *testing.T) {
 		t.Fatalf("unexpected pane keys: %q %q", m.panes[0].key, m.panes[1].key)
 	}
 	if !strings.Contains(m.View(), "local") {
-		t.Errorf("a sectionless target should land in a pane named for its provider")
+		t.Errorf("the local target should land in a pane named for its kind")
 	}
 }
 
@@ -523,12 +582,13 @@ func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 }
 
 func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
-	panes := panesOf(
-		named(target.ProviderLocal, "local", "host"),
-		named(target.ProviderLima, "vms", "vault"),
-		named(target.ProviderRemote, "remotes", "riga"),
-		named(target.ProviderRemote, "remotes", "lisbon"),
-	)
+	panes := []pane{
+		{section: "local", items: []item{named("host")}},
+		{section: "vms", items: []item{named("vault")}},
+		{section: "remotes", items: []item{named("riga"), named("lisbon")}},
+	}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
 
 	keys := map[string]rune{}
 	for _, p := range panes {
@@ -546,11 +606,7 @@ func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
 }
 
 func TestItemKeysFallThroughWithinPane(t *testing.T) {
-	panes := panesOf(
-		named(target.ProviderRemote, "remotes", "dojo"),
-		named(target.ProviderRemote, "remotes", "dublin"),
-		named(target.ProviderRemote, "remotes", "denver"),
-	)
+	panes := panesOf(named("dojo"), named("dublin"), named("denver"))
 
 	want := []rune{'d', 'u', 'e'}
 	for i, it := range panes[0].items {
@@ -561,12 +617,7 @@ func TestItemKeysFallThroughWithinPane(t *testing.T) {
 }
 
 func TestItemKeyExhaustionLeavesItemUnaddressable(t *testing.T) {
-	panes := panesOf(
-		named(target.ProviderLima, "vms", "ab"),
-		named(target.ProviderLima, "vms", "ba"),
-		named(target.ProviderLima, "vms", "aab"),
-		named(target.ProviderLima, "vms", "jkq"),
-	)
+	panes := panesOf(named("ab"), named("ba"), named("aab"), named("jkq"))
 
 	last := panes[0].items[2]
 	if last.key != 0 {
@@ -632,16 +683,15 @@ func TestLiveGaugesAlignTheirPercentColumn(t *testing.T) {
 }
 
 func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running")}
+	m, _ := newTestModel()
 	m = sized(load(m))
-	m = focus(m, "forge")
+	m = focus(probed(m, "forge", true), "forge")
 
 	var history []float64
 	for i := 0; i < 20; i++ {
 		history = appendSample(history, float64(i%7)/7)
 	}
-	m.live["forge"] = liveEntry{history: history,
+	m.live["forge"] = liveEntry{at: time.Now(), history: history,
 		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
@@ -717,11 +767,10 @@ func TestLoadChartWindowFollowsWhatIsVisible(t *testing.T) {
 }
 
 func TestPreviewLeadsWithLiveData(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running")}
+	m, _ := newTestModel()
 	m = sized(load(m))
-	m = focus(m, "forge")
-	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+	m = focus(probed(m, "forge", true), "forge")
+	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
@@ -738,43 +787,40 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	}
 }
 
-func TestStoppedTargetShowsNoStaleUptime(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running")}
+func TestDownTargetShowsNoStaleUptime(t *testing.T) {
+	m, _ := newTestModel()
 	m = sized(load(m))
-	m = focus(m, "forge")
-	m.live["forge"] = liveEntry{stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
+	m = focus(probed(m, "forge", true), "forge")
+	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
 
 	if got := m.uptimeOf(m.selected()); got == "" {
-		t.Fatalf("a running target should report uptime")
+		t.Fatalf("a reachable target should report uptime")
 	}
 
-	vms.targets = []target.Target{vm("forge", "stopped")}
-	m = load(m)
-	m = focus(m, "forge")
+	m = focus(probed(m, "forge", false), "forge")
 	if got := m.uptimeOf(m.selected()); got != "" {
-		t.Errorf("a stopped target must not show the uptime from its last run, got %q", got)
+		t.Errorf("a down target must not show the uptime from its last probe, got %q", got)
 	}
-	if strings.Contains(ansi.Strip(m.previewBody(60, 20)), "live") {
-		t.Errorf("a stopped target has no live block, so its header has nothing to report")
+	if !strings.Contains(ansi.Strip(m.previewBody(60, 20)), "unavailable") {
+		t.Errorf("a failed probe should say its readings are unavailable")
 	}
 }
 
 func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
-	up := item{t: target.Target{Status: target.StatusRunning}}
-	off := item{t: target.Target{Status: target.StatusStopped}}
-	unprobed := item{t: target.Target{Status: target.StatusUnknown}}
+	m, _ := newTestModel()
+	up, off, unprobed := item{t: remote("up")}, item{t: remote("off")}, item{t: remote("new")}
+	m = probed(probed(m, "up", true), "off", false)
 
-	if got := paneSummary(pane{items: []item{up, off}}); got != "1 up" {
+	if got := m.paneSummary(pane{items: []item{up, off}}); got != "1 up" {
 		t.Errorf("want %q, got %q", "1 up", got)
 	}
-	if got := paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
+	if got := m.paneSummary(pane{items: []item{up, off, unprobed}}); got != "" {
 		t.Errorf("one unprobed member must suppress the count, got %q", got)
 	}
-	if got := paneSummary(pane{items: []item{up}}); got != "" {
+	if got := m.paneSummary(pane{items: []item{up}}); got != "" {
 		t.Errorf("a lone member is its own summary, got %q", got)
 	}
-	if got := paneSummary(pane{}); got != "" {
+	if got := m.paneSummary(pane{}); got != "" {
 		t.Errorf("an empty pane has nothing to count, got %q", got)
 	}
 }
@@ -789,8 +835,7 @@ func TestClipMeasuresDisplayWidth(t *testing.T) {
 }
 
 func TestPaneLetterThenItemLetterSelects(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "running")}
+	m, _ := newTestModel()
 	m = sized(load(m))
 
 	if got := m.selected().name(); got != "host" {
@@ -817,9 +862,8 @@ func TestPaneLetterThenItemLetterSelects(t *testing.T) {
 }
 
 func TestFocusedPaneLetterFallsThroughToItsItems(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running"), vm("vault", "running")}
-	m = sized(load(m))
+	m, _ := newTestModel()
+	m = sized(load(withTargets(m, vm("forge"), vm("vault"))))
 
 	m = key(m, "v")
 	if got := m.selected().name(); got != "forge" {
@@ -869,7 +913,7 @@ func TestPaneScrollFollowsCursor(t *testing.T) {
 func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 	panes := []pane{{items: make([]item, 1)}, {items: make([]item, 2)}, {items: make([]item, 2)}}
 
-	rows := distributeRows(panes, 20, 20)
+	rows := distributeRows(panes, 20)
 	sum := 0
 	for _, r := range rows {
 		sum += r
@@ -881,53 +925,25 @@ func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 		t.Errorf("slack should spread evenly, got %v", rows)
 	}
 
-	for _, r := range distributeRows(panes, 20, 8) {
+	for _, r := range distributeRows(panes, 8) {
 		if r < minPaneRows {
 			t.Errorf("an overfull column must not starve a pane, got %d", r)
 		}
 	}
 }
 
-func TestDeleteConfirmFlow(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "forge")
-
-	m = key(m, "ctrl+x")
-	if m.screen != screenConfirm {
-		t.Fatalf("ctrl+x on a vm should enter the confirm screen")
-	}
-
-	m.input.SetValue("nope")
-	m = key(m, "enter")
-	if m.screen != screenList || m.status != "aborted" {
-		t.Fatalf("mismatched name should abort, got screen=%v status=%q", m.screen, m.status)
-	}
-}
-
-func TestDeleteRejectedWithoutLifecycle(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "host")
-
-	m = key(m, "ctrl+x")
-	if m.screen != screenList {
-		t.Fatalf("ctrl+x on the host should do nothing, got screen %v", m.screen)
-	}
-}
-
 func TestLogsScreenToggle(t *testing.T) {
-	m, vms := newTestModel()
-	vms.logs = "boot line"
+	m, backend := newTestModel()
+	backend.logs["forge"] = "boot line"
 	m = sized(load(m))
 	m = focus(m, "forge")
 
-	m = key(m, "ctrl+l")
+	m = keyThenApply(m, "ctrl+l")
 	if m.screen != screenLogs {
 		t.Fatalf("ctrl+l on a vm should open the log pager")
 	}
-	if m.logName != "forge" {
-		t.Fatalf("log pager should target forge, got %q", m.logName)
+	if m.logTarget.Name != "forge" {
+		t.Fatalf("log pager should target forge, got %q", m.logTarget.Name)
 	}
 	if !strings.Contains(m.View(), "boot line") {
 		t.Errorf("log pager should render the tail")
@@ -938,8 +954,8 @@ func TestLogsScreenToggle(t *testing.T) {
 		t.Fatalf("esc should close the log pager")
 	}
 
-	vms.logs = ""
-	m = key(m, "ctrl+l")
+	backend.logs["forge"] = ""
+	m = keyThenApply(m, "ctrl+l")
 	if !strings.Contains(m.View(), "no log output") {
 		t.Errorf("a target with nothing to tail should say so:\n%s", m.View())
 	}
@@ -957,8 +973,8 @@ func TestTerminalTooSmall(t *testing.T) {
 func TestViewWithinBounds(t *testing.T) {
 	sizes := []struct{ w, h int }{{minWidth, minHeight}, {40, 14}, {80, 24}, {120, 40}, {52, 16}}
 	for _, sz := range sizes {
-		m, vms := newTestModel()
-		vms.logs = strings.Repeat("a log line that is quite long indeed\n", 20)
+		m, backend := newTestModel()
+		backend.logs["forge"] = strings.Repeat("a log line that is quite long indeed\n", 20)
 		next, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
 		m = load(next.(model))
 		m = focus(m, "forge")
@@ -976,72 +992,6 @@ func TestViewWithinBounds(t *testing.T) {
 	}
 }
 
-func TestSpinnerAnimatesOnlyWhileTasksRun(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "forge")
-
-	if _, idle := m.Update(m.spinner.Tick()); idle != nil {
-		t.Errorf("an idle list should not keep rebuilding frames ten times a second")
-	}
-
-	next, started := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	m = next.(model)
-	if m.tasks["forge"] != verbStop {
-		t.Fatalf("ctrl+s should mark forge stopping, got %q", m.tasks["forge"])
-	}
-	if !kicksTheSpinner(started) {
-		t.Errorf("starting a task must set the spinner back in motion")
-	}
-	if _, running := m.Update(m.spinner.Tick()); running == nil {
-		t.Errorf("a running task keeps the spinner ticking")
-	}
-}
-
-func kicksTheSpinner(cmd tea.Cmd) bool {
-	batch, ok := cmd().(tea.BatchMsg)
-	if !ok {
-		return false
-	}
-	for _, queued := range batch {
-		if _, tick := queued().(spinner.TickMsg); tick {
-			return true
-		}
-	}
-	return false
-}
-
-func TestConcurrentTaskGuards(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "forge")
-
-	m = key(m, "ctrl+r")
-	if m.tasks["forge"] != verbRestart {
-		t.Fatalf("ctrl+r should mark forge restarting, got %q", m.tasks["forge"])
-	}
-	m = key(m, "ctrl+s")
-	if m.tasks["forge"] != verbRestart {
-		t.Fatalf("a second action on a busy VM must not change its task")
-	}
-
-	view := m.View()
-	if !strings.Contains(view, verbRestart) {
-		t.Errorf("list should show the inline %q verb", verbRestart)
-	}
-	for _, line := range strings.Split(view, "\n") {
-		if w := lipgloss.Width(line); w > 90 {
-			t.Errorf("inline task overran width: %d", w)
-		}
-	}
-
-	next, _ := m.Update(actionMsg{name: "forge", status: "restarted forge"})
-	m = next.(model)
-	if m.hasTask("forge") {
-		t.Fatalf("actionMsg should clear the task")
-	}
-}
-
 const termenvANSIProfile = 2
 
 func stylingEnabled(t *testing.T) {
@@ -1051,8 +1001,15 @@ func stylingEnabled(t *testing.T) {
 	t.Cleanup(func() { lipgloss.SetColorProfile(previous) })
 }
 
-func named(provider, section, name string) item {
-	return item{t: target.Target{Provider: provider, Section: section, Name: name}}
+func named(name string) item {
+	return item{t: target.Target{Name: name}}
+}
+
+func panesOf(items ...item) []pane {
+	panes := []pane{{section: "pane", items: items}}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
+	return panes
 }
 
 func focus(m model, name string) model {
@@ -1088,6 +1045,11 @@ func applyCmd(m model, cmd tea.Cmd) model {
 	return m
 }
 
+func keyThenApply(m model, s string) model {
+	next, cmd := m.Update(tea.KeyMsg{Type: specialKeys[s]})
+	return applyCmd(next.(model), cmd)
+}
+
 func key(m model, s string) model {
 	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	if special, ok := specialKeys[s]; ok {
@@ -1104,10 +1066,7 @@ var specialKeys = map[string]tea.KeyType{
 	"esc":       tea.KeyEsc,
 	"tab":       tea.KeyTab,
 	"shift+tab": tea.KeyShiftTab,
-	"ctrl+x":    tea.KeyCtrlX,
 	"ctrl+l":    tea.KeyCtrlL,
-	"ctrl+r":    tea.KeyCtrlR,
-	"ctrl+s":    tea.KeyCtrlS,
 }
 
 func TestLocalExpandsToOneRowPerMode(t *testing.T) {
@@ -1157,7 +1116,7 @@ func TestLaunchRowFixesItsMode(t *testing.T) {
 }
 
 func TestLaunchRowsWithoutModesSurvive(t *testing.T) {
-	bare := item{t: target.Target{Provider: target.ProviderLocal, Name: "host"}}
+	bare := item{t: target.Target{Kind: target.KindLocal, Name: "host"}}
 	if rows := launcherRows(bare); len(rows) != 1 || rows[0].launcher {
 		t.Errorf("a modeless host stays one plain row, got %+v", rows)
 	}
@@ -1178,7 +1137,7 @@ func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
 	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}, {launcher: true}}}
 	vms := pane{section: "vms", items: []item{{}, {}}}
 
-	rows := distributeRows([]pane{launcher, vms}, 20, 20)
+	rows := distributeRows([]pane{launcher, vms}, 20)
 	if rows[0] != len(launcher.items)+borderCells {
 		t.Errorf("a launcher pane cannot use extra rows, got %d", rows[0])
 	}
@@ -1188,8 +1147,9 @@ func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
 }
 
 func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
-	up := item{t: target.Target{Status: target.StatusRunning}, launcher: true}
-	if got := paneSummary(pane{items: []item{up, up, up}}); got != "" {
+	m, _ := newTestModel()
+	up := item{t: hostTarget(), launcher: true}
+	if got := m.paneSummary(pane{items: []item{up, up, up}}); got != "" {
 		t.Errorf("launch rows are one machine, not three, got %q", got)
 	}
 }
@@ -1213,8 +1173,7 @@ func TestPreviewShowsWhatEnterWillRun(t *testing.T) {
 }
 
 func TestLogPeekBelongsToItsTarget(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = []target.Target{vm("forge", "running"), vm("tokyo", "running")}
+	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(m, "forge")
 
@@ -1242,130 +1201,17 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	}
 }
 
-func TestDeclaredSectionKeepsItsPaneWhenEmpty(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = nil
-	m = sized(load(m))
+func TestCursorSkipsAnEmptyKind(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(withTargets(m)))
 
-	if len(m.panes) != 2 {
-		t.Fatalf("the vms pane should outlive its last vm, got %d panes", len(m.panes))
+	if len(m.panes) != 1 {
+		t.Fatalf("a kind with no targets gets no pane, got %d panes", len(m.panes))
 	}
-	empty := m.panes[1]
-	if empty.section != "vms" || len(empty.items) != 0 {
-		t.Fatalf("want an empty vms pane, got %q with %d items", empty.section, len(empty.items))
-	}
-	if empty.key != 0 {
-		t.Errorf("an inert pane takes no jump key, got %q", empty.key)
-	}
-	if !strings.Contains(m.View(), "no vms") {
-		t.Error("the empty pane should say why it is empty")
-	}
-}
-
-func TestUndeclaredSectionVanishesWhenEmpty(t *testing.T) {
-	panes := groupPanes([]group{
-		{items: []item{named(target.ProviderLocal, "local", "host")}},
-		{section: "vms", placeholder: []string{"no vms"}},
-		{},
-	})
-
-	if len(panes) != 2 {
-		t.Fatalf("only a declared section survives with no targets, got %d panes", len(panes))
-	}
-	if panes[0].section != "local" || panes[1].section != "vms" {
-		t.Fatalf("want the local and vms panes, got %q and %q", panes[0].section, panes[1].section)
-	}
-	if len(panes[1].placeholder) != 1 {
-		t.Errorf("the declared section should carry its placeholder, got %+v", panes[1])
-	}
-}
-
-func TestCursorSkipsAnEmptyPane(t *testing.T) {
-	m, vms := newTestModel()
-	vms.targets = nil
-	m = sized(load(m))
-
 	for _, want := range []string{"shell", "top", "tmux"} {
 		m = key(m, "down")
 		if got := m.selected().label(); got != want {
 			t.Fatalf("down should reach %q, got %q", want, got)
 		}
-	}
-	if got := m.focusedSection(); got != "local" {
-		t.Errorf("an empty pane must never take the focus, got %q", got)
-	}
-}
-
-func TestFocusLeavesTheSectionItEmptied(t *testing.T) {
-	m, vms := newTestModel()
-	m = sized(load(m))
-	m = focus(m, "forge")
-
-	vms.targets = nil
-	m = load(m)
-
-	if got := m.focusedSection(); got != "local" {
-		t.Errorf("deleting the last vm should hand the focus back, got %q", got)
-	}
-	if m.selected().name() == "" {
-		t.Error("the focus should land on a real target")
-	}
-}
-
-func TestEmptyPaneGetsNoSlack(t *testing.T) {
-	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}}}
-	empty := pane{section: "vms", placeholder: []string{"no vms"}}
-	remotes := pane{section: "remotes", items: []item{{}, {}}}
-
-	rows := distributeRows([]pane{launcher, empty, remotes}, 20, 20)
-	if rows[1] != minPaneRows {
-		t.Errorf("an empty pane should not absorb slack, got %d", rows[1])
-	}
-	if sum := rows[0] + rows[1] + rows[2]; sum != 20 {
-		t.Errorf("the slack should still be spent, got %d of 20", sum)
-	}
-
-	fresh := distributeRows([]pane{launcher, empty}, 20, 20)
-	if fresh[1] != minPaneRows || fresh[0]+fresh[1] != 20 {
-		t.Errorf("with nothing else to grow the launcher takes the slack, got %v", fresh)
-	}
-}
-
-func TestPlaceholderKeepsOnlyTheLinesThatFit(t *testing.T) {
-	m, _ := newTestModel()
-	p := pane{section: "vms", placeholder: []string{"no vms", "uplink vm create <template>"}}
-
-	wide := m.renderPane(p, false, 40, 4)
-	if !strings.Contains(wide, "no vms") || !strings.Contains(wide, "uplink vm create <template>") {
-		t.Errorf("a wide pane shows the whole placeholder, got:\n%s", wide)
-	}
-
-	narrow := m.renderPane(p, false, minPaneColumnW, 4)
-	if !strings.Contains(narrow, "no vms") {
-		t.Errorf("the first placeholder line must survive at %d cols, got:\n%s", minPaneColumnW, narrow)
-	}
-	if strings.Contains(narrow, "uplink") {
-		t.Errorf("a line that does not fit is dropped, not truncated, got:\n%s", narrow)
-	}
-	for _, line := range strings.Split(narrow, "\n") {
-		if got := lipgloss.Width(line); got != minPaneColumnW {
-			t.Errorf("pane line spans %d, want %d", got, minPaneColumnW)
-		}
-	}
-}
-
-func TestPlaceholderStaysHiddenWhileTheSectionHasTargets(t *testing.T) {
-	panes := groupPanes([]group{{
-		section:     "vms",
-		placeholder: []string{"no vms"},
-		items:       []item{named(target.ProviderLima, "vms", "forge")},
-	}})
-
-	m, _ := newTestModel()
-	if got := m.renderPane(panes[0], false, 40, 6); strings.Contains(got, "no vms") {
-		t.Errorf("a section with targets never shows its placeholder, got:\n%s", got)
-	}
-	if got := paneBodyRows(panes[0], paneTextWidth(40)); got != 1 {
-		t.Errorf("a populated pane is sized by its items, got %d rows", got)
 	}
 }

@@ -22,12 +22,11 @@ type shortcut struct {
 	command string
 }
 
-var legacyIDs = []string{"vmm-launcher", "vmm-clipboard"}
+var legacyIDs = []string{"vmm-launcher", "vmm-clipboard", "uplink-clipboard"}
 
 func defaults(exe string) []shortcut {
 	return []shortcut{
 		{"uplink-launcher", "<Control><Alt>t", "uplink launcher", "alacritty -e " + exe + " dashboard"},
-		{"uplink-clipboard", "<Control><Alt>p", "uplink push clipboard", exe + " vm push-clipboard"},
 	}
 }
 

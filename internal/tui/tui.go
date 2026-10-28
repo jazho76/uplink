@@ -5,8 +5,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/target"
@@ -18,20 +16,24 @@ const (
 	maxLogPeek   = 300
 )
 
-type caps struct {
-	lifecycle bool
-	autostart bool
-	tail      bool
-	probe     bool
+var kindTitles = map[target.Kind]string{
+	target.KindLocal:  "local",
+	target.KindVM:     "vms",
+	target.KindRemote: "remotes",
 }
 
+type status string
+
+const (
+	statusUnknown status = "unknown"
+	statusUp      status = "up"
+	statusDown    status = "down"
+)
+
 type item struct {
-	t         target.Target
-	provider  target.Provider
-	autostart bool
-	launcher  bool
-	key       rune
-	caps      caps
+	t        target.Target
+	launcher bool
+	key      rune
 }
 
 func (i item) name() string { return i.t.Name }
@@ -43,51 +45,31 @@ func (i item) label() string {
 	return i.t.Name
 }
 
-func (i item) running() bool { return i.t.Running() }
-
-func (i item) worthProbing() bool {
-	return i.caps.probe && i.t.Status != target.StatusStopped
-}
-
 type screen int
 
 const (
 	screenList screen = iota
-	screenConfirm
 	screenLogs
 )
 
 type model struct {
-	self        string
-	reg         target.Registry
-	panes       []pane
-	focus       int
-	modeIdx     int
-	width       int
-	height      int
-	status      string
-	spinner     spinner.Model
-	screen      screen
-	input       textinput.Model
-	logName     string
-	logView     string
-	logTailer   target.Tailer
-	logPeek     peek
-	hostName    string
-	hostStats   probe.Stats
-	hostHistory []float64
-	live        map[string]liveEntry
-	tasks       map[string]string
+	self      string
+	targets   []target.Target
+	backend   target.Backend
+	panes     []pane
+	focus     int
+	modeIdx   int
+	width     int
+	height    int
+	status    string
+	screen    screen
+	logTarget target.Target
+	logRound  int
+	logView   string
+	logPeek   peek
+	hostName  string
+	live      map[string]liveEntry
 }
-
-const (
-	verbStop    = "stopping"
-	verbRestart = "restarting"
-	verbAuto    = "autostart"
-	verbDelete  = "deleting"
-)
-
-func (m model) hasTask(name string) bool { return m.tasks[name] != "" }
 
 type peek struct {
 	name string
@@ -100,76 +82,79 @@ type liveEntry struct {
 	history []float64
 	at      time.Time
 	err     bool
+	pending bool
 }
 
-func Run(reg target.Registry, configWarning error) error {
+func Run(targets []target.Target, backend target.Backend, configWarning error) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
 
-	sp := spinner.New()
-	sp.Spinner = spinner.Dot
-
-	in := textinput.New()
-	in.Prompt = ""
-	in.CharLimit = 32
-
 	host, _ := os.Hostname()
 
-	m := model{
-		self:     exe,
-		reg:      reg,
-		spinner:  sp,
-		input:    in,
-		hostName: host,
-		live:     map[string]liveEntry{},
-		tasks:    map[string]string{},
-	}
+	m := newModel(targets, backend)
+	m.self, m.hostName = exe, host
 	if configWarning != nil {
 		m.status = configWarning.Error()
 	}
-	m.rebuild(nil)
 
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
-func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadCmd(), tickCmd(), liveTickCmd())
+func newModel(targets []target.Target, backend target.Backend) model {
+	m := model{
+		targets: targets,
+		backend: backend,
+		live:    map[string]liveEntry{},
+	}
+	m.rebuild()
+	return m
 }
 
-func (m *model) rebuild(listings target.Listings) {
-	groups := make([]group, 0, len(listings))
-	for _, l := range listings {
-		g := group{section: l.Section.Name, placeholder: l.Section.Placeholder}
-		for _, t := range l.Targets {
-			g.items = append(g.items, m.rowsFor(t)...)
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.hostCmd(), m.onSelectionChange(), tickCmd(), liveTickCmd())
+}
+
+func (m *model) rebuild() {
+	var panes []pane
+	for _, kind := range target.Kinds {
+		p := pane{section: kindTitles[kind]}
+		for _, t := range m.targets {
+			if t.Kind == kind {
+				p.items = append(p.items, launcherRows(item{t: t})...)
+			}
 		}
-		groups = append(groups, g)
+		if len(p.items) > 0 {
+			panes = append(panes, p)
+		}
 	}
+	assignPaneKeys(panes)
+	assignItemKeys(panes)
 
 	previouslyFocused := m.focusedSection()
-	m.panes = carryOverCursors(groupPanes(groups), m.panes)
+	m.panes = carryOverCursors(panes, m.panes)
 	m.focus = paneToFocus(m.panes, previouslyFocused)
 }
 
-func (m model) rowsFor(t target.Target) []item {
-	provider := m.reg.Provider(t.Provider)
-	it := item{t: t, provider: provider}
-
-	_, it.caps.lifecycle = provider.(target.Lifecycle)
-	_, it.caps.tail = provider.(target.Tailer)
-	_, it.caps.probe = provider.(target.Prober)
-	if auto, ok := provider.(target.Autostarter); ok {
-		it.caps.autostart = true
-		it.autostart = auto.Autostart(t.Name)
+func (m model) statusOf(t target.Target) status {
+	if t.Local() {
+		return statusUp
 	}
-	return launcherRows(it)
+	e, ok := m.live[t.Name]
+	switch {
+	case !ok || e.at.IsZero():
+		return statusUnknown
+	case e.err:
+		return statusDown
+	default:
+		return statusUp
+	}
 }
 
 func launcherRows(it item) []item {
-	if it.t.Provider != target.ProviderLocal || len(it.t.Modes) == 0 {
+	if !it.t.Local() || len(it.t.Modes) == 0 {
 		return []item{it}
 	}
 
@@ -195,12 +180,7 @@ func carryOverCursors(fresh, previous []pane) []pane {
 }
 
 func paneToFocus(panes []pane, section string) int {
-	if i := slices.IndexFunc(panes, func(p pane) bool {
-		return p.section == section && len(p.items) > 0
-	}); i >= 0 {
-		return i
-	}
-	return max(slices.IndexFunc(panes, func(p pane) bool { return len(p.items) > 0 }), 0)
+	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
 }
 
 func (m model) focusedPane() (pane, bool) {
@@ -248,24 +228,11 @@ func (m *model) moveCursor(delta int) tea.Cmd {
 		return m.focusItem(m.focus, to)
 	}
 
-	next, ok := nextPaneWithItems(m.panes, m.focus, delta)
-	if !ok {
-		return nil
-	}
+	next := wrap(m.focus+delta, len(m.panes))
 	if delta < 0 {
 		return m.focusItem(next, len(m.panes[next].items)-1)
 	}
 	return m.focusItem(next, 0)
-}
-
-func nextPaneWithItems(panes []pane, from, step int) (int, bool) {
-	for moved := 1; moved <= len(panes); moved++ {
-		next := wrap(from+moved*step, len(panes))
-		if len(panes[next].items) > 0 {
-			return next, true
-		}
-	}
-	return 0, false
 }
 
 func (m *model) focusItem(inPane, cursor int) tea.Cmd {
@@ -284,18 +251,13 @@ func (m *model) focusItem(inPane, cursor int) tea.Cmd {
 	return m.onSelectionChange()
 }
 
-func (m *model) startTask(name, verb string, task tea.Cmd) tea.Cmd {
-	m.tasks[name], m.status = verb, ""
-	return tea.Batch(task, m.spinner.Tick)
-}
-
 func wrap(i, n int) int {
 	return ((i % n) + n) % n
 }
 
 type tickMsg struct{}
 type liveTickMsg struct{}
-type logTickMsg struct{}
+type logTickMsg struct{ round int }
 
 type logPeekMsg struct {
 	name string
@@ -303,8 +265,8 @@ type logPeekMsg struct {
 }
 
 type logViewMsg struct {
-	name string
-	text string
+	round int
+	text  string
 }
 
 type liveStatsMsg struct {
@@ -313,15 +275,9 @@ type liveStatsMsg struct {
 	err   bool
 }
 
-type loadedMsg struct {
-	listings  target.Listings
-	hostStats probe.Stats
-	err       error
-}
-
-type actionMsg struct {
-	name   string
-	status string
+type reachMsg struct {
+	name    string
+	reached bool
 }
 
 type execDoneMsg struct {
@@ -337,44 +293,59 @@ func liveTickCmd() tea.Cmd {
 	return tea.Tick(liveInterval, func(time.Time) tea.Msg { return liveTickMsg{} })
 }
 
-func logTickCmd() tea.Cmd {
-	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{} })
+func logTickCmd(round int) tea.Cmd {
+	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{round: round} })
 }
 
-func (m model) loadCmd() tea.Cmd {
-	reg := m.reg
+func (m model) localTarget() (target.Target, bool) {
+	i := slices.IndexFunc(m.targets, target.Target.Local)
+	if i < 0 {
+		return target.Target{}, false
+	}
+	return m.targets[i], true
+}
+
+func (m model) hostCmd() tea.Cmd {
+	host, ok := m.localTarget()
+	if !ok {
+		return nil
+	}
+	return fetchLiveCmd(m.backend, host)
+}
+
+func (m model) hostEntry() liveEntry {
+	host, _ := m.localTarget()
+	return m.live[host.Name]
+}
+
+func fetchLiveCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		listings := reg.Listings()
-		msg := loadedMsg{listings: listings, err: listings.Err()}
-		if prober, ok := reg.Provider(target.ProviderLocal).(target.Prober); ok {
-			if stats, err := prober.Probe(""); err == nil {
-				msg.hostStats = stats
-			}
-		}
-		return msg
+		stats, err := backend.Stats(t)
+		return liveStatsMsg{name: t.Name, stats: stats, err: err != nil}
 	}
 }
 
-func fetchLiveCmd(prober target.Prober, name string) tea.Cmd {
+func reachCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		stats, err := prober.Probe(name)
-		return liveStatsMsg{name: name, stats: stats, err: err != nil}
+		return liveStatsMsg{name: t.Name, err: backend.Reachable(t) != nil}
 	}
 }
 
 func (m model) liveFetch() tea.Cmd {
 	it := m.selected()
-	if !it.worthProbing() {
+	if it.name() == "" || it.t.Local() {
 		return nil
 	}
-	if e, ok := m.live[it.name()]; ok && time.Since(e.at) < liveInterval {
+	e := m.live[it.name()]
+	if e.pending || time.Since(e.at) < liveInterval {
 		return nil
 	}
-	prober, ok := it.provider.(target.Prober)
-	if !ok {
-		return nil
+	e.pending = true
+	m.live[it.name()] = e
+	if it.t.Stats {
+		return fetchLiveCmd(m.backend, it.t)
 	}
-	return fetchLiveCmd(prober, it.name())
+	return reachCmd(m.backend, it.t)
 }
 
 func (m model) onSelectionChange() tea.Cmd {
@@ -383,24 +354,24 @@ func (m model) onSelectionChange() tea.Cmd {
 
 func (m model) peekLogs() tea.Cmd {
 	it := m.selected()
-	tailer, ok := it.provider.(target.Tailer)
-	if !ok {
+	if it.t.Logs == "" {
 		return nil
 	}
 	if m.logPeek.name == it.name() && time.Since(m.logPeek.at) < liveInterval {
 		return nil
 	}
-	return peekLogsCmd(tailer, it.name())
+	return peekLogsCmd(m.backend, it.t)
 }
 
-func peekLogsCmd(tailer target.Tailer, name string) tea.Cmd {
+func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		return logPeekMsg{name: name, text: tailer.Tail(name, maxLogPeek)}
+		return logPeekMsg{name: t.Name, text: backend.Logs(t, maxLogPeek)}
 	}
 }
 
-func viewLogsCmd(tailer target.Tailer, name string) tea.Cmd {
+func (m model) viewLogsCmd() tea.Cmd {
+	backend, t, round := m.backend, m.logTarget, m.logRound
 	return func() tea.Msg {
-		return logViewMsg{name: name, text: tailer.Tail(name, logScreenLines)}
+		return logViewMsg{round: round, text: backend.Logs(t, logScreenLines)}
 	}
 }

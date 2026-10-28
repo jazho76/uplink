@@ -26,12 +26,10 @@ const (
 )
 
 var (
-	plainStyle   = lipgloss.NewStyle()
-	rowFill      = lipgloss.NewStyle().Background(ui.Selection)
-	spinnerStyle = lipgloss.NewStyle().Foreground(ui.Cyan)
+	plainStyle = lipgloss.NewStyle()
+	rowFill    = lipgloss.NewStyle().Background(ui.Selection)
 
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
-	autoMarker = lipgloss.NewStyle().Foreground(ui.Magenta)
 	modeMarker = lipgloss.NewStyle().Foreground(ui.Yellow)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
@@ -54,33 +52,25 @@ var (
 			Padding(0, 1)
 )
 
-func glyph(it item, base lipgloss.Style) string {
-	mark, color := glyphOf(it)
+func (m model) glyph(it item, base lipgloss.Style) string {
+	mark, color := glyphOf(it.t.Kind, m.statusOf(it.t))
 	return base.Foreground(color).Render(mark)
 }
 
-func glyphOf(it item) (string, lipgloss.TerminalColor) {
-	switch it.t.Provider {
-	case target.ProviderLocal:
+func glyphOf(kind target.Kind, s status) (string, lipgloss.TerminalColor) {
+	switch {
+	case kind == target.KindLocal:
 		return "⬢", ui.Cyan
-	case target.ProviderRemote:
-		return remoteGlyphOf(it.t.Status)
-	default:
-		if it.running() {
-			return "●", ui.Green
-		}
-		return "○", ui.Comment
-	}
-}
-
-func remoteGlyphOf(status target.Status) (string, lipgloss.TerminalColor) {
-	switch status {
-	case target.StatusRunning:
+	case kind == target.KindRemote && s == statusUp:
 		return "◆", ui.Green
-	case target.StatusUnreachable:
+	case kind == target.KindRemote && s == statusDown:
 		return "×", ui.Red
-	default:
+	case kind == target.KindRemote:
 		return "◇", ui.Comment
+	case s == statusUp:
+		return "●", ui.Green
+	default:
+		return "○", ui.Comment
 	}
 }
 
@@ -116,10 +106,10 @@ func (m model) previewBody(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := titleStyle.Render(it.name()) + "  " + glyph(it, plainStyle) + " " + string(it.t.Status)
+	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
 	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
 
-	if it.worthProbing() {
+	if it.t.Stats {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.name(), width, height))
 	}
@@ -152,8 +142,8 @@ func (m model) logsFor(it item) string {
 }
 
 func (m model) renderLive(name string, width, height int) string {
-	e, ok := m.live[name]
-	if !ok {
+	e := m.live[name]
+	if e.at.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
 	if e.err {
@@ -264,8 +254,8 @@ func unitOf(size string) string {
 }
 
 func (m model) uptimeOf(it item) string {
-	e, ok := m.live[it.name()]
-	if !it.worthProbing() || !ok || e.err {
+	e := m.live[it.name()]
+	if !it.t.Stats || e.at.IsZero() || e.err {
 		return ""
 	}
 	if up := humanize.Duration(e.stats.Uptime); up != "" {
@@ -283,20 +273,10 @@ func (m model) specFields(it item) []field {
 	if command := m.mode().Command(); command != "" {
 		fields = append(fields, field{"run", command})
 	}
-	for _, f := range it.t.Detail {
-		fields = append(fields, field{f.Key, f.Value})
-	}
-	if it.caps.autostart {
-		fields = append(fields, field{"auto", autostartLabel(it)})
+	if it.t.Logs != "" {
+		fields = append(fields, field{"logs", it.t.Logs})
 	}
 	return fields
-}
-
-func autostartLabel(it item) string {
-	if it.autostart {
-		return autoMarker.Render("↻ on")
-	}
-	return "off"
 }
 
 type field struct{ key, value string }
@@ -321,7 +301,7 @@ func renderFields(fields []field, width int) string {
 }
 
 func (m model) renderLogs() string {
-	header := titleStyle.Render("logs: " + m.logName)
+	header := titleStyle.Render("logs: " + m.logTarget.Name)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
 	body := labelStyle.Render("no log output")
@@ -341,27 +321,13 @@ func (m model) renderLogs() string {
 }
 
 func (m model) renderFooter() string {
-	if m.screen == screenConfirm {
-		prompt := statusStyle.Render(fmt.Sprintf("delete %s? type the name: ", m.selected().name()))
-		return prompt + m.input.View() + "\n"
-	}
-
 	it := m.selected()
 	pairs := [][2]string{{"↵", "connect"}}
 	if len(it.t.Modes) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
-	if it.caps.tail {
+	if it.t.Logs != "" {
 		pairs = append(pairs, [2]string{"^l", "logs"})
-	}
-	if it.caps.lifecycle {
-		pairs = append(pairs, [2]string{"^s", "stop"}, [2]string{"^r", "restart"})
-	}
-	if it.caps.autostart {
-		pairs = append(pairs, [2]string{"^a", "auto"})
-	}
-	if it.caps.lifecycle {
-		pairs = append(pairs, [2]string{"^x", "del"})
 	}
 	pairs = append(pairs, [2]string{"q", "quit"})
 
@@ -385,16 +351,16 @@ type barSegment struct {
 }
 
 func (m model) hostSegments() []barSegment {
-	h := m.hostStats
+	host := m.hostEntry()
+	h := host.stats
 	load := loadFraction(h.Load, h.Cores)
 
 	return []barSegment{
 		{text: titleStyle.Render(m.hostName), priority: 0},
-		{text: hostGauge("load", sparkline(m.hostHistory, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
+		{text: hostGauge("load", sparkline(host.history, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
 		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
 		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
-		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 5},
-		{text: m.committedSummary(), priority: 3},
+		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 3},
 	}
 }
 
@@ -459,25 +425,6 @@ func spaceEvenly(parts []string, width int) string {
 	}
 	spaced.WriteString(parts[gaps])
 	return spaced.String()
-}
-
-func (m model) committedSummary() string {
-	var vcpu int
-	var memory uint64
-	for _, p := range m.panes {
-		for _, it := range p.items {
-			if !it.running() || (it.t.CPUs == 0 && it.t.Memory == 0) {
-				continue
-			}
-			vcpu += it.t.CPUs
-			memory += it.t.Memory
-		}
-	}
-	if vcpu == 0 && memory == 0 {
-		return ""
-	}
-	return labelStyle.Render("committed ") + valueStyle.Render(
-		fmt.Sprintf("%d vCPU · %s", vcpu, humanize.Bytes(memory)))
 }
 
 func rule(title string, width int) string {

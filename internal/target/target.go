@@ -1,34 +1,21 @@
 package target
 
 import (
-	"errors"
 	"fmt"
-	"io"
-	"sort"
+	"os"
+	"slices"
 	"strings"
-
-	"github.com/jazho76/uplink/internal/probe"
 )
+
+type Kind string
 
 const (
-	ProviderLocal  = "local"
-	ProviderLima   = "lima"
-	ProviderRemote = "remote"
+	KindLocal  Kind = "local"
+	KindVM     Kind = "vm"
+	KindRemote Kind = "remote"
 )
 
-type Status string
-
-const (
-	StatusUnknown     Status = "unknown"
-	StatusRunning     Status = "running"
-	StatusStopped     Status = "stopped"
-	StatusUnreachable Status = "unreachable"
-)
-
-type Field struct {
-	Key   string
-	Value string
-}
+var Kinds = []Kind{KindLocal, KindVM, KindRemote}
 
 type Mode struct {
 	Name string
@@ -36,56 +23,22 @@ type Mode struct {
 	Back bool
 }
 
-type ModeSpec struct {
-	Name string `yaml:"name"`
-	Run  string `yaml:"run"`
-	Back bool   `yaml:"back"`
-}
-
-func ValidateSpecs(section string, specs []ModeSpec) error {
-	seen := map[string]bool{}
-	for i, s := range specs {
-		if s.Name == "" {
-			return fmt.Errorf("%s: mode %d has no name", section, i+1)
-		}
-		if seen[s.Name] {
-			return fmt.Errorf("%s: duplicate mode %q", section, s.Name)
-		}
-		seen[s.Name] = true
-	}
-	return nil
-}
-
 type Target struct {
-	Provider string
-	Section  string
-	Name     string
-	Status   Status
-	CPUs     int
-	Memory   uint64
-	Modes    []Mode
-	Detail   []Field
+	Name  string
+	Kind  Kind
+	Via   []string
+	Logs  string
+	Stats bool
+	Modes []Mode
 }
 
-func (t Target) Running() bool { return t.Status == StatusRunning }
+func (t Target) Local() bool { return t.Kind == KindLocal }
 
 func (t Target) DefaultMode() Mode {
 	if len(t.Modes) == 0 {
 		return Mode{}
 	}
 	return t.Modes[0]
-}
-
-func (m Mode) Command() string {
-	parts := make([]string, 0, len(m.Argv))
-	for _, a := range m.Argv {
-		if a == "" || strings.ContainsAny(a, " \t'\"") {
-			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
-			continue
-		}
-		parts = append(parts, a)
-	}
-	return strings.Join(parts, " ")
 }
 
 func (t Target) Mode(name string) (Mode, bool) {
@@ -105,140 +58,50 @@ func (t Target) ModeNames() []string {
 	return names
 }
 
-type Provider interface {
-	ID() string
-	List() ([]Target, error)
-}
-
-type Lifecycle interface {
-	Start(name string, progress io.Writer) error
-	Stop(name string) error
-	Delete(name string) error
-}
-
-type Autostarter interface {
-	Autostart(name string) bool
-	SetAutostart(name string, on bool) error
-}
-
-type Tailer interface {
-	Tail(name string, lines int) string
-}
-
-type Prober interface {
-	Probe(name string) (probe.Stats, error)
-}
-
-type Section struct {
-	Name        string
-	Placeholder []string
-}
-
-type Sectioned interface {
-	Section() Section
-}
-
-type Listing struct {
-	Provider string
-	Section  Section
-	Targets  []Target
-	Err      error
-}
-
-type Listings []Listing
-
-func (l Listings) Targets() []Target {
-	var all []Target
-	for _, listing := range l {
-		all = append(all, listing.Targets...)
-	}
-	return all
-}
-
-func (l Listings) Err() error {
-	var errs []error
-	for _, listing := range l {
-		if listing.Err != nil {
-			errs = append(errs, listing.Err)
+func (t Target) ArgvFor(command string) []string {
+	if t.Local() {
+		shell := userShell()
+		if command == "" {
+			return []string{shell}
 		}
+		return []string{shell, "-c", command}
 	}
-	return errors.Join(errs...)
+	argv := append([]string(nil), t.Via...)
+	if command == "" {
+		return argv
+	}
+	return append(argv, command)
 }
 
-type Registry struct {
-	providers []Provider
+func userShell() string {
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	return "/bin/sh"
 }
 
-func NewRegistry(providers ...Provider) Registry {
-	return Registry{providers: providers}
-}
+func (m Mode) Command() string { return Quote(m.Argv) }
 
-func (r Registry) Listings() Listings {
-	listings := make(Listings, 0, len(r.providers))
-	claimed := map[string]string{}
-	for _, p := range r.providers {
-		listings = append(listings, listingOf(p, claimed))
-	}
-	return listings
-}
-
-func listingOf(p Provider, claimed map[string]string) Listing {
-	l := Listing{Provider: p.ID()}
-	if sectioned, ok := p.(Sectioned); ok {
-		l.Section = sectioned.Section()
-	}
-
-	targets, err := p.List()
-	if err != nil {
-		l.Err = fmt.Errorf("%s: %w", p.ID(), err)
-		return l
-	}
-
-	var errs []error
-	for _, t := range targets {
-		if owner, taken := claimed[t.Name]; taken {
-			errs = append(errs, fmt.Errorf("duplicate target %q from %s and %s; rename one", t.Name, owner, p.ID()))
+func Quote(argv []string) string {
+	parts := make([]string, 0, len(argv))
+	for _, a := range argv {
+		if a == "" || strings.ContainsAny(a, " \t'\"") {
+			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
 			continue
 		}
-		claimed[t.Name] = p.ID()
-		l.Targets = append(l.Targets, t)
+		parts = append(parts, a)
 	}
-	l.Err = errors.Join(errs...)
-	return l
+	return strings.Join(parts, " ")
 }
 
-func (r Registry) All() ([]Target, error) {
-	listings := r.Listings()
-	return listings.Targets(), listings.Err()
-}
-
-func (r Registry) Provider(id string) Provider {
-	for _, p := range r.providers {
-		if p.ID() == id {
-			return p
-		}
+func Resolve(targets []Target, name string) (Target, error) {
+	if i := slices.IndexFunc(targets, func(t Target) bool { return t.Name == name }); i >= 0 {
+		return targets[i], nil
 	}
-	return nil
-}
-
-func (r Registry) Resolve(name string) (Target, Provider, error) {
-	all, err := r.All()
-	for _, t := range all {
-		if t.Name == name {
-			return t, r.Provider(t.Provider), nil
-		}
-	}
-	if err != nil {
-		return Target{}, nil, fmt.Errorf("no such target %q: %w", name, err)
-	}
-	return Target{}, nil, fmt.Errorf("no such target %q; known targets: %s", name, strings.Join(names(all), ", "))
-}
-
-func names(targets []Target) []string {
-	out := make([]string, 0, len(targets))
+	names := make([]string, 0, len(targets))
 	for _, t := range targets {
-		out = append(out, t.Name)
+		names = append(names, t.Name)
 	}
-	sort.Strings(out)
-	return out
+	slices.Sort(names)
+	return Target{}, fmt.Errorf("no such target %q; known targets: %s", name, strings.Join(names, ", "))
 }

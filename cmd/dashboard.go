@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/tui"
 	"github.com/spf13/cobra"
 )
@@ -19,6 +20,6 @@ func init() {
 }
 
 func dashboard() error {
-	reg, warn := registry()
-	return tui.Run(reg, warn)
+	resolved, warn := targets()
+	return tui.Run(resolved, target.System{}, warn)
 }

@@ -7,64 +7,18 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/target"
 )
 
 const (
 	minPaneRows      = borderCells + 1
-	paneIndent       = 1
 	reservedPaneKeys = "qjk"
 )
 
 type pane struct {
-	section     string
-	key         rune
-	items       []item
-	placeholder []string
-	cursor      int
-}
-
-type group struct {
-	section     string
-	placeholder []string
-	items       []item
-}
-
-func sectionOf(t target.Target) string {
-	if t.Section != "" {
-		return t.Section
-	}
-	return t.Provider
-}
-
-func groupPanes(groups []group) []pane {
-	var panes []pane
-	at := map[string]int{}
-	paneFor := func(section string) int {
-		i, exists := at[section]
-		if !exists {
-			i = len(panes)
-			at[section] = i
-			panes = append(panes, pane{section: section})
-		}
-		return i
-	}
-
-	for _, g := range groups {
-		for _, it := range g.items {
-			i := paneFor(sectionOf(it.t))
-			panes[i].items = append(panes[i].items, it)
-		}
-		if g.section != "" {
-			i := paneFor(g.section)
-			panes[i].placeholder = g.placeholder
-		}
-	}
-
-	assignPaneKeys(panes)
-	assignItemKeys(panes)
-	return panes
+	section string
+	key     rune
+	items   []item
+	cursor  int
 }
 
 func assignPaneKeys(panes []pane) {
@@ -127,7 +81,7 @@ func keyMatches(assigned rune, pressed string) bool {
 	return assigned != 0 && string(assigned) == pressed
 }
 
-func distributeRows(panes []pane, textWidth, total int) []int {
+func distributeRows(panes []pane, total int) []int {
 	rows := make([]int, len(panes))
 	if len(panes) == 0 {
 		return rows
@@ -135,7 +89,7 @@ func distributeRows(panes []pane, textWidth, total int) []int {
 
 	sum := 0
 	for i, p := range panes {
-		rows[i] = max(paneBodyRows(p, textWidth)+borderCells, minPaneRows)
+		rows[i] = max(len(p.items)+borderCells, minPaneRows)
 		sum += rows[i]
 	}
 
@@ -153,53 +107,18 @@ func distributeRows(panes []pane, textWidth, total int) []int {
 	return rows
 }
 
-func paneBodyRows(p pane, textWidth int) int {
-	return max(len(p.items), len(placeholderLines(p, textWidth)))
-}
-
-func placeholderLines(p pane, textWidth int) []string {
-	if len(p.items) > 0 {
-		return nil
-	}
-	return fitLines(p.placeholder, textWidth)
-}
-
-func paneTextWidth(width int) int {
-	return max(width-borderCells-paneIndent, 1)
-}
-
-func fitLines(lines []string, width int) []string {
-	fitted := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if lipgloss.Width(line) <= width {
-			fitted = append(fitted, line)
-		}
-	}
-	return fitted
-}
-
 func growablePanes(panes []pane) []int {
-	var scrollable, inhabited, all []int
+	var scrollable, all []int
 	for i, p := range panes {
 		all = append(all, i)
-		if len(p.items) == 0 {
-			continue
-		}
-		inhabited = append(inhabited, i)
 		if !launcherPane(p) {
 			scrollable = append(scrollable, i)
 		}
 	}
-	return firstNonEmpty(scrollable, inhabited, all)
-}
-
-func firstNonEmpty(choices ...[]int) []int {
-	for _, chosen := range choices {
-		if len(chosen) > 0 {
-			return chosen
-		}
+	if len(scrollable) > 0 {
+		return scrollable
 	}
-	return nil
+	return all
 }
 
 func launcherPane(p pane) bool {
@@ -234,33 +153,27 @@ func scrollHint(start, count, rows int) string {
 	return fmt.Sprintf("%d-%d of %d", start+1, start+rows, count)
 }
 
-func paneSummary(p pane) string {
-	if launcherPane(p) || len(p.items) < 2 || !allStatusesKnown(p.items) {
+func (m model) paneSummary(p pane) string {
+	if launcherPane(p) || len(p.items) < 2 {
 		return ""
 	}
 	running := 0
 	for _, it := range p.items {
-		if it.running() {
+		switch m.statusOf(it.t) {
+		case statusUnknown:
+			return ""
+		case statusUp:
 			running++
 		}
 	}
 	return fmt.Sprintf("%d up", running)
 }
 
-func allStatusesKnown(items []item) bool {
-	for _, it := range items {
-		if it.t.Status == target.StatusUnknown {
-			return false
-		}
-	}
-	return true
-}
-
 func (m model) renderPanes(width, height int) string {
 	if len(m.panes) == 0 {
 		return ""
 	}
-	rows := distributeRows(m.panes, paneTextWidth(width), height)
+	rows := distributeRows(m.panes, height)
 	blocks := make([]string, 0, len(m.panes))
 	for i, p := range m.panes {
 		blocks = append(blocks, m.renderPane(p, i == m.focus, width, rows[i]))
@@ -278,20 +191,15 @@ func (m model) renderPane(p pane, focused bool, width, height int) string {
 	interior := max(width-borderCells, 1)
 	start := scrollOffset(p.cursor, len(p.items), rows)
 
-	placeholder := placeholderLines(p, paneTextWidth(width))
-	summary := labelStyle.Render(paneSummary(p))
+	summary := labelStyle.Render(m.paneSummary(p))
 	blank := strings.Repeat(" ", interior)
-	indent := strings.Repeat(" ", paneIndent)
 	side := border.Render(boxBorder.Left)
 	lines := []string{paneEdge(boxBorder.TopLeft, boxBorder.TopRight,
 		accentLetter(p.section, p.key, title), summary, width, border)}
 	for i := start; i < start+rows; i++ {
 		row := blank
-		switch {
-		case i < len(p.items):
+		if i < len(p.items) {
 			row = m.paneRow(p.items[i], i == p.cursor, focused, interior)
-		case i < len(placeholder):
-			row = pad(indent+labelStyle.Render(placeholder[i]), interior, plainStyle)
 		}
 		lines = append(lines, side+row+side)
 	}
@@ -341,21 +249,14 @@ func (m model) paneRow(it item, selected, focused bool, width int) string {
 		key = it.key
 	}
 	name := layer(base, valueStyle).Bold(selected)
-	left := glyph(it, base) + space + accentLetter(it.label(), key, name)
+	left := m.glyph(it, base) + space + accentLetter(it.label(), key, name)
 
-	var status []string
+	badge := ""
 	if selected && focused && m.modeIdx != 0 {
-		status = append(status, layer(base, modeMarker).Render("["+m.mode().Name+"]"))
-	}
-	if it.autostart {
-		status = append(status, layer(base, autoMarker).Render("↻"))
-	}
-	if verb := m.tasks[it.name()]; verb != "" {
-		spin := layer(base, spinnerStyle).Render(ansi.Strip(m.spinner.View()))
-		status = append(status, spin+layer(base, labelStyle).Render(" "+verb))
+		badge = layer(base, modeMarker).Render("["+m.mode().Name+"]") + space
 	}
 
-	return spread(space+left, strings.Join(status, space)+space, width, base)
+	return spread(space+left, badge, width, base)
 }
 
 func rowBase(selected, focused bool) lipgloss.Style {

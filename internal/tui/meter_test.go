@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/probe"
@@ -134,13 +134,16 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 	}
 }
 
+func glados() model {
+	host := hostTarget()
+	return model{hostName: "GLaDOS", targets: []target.Target{host}, live: map[string]liveEntry{
+		host.Name: {stats: probe.Stats{Cores: 12, Load: 4.1,
+			MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}},
+	}}
+}
+
 func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
-	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
-		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30},
-		panes: panesOf(
-			item{t: target.Target{Name: "kyoto", Status: target.StatusRunning, CPUs: 6, Memory: 12 << 30}},
-			item{t: target.Target{Name: "forge", Status: target.StatusRunning, CPUs: 8, Memory: 16 << 30}},
-		)}
+	m := glados()
 
 	for _, width := range []int{minWidth, 60, 80, 100, 140} {
 		bar := m.renderHostBar(width)
@@ -155,12 +158,12 @@ func TestHostBarFitsByPriorityAndRendersInReadingOrder(t *testing.T) {
 	}
 
 	roomy := ansi.Strip(m.renderHostBar(140))
-	disk, committed := strings.Index(roomy, "disk"), strings.Index(roomy, "committed")
-	if disk < 0 || committed < 0 {
+	ram, disk, cores := strings.Index(roomy, "ram"), strings.Index(roomy, "disk"), strings.Index(roomy, "cores")
+	if ram < 0 || disk < 0 || cores < 0 {
 		t.Fatalf("a wide bar should carry every segment: %q", roomy)
 	}
-	if disk > committed {
-		t.Errorf("host meters read together, before the allocation summary: %q", roomy)
+	if !(ram < disk && disk < cores) {
+		t.Errorf("segments render in reading order whatever their priority: %q", roomy)
 	}
 
 	narrow := ansi.Strip(m.renderHostBar(60))
@@ -198,8 +201,7 @@ func TestHostBarSegmentsShareTheSlackEvenly(t *testing.T) {
 }
 
 func TestHostBarReachesBothEdges(t *testing.T) {
-	m := model{hostName: "GLaDOS", hostStats: probe.Stats{Cores: 12, Load: 4.1,
-		MemUsed: 8 << 30, MemTotal: 31 << 30, DiskUsed: 780 << 30, DiskTotal: 930 << 30}}
+	m := glados()
 
 	for _, width := range []int{60, 100, 160} {
 		interior := strings.Split(ansi.Strip(m.renderHostBar(width)), "\n")[1]
@@ -212,9 +214,8 @@ func TestHostBarReachesBothEdges(t *testing.T) {
 func TestSelectedRowFillsEveryCell(t *testing.T) {
 	stylingEnabled(t)
 
-	m := model{spinner: spinner.New(), tasks: map[string]string{}, modeIdx: 0}
-	it := item{t: target.Target{Provider: target.ProviderLima, Name: "kyoto",
-		Status: target.StatusRunning}, autostart: true, key: 'k'}
+	m := model{live: map[string]liveEntry{"kyoto": {at: time.Now()}}}
+	it := item{t: target.Target{Kind: target.KindVM, Name: "kyoto"}, key: 'k'}
 
 	const width = 30
 	filled := m.paneRow(it, true, true, width)
