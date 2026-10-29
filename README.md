@@ -288,9 +288,11 @@ their output is used. A `max` that is a plain number is used as is. `unit:
 bytes` formats both as sizes. `{name}` works in `value`, `max`, and `path`. The
 first gauge is also charted over time.
 
-The built-ins read `/proc`, so they need a Linux target. Every metric runs in
-one script piped through `exec` into `sh`, one round trip per refresh. A metric
-whose command fails or prints no number shows `?`; the others are unaffected.
+The built-ins read `/proc`, so they need a Linux target. All metrics travel in
+one script piped through `exec` into `sh`, one round trip per refresh, but each
+command runs in its own `sh -c` with no stdin and, where the target has
+`timeout`, a 5 second limit. A metric that fails, hangs, or prints no number
+shows `?`; the others are unaffected.
 
 ### Probes and timeouts
 

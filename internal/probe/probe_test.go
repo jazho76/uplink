@@ -73,6 +73,35 @@ func TestBrokenMetricsDoNotSpoilTheRest(t *testing.T) {
 	}
 }
 
+func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
+	previous := metricTimeout
+	metricTimeout = time.Second
+	t.Cleanup(func() { metricTimeout = previous })
+
+	start := time.Now()
+	readings := runLocally(t, Metrics{
+		{Type: TypeText, Label: "syntax", Value: "echo ( unbalanced"},
+		{Type: TypeText, Label: "spoof", Value: "echo first; echo '3 value 999'"},
+		{Type: TypeGauge, Label: "hang", Value: "sleep 30; echo 1", Max: "2"},
+		{Type: TypeGauge, Label: "victim", Value: "echo 1", Max: "2"},
+	})
+	if readings[0].OK {
+		t.Errorf("a syntax error is the metric's own problem, got %+v", readings[0])
+	}
+	if r := readings[1]; !r.OK || r.Text != "first" {
+		t.Errorf("only the first line counts, got %+v", r)
+	}
+	if readings[2].OK {
+		t.Errorf("a hanging metric should time out, got %+v", readings[2])
+	}
+	if r := readings[3]; !r.OK || r.Value != 1 {
+		t.Errorf("other metrics must not be spoofed or stalled, got %+v", r)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("a hanging metric held the probe for %s", elapsed)
+	}
+}
+
 func TestParseIgnoresNoise(t *testing.T) {
 	metrics := Metrics{{Type: TypeLoad}, {Type: TypeUptime}}
 	readings := Parse("motd banner\n0 value 0.5\n7 value 1\nx max 2\n0 max 4\n1 value nope\n", metrics)

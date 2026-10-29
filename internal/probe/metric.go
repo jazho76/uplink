@@ -128,40 +128,45 @@ func (m Metric) constantMax() (float64, bool) {
 	return v, err == nil && !math.IsNaN(v)
 }
 
-func (m Metric) script(index int) string {
-	valueTag, maxTag := fmt.Sprintf("%d value", index), fmt.Sprintf("%d max", index)
+func (m Metric) commands() (value, ceiling string) {
 	switch m.Type {
 	case TypeLoad:
-		return fmt.Sprintf(`read l _ < /proc/loadavg; echo "%s $l"; echo "%s $(nproc)"`, valueTag, maxTag)
+		return "cut -d ' ' -f 1 /proc/loadavg", "nproc"
 	case TypeMem:
-		return fmt.Sprintf(`awk '/^MemTotal:/{t=$2}/^MemAvailable:/{a=$2}END{print "%s", (t-a)*1024; print "%s", t*1024}' /proc/meminfo`, valueTag, maxTag)
+		return `awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo`,
+			`awk '/^MemTotal:/{print $2*1024}' /proc/meminfo`
 	case TypeDisk:
-		return fmt.Sprintf(`df -P -k %s | awk 'NR==2{print "%s", $3*1024; print "%s", $2*1024}'`, quote(cmp.Or(m.Path, "/")), valueTag, maxTag)
+		df := "df -P -k " + quote(cmp.Or(m.Path, "/"))
+		return df + " | awk 'NR==2{print $3*1024}'", df + " | awk 'NR==2{print $2*1024}'"
 	case TypeUptime:
-		return fmt.Sprintf(`read u _ < /proc/uptime; echo "%s $u"`, valueTag)
+		return "cut -d ' ' -f 1 /proc/uptime", ""
 	}
-
-	lines := []string{capture(valueTag, m.Value)}
-	if _, constant := m.constantMax(); m.Type == TypeGauge && !constant {
-		lines = append(lines, capture(maxTag, m.Max))
+	if _, constant := m.constantMax(); constant {
+		return m.Value, ""
 	}
-	return strings.Join(lines, "\n")
+	return m.Value, m.Max
 }
 
 func capture(tag, command string) string {
-	return fmt.Sprintf("v=$(\n%s\n)\nprintf '%%s\\n' %s\"$v\"", command, quote(tag+" "))
+	return fmt.Sprintf(`printf '%%s\n' %s"$($limit sh -c %s </dev/null 2>/dev/null | head -n 1)"`, quote(tag+" "), quote(command))
 }
 
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+var metricTimeout = 5 * time.Second
+
 func Compile(metrics Metrics) string {
-	blocks := make([]string, len(metrics))
+	lines := []string{fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))}
 	for i, m := range metrics {
-		blocks[i] = "{\n" + m.script(i) + "\n} </dev/null 2>/dev/null"
+		value, ceiling := m.commands()
+		lines = append(lines, capture(fmt.Sprintf("%d value", i), value))
+		if ceiling != "" {
+			lines = append(lines, capture(fmt.Sprintf("%d max", i), ceiling))
+		}
 	}
-	return strings.Join(blocks, "\n")
+	return strings.Join(lines, "\n")
 }
 
 func Parse(out string, metrics Metrics) []Reading {
