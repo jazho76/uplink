@@ -30,6 +30,8 @@ const (
 
 var sparkLevels = []rune("▁▂▃▄▅▆▇█")
 
+const blank = " "
+
 func clampFraction(f float64) float64 {
 	return min(max(f, 0), 1)
 }
@@ -77,7 +79,7 @@ func areaChart(samples []float64, width, height int, ceiling float64, fill lipgl
 	}
 	samples = newest(samples, width)
 
-	window := slices.Repeat([]string{blockGlyphs.track}, width-len(samples))
+	window := slices.Repeat([]string{blank}, width-len(samples))
 	rows := make([][]string, height)
 	for r := range rows {
 		rows[r] = append(make([]string, 0, width), window...)
@@ -91,24 +93,24 @@ func areaChart(samples []float64, width, height int, ceiling float64, fill lipgl
 
 	out := make([]string, height)
 	for r := range rows {
-		out[r] = renderOverTrack(rows[r], fill)
+		out[r] = renderColumns(rows[r], fill)
 	}
 	return out
 }
 
-func renderOverTrack(row []string, fill lipgloss.Style) string {
+func renderColumns(row []string, fill lipgloss.Style) string {
 	var b strings.Builder
 	for start := 0; start < len(row); {
-		track := row[start] == blockGlyphs.track
+		empty := row[start] == blank
 		end := start + 1
-		for end < len(row) && (row[end] == blockGlyphs.track) == track {
+		for end < len(row) && (row[end] == blank) == empty {
 			end++
 		}
-		style := fill
-		if track {
-			style = labelStyle
+		run := strings.Join(row[start:end], "")
+		if !empty {
+			run = fill.Render(run)
 		}
-		b.WriteString(style.Render(strings.Join(row[start:end], "")))
+		b.WriteString(run)
 		start = end
 	}
 	return b.String()
@@ -119,10 +121,14 @@ func areaCell(covered float64) string {
 	case covered >= 1:
 		return blockGlyphs.fill
 	case covered > 0:
-		return blockGlyphs.partial
+		return string(sparkLevels[stepIndex(covered, len(sparkLevels))])
 	default:
-		return blockGlyphs.track
+		return blank
 	}
+}
+
+func stepIndex(fraction float64, steps int) int {
+	return min(max(int(math.Ceil(fraction*float64(steps)))-1, 0), steps-1)
 }
 
 func chartHeight(available int) int {
@@ -137,8 +143,7 @@ func sparkline(samples []float64, width int, fill lipgloss.Style) string {
 
 	var trace strings.Builder
 	for _, s := range samples {
-		reached := max(clampFraction(s)*float64(len(sparkLevels)), 1)
-		trace.WriteRune(sparkLevels[int(math.Ceil(reached))-1])
+		trace.WriteRune(sparkLevels[stepIndex(clampFraction(s), len(sparkLevels))])
 	}
 
 	return labelStyle.Render(strings.Repeat(thinGlyphs.track, width-len(samples))) +

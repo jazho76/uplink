@@ -316,12 +316,12 @@ func TestAreaChartFillsItsBox(t *testing.T) {
 	}
 }
 
-func TestAreaChartTransitionsWithTheGaugePartial(t *testing.T) {
+func TestAreaChartTopsColumnsWithEighths(t *testing.T) {
 	plain := lipgloss.NewStyle()
 
-	column := ansi.Strip(strings.Join(areaChart([]float64{0.75}, 1, 2, 1, plain), ""))
-	if want := blockGlyphs.partial + blockGlyphs.fill; column != want {
-		t.Errorf("a part-filled row tops the column with the gauge partial, got %q want %q", column, want)
+	column := areaChart([]float64{0.75}, 1, 2, 1, plain)
+	if got := ansi.Strip(strings.Join(column, "")); got != "▄█" {
+		t.Errorf("three quarters of two rows is a full row under a half block, got %q", got)
 	}
 
 	capped := ansi.Strip(strings.Join(areaChart([]float64{1}, 1, 2, 1, plain), ""))
@@ -329,27 +329,26 @@ func TestAreaChartTransitionsWithTheGaugePartial(t *testing.T) {
 		t.Errorf("a column at the ceiling fills every row, got %q want %q", capped, want)
 	}
 
-	spiky := []float64{0.1, 0.9, 0.2, 0.8, 0.05}
-	plot := ansi.Strip(strings.Join(areaChart(spiky, 8, 4, chartCeiling(spiky), plain), ""))
-	if strings.ContainsAny(plot, string(sparkLevels[:len(sparkLevels)-1])) {
-		t.Errorf("the chart leaves sub-row heights to the sparkline, got %q", plot)
+	rising := ansi.Strip(strings.Join(areaChart([]float64{0.1, 0.3, 0.5, 0.7}, 4, 1, 1, plain), ""))
+	if rising != "▁▃▄▆" {
+		t.Errorf("one row resolves eight heights, got %q", rising)
 	}
 }
 
-func TestAreaChartBacksTheCurveWithTrack(t *testing.T) {
+func TestAreaChartLeavesEmptyCellsBlank(t *testing.T) {
 	plain := lipgloss.NewStyle()
 
 	plot := ansi.Strip(strings.Join(areaChart([]float64{0.1, 1}, 4, 2, 1, plain), "\n"))
-	if strings.ContainsRune(plot, ' ') {
-		t.Errorf("every empty cell should carry the track glyph, got %q", plot)
+	if strings.Contains(plot, blockGlyphs.track) {
+		t.Errorf("the chart draws no track, got %q", plot)
 	}
-	if got := strings.Count(plot, blockGlyphs.track); got != 5 {
-		t.Errorf("the window pad and the headroom are track, got %d cells in %q", got, plot)
+	if got := strings.Count(plot, blank); got != 5 {
+		t.Errorf("the window pad and the headroom are blank, got %d cells in %q", got, plot)
 	}
 
-	shaded := areaChart([]float64{1}, 2, 1, 1, lipgloss.NewStyle().Foreground(ui.Green))
-	if !strings.Contains(shaded[0], labelStyle.Render(blockGlyphs.track)) {
-		t.Errorf("the track keeps its own dim styling, got %q", shaded[0])
+	shaded := areaChart([]float64{1}, 3, 1, 1, lipgloss.NewStyle().Foreground(ui.Green))
+	if !strings.HasPrefix(shaded[0], strings.Repeat(blank, 2)) {
+		t.Errorf("blank cells carry no styling, got %q", shaded[0])
 	}
 }
 
