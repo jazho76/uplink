@@ -1551,3 +1551,58 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 		m = probed(m, "forge", true)
 	}
 }
+
+func TestConfigStatusSummarizesProblems(t *testing.T) {
+	one := errors.New(`target "box": no modes`)
+	nested := errors.Join(errors.Join(one, errors.New("b")), errors.New("c"))
+	for err, want := range map[error]string{
+		nil:    "",
+		one:    `config: target "box": no modes`,
+		nested: "config: 3 problems, see uplink config check",
+	} {
+		if got := configStatus(err); got != want {
+			t.Errorf("configStatus(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+func TestEditedConfigReloadsInPlace(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = probed(focus(m, "tokyo"), "tokyo", true)
+
+	moved := vm("tokyo")
+	moved.Group = "far"
+	broken := errors.Join(errors.New(`target "x": no modes`), errors.New(`target "y": no modes`))
+	m.load = func() ([]target.Target, error) {
+		return []target.Target{hostTarget(), moved, remote("berlin")}, broken
+	}
+
+	if footer := m.renderFooter(); !strings.Contains(footer, "config") {
+		t.Errorf("the footer should offer the config editor: %s", footer)
+	}
+	next, _ := m.Update(configEditedMsg{})
+	m = next.(model)
+
+	var sections []string
+	for _, p := range m.panes {
+		sections = append(sections, p.section)
+	}
+	if got := strings.Join(sections, " "); got != "local far remotes" {
+		t.Errorf("panes should follow the new config, got %q", got)
+	}
+	if got := m.statusOf(itemNamed(m, "tokyo").t); got != statusUp {
+		t.Errorf("a surviving target keeps what is known about it, got %q", got)
+	}
+	if itemNamed(m, "forge").name() != "" {
+		t.Errorf("a removed target should disappear")
+	}
+	if m.status != "config: 2 problems, see uplink config check" {
+		t.Errorf("problems should be summarized, got %q", m.status)
+	}
+
+	next, _ = m.Update(configEditedMsg{status: "config edit: no such file"})
+	if got := next.(model).status; got != "config edit: no such file" {
+		t.Errorf("a failure to open the editor wins over the reload summary, got %q", got)
+	}
+}

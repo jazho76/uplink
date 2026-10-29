@@ -20,6 +20,5 @@ func init() {
 }
 
 func dashboard() error {
-	resolved, warn := targets()
-	return tui.Run(resolved, target.System{}, warn)
+	return tui.Run(targets, target.System{})
 }

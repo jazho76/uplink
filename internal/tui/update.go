@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -68,6 +69,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.check(t, t.Name == m.selected().name())
 
+	case configEditedMsg:
+		return m.reload(msg.status)
+
 	case execDoneMsg:
 		m.status = msg.status
 		if name := m.selected().name(); name != "" {
@@ -112,6 +116,15 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.runHook(true)
 	case "ctrl+x":
 		return m.runHook(false)
+
+	case "ctrl+e":
+		return m, tea.ExecProcess(exec.Command(m.self, "config", "edit"), func(err error) tea.Msg {
+			var exitErr *exec.ExitError
+			if err != nil && !errors.As(err, &exitErr) {
+				return configEditedMsg{status: fmt.Sprintf("config edit: %v", err)}
+			}
+			return configEditedMsg{}
+		})
 
 	case "ctrl+l":
 		if it := m.selected(); it.t.Logs != "" {
@@ -173,4 +186,12 @@ func sessionEnded(name string, err error) execDoneMsg {
 	default:
 		return execDoneMsg{status: fmt.Sprintf("%s: %v", name, err)}
 	}
+}
+
+func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
+	targets, problems := m.load()
+	m.targets, m.modeIdx = targets, 0
+	m.rebuild()
+	m.status = cmp.Or(editStatus, configStatus(problems))
+	return m, tea.Batch(m.onSelectionChange(), m.watchFetch())
 }

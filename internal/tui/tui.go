@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"slices"
 	"time"
@@ -68,6 +69,7 @@ type model struct {
 	hostName  string
 	host      hostReading
 	live      map[string]liveEntry
+	load      func() ([]target.Target, error)
 }
 
 type hostReading struct {
@@ -93,7 +95,7 @@ type liveEntry struct {
 	epoch    int
 }
 
-func Run(targets []target.Target, backend target.Backend, configWarning error) error {
+func Run(load func() ([]target.Target, error), backend target.Backend) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -101,11 +103,10 @@ func Run(targets []target.Target, backend target.Backend, configWarning error) e
 
 	host, _ := os.Hostname()
 
+	targets, problems := load()
 	m := newModel(targets, backend)
-	m.self, m.hostName = exe, host
-	if configWarning != nil {
-		m.status = configWarning.Error()
-	}
+	m.self, m.hostName, m.load = exe, host, load
+	m.status = configStatus(problems)
 
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
@@ -288,6 +289,8 @@ type hookDoneMsg struct {
 	err  error
 }
 
+type configEditedMsg struct{ status string }
+
 type execDoneMsg struct {
 	status string
 }
@@ -460,4 +463,30 @@ func (m model) viewLogsCmd() tea.Cmd {
 	return func() tea.Msg {
 		return logViewMsg{round: round, text: backend.Logs(t, logScreenLines)}
 	}
+}
+
+func configStatus(problems error) string {
+	switch count := countProblems(problems); count {
+	case 0:
+		return ""
+	case 1:
+		return "config: " + problems.Error()
+	default:
+		return fmt.Sprintf("config: %d problems, see uplink config check", count)
+	}
+}
+
+func countProblems(err error) int {
+	if err == nil {
+		return 0
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return 1
+	}
+	count := 0
+	for _, inner := range joined.Unwrap() {
+		count += countProblems(inner)
+	}
+	return count
 }

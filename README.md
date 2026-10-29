@@ -129,6 +129,7 @@ session exits with a non-zero code, the status line says so.
 | `Ctrl+L` | Open the target's logs |
 | `Ctrl+S` | Start the target (its `up` hook) |
 | `Ctrl+X` | Stop the target (its `down` hook) |
+| `Ctrl+E` | Edit the config; the dashboard reloads when the editor closes |
 | `q`, `Esc`, `Ctrl+C` | Quit, or leave the log view |
 
 ## Configuration

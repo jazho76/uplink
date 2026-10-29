@@ -398,7 +398,7 @@ func (m model) renderFooter() string {
 	if m.canHook(it.t, false) {
 		pairs = append(pairs, [2]string{"^x", "stop"})
 	}
-	pairs = append(pairs, [2]string{"q", "quit"})
+	pairs = append(pairs, [2]string{"^e", "config"}, [2]string{"q", "quit"})
 
 	var parts []string
 	for _, p := range pairs {
