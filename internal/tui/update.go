@@ -42,7 +42,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(hostCmd(), tickCmd())
 
 	case liveTickMsg:
-		return m, tea.Batch(m.liveFetch(), m.watchFetch(), liveTickCmd())
+		return m, tea.Batch(m.probeSelected(), m.peekSelected(), m.watchFetch(), liveTickCmd())
 
 	case hostStatsMsg:
 		m.host.stats = msg.stats

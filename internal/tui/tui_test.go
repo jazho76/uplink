@@ -1478,3 +1478,42 @@ func TestHistoryFollowsTheFirstGauge(t *testing.T) {
 		t.Errorf("a sample whose first gauge is missing adds nothing to the chart, history has %d", got)
 	}
 }
+
+func TestTickRefreshesLogsInPlace(t *testing.T) {
+	m, backend := newTestModel()
+	m = sized(load(m))
+	m = applyCmd(m, m.peekLogs())
+	if got := m.logsFor(m.selected()); got != "journal line" {
+		t.Fatalf("the first peek should land, got %q", got)
+	}
+
+	backend.logs["host"] = "journal line\nnew line"
+	if m.peekLogs() != nil {
+		t.Fatalf("a selection change right after a peek should not refetch")
+	}
+	m = applyCmd(m, m.peekSelected())
+	if got := m.logsFor(m.selected()); !strings.HasSuffix(got, "new line") {
+		t.Errorf("the tick should refresh the tail while staying on a target, got %q", got)
+	}
+
+	m.screen = screenLogs
+	if m.peekSelected() != nil {
+		t.Errorf("the full log screen polls on its own, the preview should not")
+	}
+}
+
+func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = probed(focus(m, "forge"), "forge", true)
+
+	if m.liveFetch() != nil {
+		t.Fatalf("a selection change right after a probe should not refetch")
+	}
+	if m.probeSelected() == nil {
+		t.Errorf("the tick should probe even when the last result just landed")
+	}
+	if m.probeSelected() != nil {
+		t.Errorf("a probe still in flight must not be joined by another")
+	}
+}

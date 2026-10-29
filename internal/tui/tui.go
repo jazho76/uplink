@@ -335,12 +335,15 @@ func (m model) check(t target.Target, full bool) tea.Cmd {
 }
 
 func (m model) liveFetch() tea.Cmd {
-	it := m.selected()
-	if it.name() == "" {
+	if time.Since(m.live[m.selected().name()].at) < liveInterval {
 		return nil
 	}
-	e := m.live[it.name()]
-	if e.pending || time.Since(e.at) < liveInterval {
+	return m.probeSelected()
+}
+
+func (m model) probeSelected() tea.Cmd {
+	it := m.selected()
+	if it.name() == "" || m.live[it.name()].pending {
 		return nil
 	}
 	return m.check(it.t, true)
@@ -433,11 +436,15 @@ func (m model) onSelectionChange() tea.Cmd {
 }
 
 func (m model) peekLogs() tea.Cmd {
-	it := m.selected()
-	if it.t.Logs == "" {
+	if m.logPeek.name == m.selected().name() && time.Since(m.logPeek.at) < liveInterval {
 		return nil
 	}
-	if m.logPeek.name == it.name() && time.Since(m.logPeek.at) < liveInterval {
+	return m.peekSelected()
+}
+
+func (m model) peekSelected() tea.Cmd {
+	it := m.selected()
+	if it.t.Logs == "" || m.screen == screenLogs {
 		return nil
 	}
 	return peekLogsCmd(m.backend, it.t)
