@@ -154,7 +154,7 @@ func scrollHint(start, count, rows int) string {
 }
 
 func (m model) paneSummary(p pane) string {
-	if launcherPane(p) || len(p.items) < 2 {
+	if launcherPane(p) || len(p.items) == 0 {
 		return ""
 	}
 	running := 0
