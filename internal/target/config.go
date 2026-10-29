@@ -29,7 +29,6 @@ var (
 type ModeSpec struct {
 	Name string `yaml:"name"`
 	Run  string `yaml:"run"`
-	Back bool   `yaml:"back"`
 }
 
 type Spec struct {
@@ -253,7 +252,7 @@ func (t Target) modes(specs []ModeSpec) ([]Mode, error) {
 			return nil, fmt.Errorf("duplicate mode %q", s.Name)
 		}
 		seen[s.Name] = true
-		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(cmp.Or(s.Run, loginShell)), Back: s.Back})
+		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(cmp.Or(s.Run, loginShell))})
 	}
 	return modes, nil
 }

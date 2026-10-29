@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"time"
@@ -69,8 +70,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		m.status = msg.status
-		if msg.quit {
-			return m, tea.Quit
+		if name := m.selected().name(); name != "" {
+			e := m.live[name]
+			e.at = time.Time{}
+			m.live[name] = e
 		}
 		return m, m.onSelectionChange()
 
@@ -154,11 +157,20 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 		args = append(args, "--mode", mode.Name)
 	}
 
-	back := mode.Back
+	name := it.name()
 	return m, tea.ExecProcess(exec.Command(m.self, args...), func(err error) tea.Msg {
-		if err != nil {
-			return execDoneMsg{status: fmt.Sprintf("connect failed: %v", err)}
-		}
-		return execDoneMsg{quit: !back}
+		return sessionEnded(name, err)
 	})
+}
+
+func sessionEnded(name string, err error) execDoneMsg {
+	var exitErr *exec.ExitError
+	switch {
+	case err == nil:
+		return execDoneMsg{}
+	case errors.As(err, &exitErr):
+		return execDoneMsg{status: fmt.Sprintf("%s: session ended with exit %d", name, exitErr.ExitCode())}
+	default:
+		return execDoneMsg{status: fmt.Sprintf("%s: %v", name, err)}
+	}
 }

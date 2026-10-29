@@ -290,7 +290,6 @@ type hookDoneMsg struct {
 
 type execDoneMsg struct {
 	status string
-	quit   bool
 }
 
 func tickCmd() tea.Cmd {

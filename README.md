@@ -74,6 +74,9 @@ from anywhere on the desktop to any working environment becomes:
 3. Press Enter.
 4. Continue inside tmux.
 
+When the session ends, whether you exit, detach, or lose the connection, you are
+back on the dashboard. Press `q` to close it.
+
 On GNOME, Uplink can register this for you:
 
 ```sh
@@ -109,12 +112,13 @@ uplink box:shell
 
 The left side lists targets in the groups your config gives them, in the order
 they first appear. The right
-side shows the selected target's status, the exact command each mode runs, live
-load, memory, disk, and uptime, and recent logs. The bottom bar keeps the host's
+side shows the selected target's status, its declared stats, the exact command
+each mode runs, and recent logs. The bottom bar keeps the host's
 resource usage visible while you browse other machines.
 
 A target's status is checked while it is selected, and in the background for
-targets with `watch: true`; others show as unknown until you visit them.
+targets with `watch: true`; others show as unknown until you visit them. When a
+session exits with a non-zero code, the status line says so.
 
 | Key | Action |
 | --- | --- |
@@ -164,7 +168,7 @@ targets:
     modes:
       - { name: tmux, run: tmux new-session -A -s host }
       - { name: shell }
-      - { name: top, run: htop, back: true }
+      - { name: top, run: htop }
 
   - { name: devbox, profile: lima }
 
@@ -246,7 +250,6 @@ profile, such as a function or `PATH` entry, ask for one:
 | --- | --- |
 | `name` | Name shown in the dashboard |
 | `run` | Shell command to run on the target; omit it to open the user's shell |
-| `back` | Return to the dashboard when the command exits |
 
 ### Profiles
 

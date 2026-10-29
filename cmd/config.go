@@ -36,7 +36,7 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 #         load, mem, disk (path), uptime, gauge (label, value, max, unit)
 #         and text (label, value). Left out means none.
 # modes   ways to enter; the first is the default. A mode without run opens
-#         the user's shell; back: true returns to the dashboard when it exits.
+#         the user's shell. Every session returns to the dashboard.
 #
 # A profile holds shared fields; {name} becomes the target's name.
 
@@ -64,7 +64,7 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s host }
 #       - { name: shell }
-#       - { name: top, run: htop, back: true }
+#       - { name: top, run: htop }
 #   - { name: devbox, profile: lima }
 #   - name: box
 #     group: remotes
@@ -156,11 +156,7 @@ func checkConfig() error {
 			if i == 0 {
 				marker = "*"
 			}
-			back := ""
-			if mode.Back {
-				back = "  (returns to the dashboard)"
-			}
-			ui.Info("  %s %-10s %s%s", marker, mode.Name, mode.Command(), back)
+			ui.Info("  %s %-10s %s", marker, mode.Name, mode.Command())
 		}
 	}
 

@@ -139,8 +139,8 @@ targets:`+host+`
 	if got := tokyo.ModeNames(); !slices.Equal(got, []string{"top"}) {
 		t.Errorf("target modes replace the profile's wholesale, got %v", got)
 	}
-	if top, _ := tokyo.Mode("top"); !top.Back {
-		t.Errorf("back should survive the merge")
+	if top, _ := tokyo.Mode("top"); top.Argv[len(top.Argv)-1] != "htop" {
+		t.Errorf("a mode still carrying the retired back key should load, got %q", top.Argv)
 	}
 }
 

@@ -18,7 +18,6 @@ var localVia = []string{"sh", "-c"}
 type Mode struct {
 	Name string
 	Argv []string
-	Back bool
 }
 
 type Target struct {

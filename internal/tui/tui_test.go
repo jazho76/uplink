@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -86,7 +87,7 @@ func hostTarget() target.Target {
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
-			{Name: "top", Argv: []string{"/bin/sh", "-c", "htop"}, Back: true},
+			{Name: "top", Argv: []string{"/bin/sh", "-c", "htop"}},
 		},
 	}
 }
@@ -102,7 +103,7 @@ func vm(name string) target.Target {
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: append(via, "tmux")},
 			{Name: "shell", Argv: via},
-			{Name: "top", Argv: append(via, "htop"), Back: true},
+			{Name: "top", Argv: append(via, "htop")},
 		},
 	}
 }
@@ -288,10 +289,6 @@ func TestModeCycling(t *testing.T) {
 	if got := m.mode().Name; got != "top" {
 		t.Errorf("tab should advance to top, got %q", got)
 	}
-	if !m.mode().Back {
-		t.Errorf("top carries back: the dashboard should survive it")
-	}
-
 	m = key(m, "tab")
 	if got := m.mode().Name; got != "tmux" {
 		t.Errorf("tab should wrap around to tmux, got %q", got)
@@ -1317,8 +1314,8 @@ func TestLaunchRowFixesItsMode(t *testing.T) {
 		t.Errorf("the row is the mode, so it needs no badge:\n%s", badge)
 	}
 
-	if m = focus(m, "top"); !m.mode().Back {
-		t.Errorf("a back mode should still return to the dashboard")
+	if m = focus(m, "top"); m.mode().Name != "top" {
+		t.Errorf("each launch row selects its own mode, got %q", m.mode().Name)
 	}
 }
 
@@ -1515,5 +1512,42 @@ func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
 	}
 	if m.probeSelected() != nil {
 		t.Errorf("a probe still in flight must not be joined by another")
+	}
+}
+
+func TestSessionEndReportsWithoutBlame(t *testing.T) {
+	exitErr := exec.Command("sh", "-c", "exit 3").Run()
+	for err, want := range map[error]string{
+		nil:                     "",
+		exitErr:                 "forge: session ended with exit 3",
+		errors.New("not found"): "forge: not found",
+	} {
+		if got := sessionEnded("forge", err).status; got != want {
+			t.Errorf("sessionEnded(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = probed(focus(m, "forge"), "forge", true)
+	m.status = "stale message"
+
+	for _, ended := range []execDoneMsg{{}, {status: "forge: session ended with exit 255"}} {
+		next, cmd := m.Update(ended)
+		m = next.(model)
+		if cmd != nil {
+			if _, quit := cmd().(tea.QuitMsg); quit {
+				t.Fatalf("a session ending must never close the dashboard")
+			}
+		}
+		if m.status != ended.status {
+			t.Errorf("status = %q, want %q", m.status, ended.status)
+		}
+		if !m.live["forge"].pending {
+			t.Errorf("the target should be checked again right away")
+		}
+		m = probed(m, "forge", true)
 	}
 }
