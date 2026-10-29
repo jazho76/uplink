@@ -1006,8 +1006,8 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	if got := m.uptimeOf(m.selected()); got != "" {
 		t.Errorf("a down target must not show the uptime from its last probe, got %q", got)
 	}
-	if !strings.Contains(ansi.Strip(m.previewBody(60, 20)), "unavailable") {
-		t.Errorf("a failed probe should say its readings are unavailable")
+	if preview := ansi.Strip(m.previewBody(60, 20)); !strings.Contains(preview, "unavailable") || strings.Contains(preview, "load") {
+		t.Errorf("a failed probe should say its readings are unavailable, naming no metric:\n%s", preview)
 	}
 }
 

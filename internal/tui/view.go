@@ -148,7 +148,7 @@ func (m model) renderLive(name string, width, height int) string {
 		return labelStyle.Render("…") + "\n"
 	}
 	if !e.statsOK {
-		return renderFields([]field{{"load", labelStyle.Render("unavailable")}}, width)
+		return labelStyle.Render("unavailable") + "\n"
 	}
 
 	var gauges []gaugeRow
