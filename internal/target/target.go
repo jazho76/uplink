@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/jazho76/uplink/internal/probe"
 )
 
 const (
@@ -30,7 +32,7 @@ type Target struct {
 	Logs   string
 	Watch  bool
 	Expand bool
-	Stats  bool
+	Stats  probe.Metrics
 	Modes  []Mode
 }
 

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/run"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
@@ -30,11 +32,15 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 # logs    host-side command whose output fills the log view (ctrl+l).
 # watch   true polls status in the background, not only while selected.
 # expand  true lists each mode as its own row.
-# stats   false skips the load, memory and disk probe.
+# stats   metrics shown while selected, measured in one probe through exec:
+#         load, mem, disk (path), uptime, gauge (label, value, max, unit)
+#         and text (label, value). Left out means none.
 # modes   ways to enter; the first is the default. A mode without run opens
 #         the user's shell; back: true returns to the dashboard when it exits.
 #
 # A profile holds shared fields; {name} becomes the target's name.
+
+# x-linux: &linux [{ type: load }, { type: mem }, { type: disk }, { type: uptime }]
 
 # profiles:
 #   lima:
@@ -45,6 +51,7 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 #     down: limactl stop {name}
 #     logs: tail -n 500 ~/.lima/{name}/serial.log
 #     watch: true
+#     stats: *linux
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
@@ -53,6 +60,7 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 #   - name: host
 #     group: local
 #     expand: true
+#     stats: *linux
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s host }
 #       - { name: shell }
@@ -137,6 +145,7 @@ func checkConfig() error {
 			{"up", t.Up},
 			{"down", t.Down},
 			{"logs", t.Logs},
+			{"stats", statNames(t.Stats)},
 		} {
 			if f.value != "" {
 				ui.Info("  %-7s %s", f.key, f.value)
@@ -167,10 +176,18 @@ func flags(t target.Target) string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"watch", t.Watch}, {"expand", t.Expand}, {"no stats", !t.Stats}} {
+	}{{"watch", t.Watch}, {"expand", t.Expand}} {
 		if f.on {
 			set += "  " + f.name
 		}
 	}
 	return set
+}
+
+func statNames(metrics probe.Metrics) string {
+	names := make([]string, len(metrics))
+	for i, m := range metrics {
+		names[i] = m.Name()
+	}
+	return strings.Join(names, ", ")
 }

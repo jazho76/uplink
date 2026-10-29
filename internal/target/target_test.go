@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/probe"
 )
 
 const host = `
@@ -79,7 +80,7 @@ func TestShellWords(t *testing.T) {
 
 func TestMissingTargetsFallBackToTheHost(t *testing.T) {
 	targets := mustLoad(t, "")
-	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand {
+	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand || len(targets[0].Stats) != 4 {
 		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
 	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
@@ -95,6 +96,7 @@ profiles:
     watch: true
     via: ssh -F ~/.lima/{name}/ssh.config lima-{name}
     logs: tail ~/.lima/{name}/serial.log
+    stats: [{ type: load }, { type: gauge, label: jobs, value: "jobs {name}", max: 8 }]
     modes:
       - { name: tmux, run: "tmux new-session -A -s {name}" }
       - { name: shell }
@@ -103,15 +105,18 @@ targets:`+host+`
   - name: tokyo
     profile: lima
     logs: echo own
-    stats: false
+    stats: []
     modes:
       - { name: top, run: htop, back: true }
 `)
 	home, _ := os.UserHomeDir()
 
 	forge := find(t, targets, "forge")
-	if forge.Group != "vms" || !forge.Watch || !forge.Stats {
-		t.Errorf("forge should inherit group and watch and default to stats, got %+v", forge)
+	if forge.Group != "vms" || !forge.Watch || len(forge.Stats) != 2 {
+		t.Errorf("forge should inherit group, watch and stats, got %+v", forge)
+	}
+	if got := forge.Stats[1].Value; got != "jobs forge" {
+		t.Errorf("metric commands should interpolate the name, got %q", got)
 	}
 	wantVia := []string{"ssh", "-F", filepath.Join(home, ".lima/forge/ssh.config"), "lima-forge"}
 	if !slices.Equal(forge.Via, wantVia) {
@@ -128,7 +133,7 @@ targets:`+host+`
 	}
 
 	tokyo := find(t, targets, "tokyo")
-	if tokyo.Logs != "echo own" || tokyo.Stats {
+	if tokyo.Logs != "echo own" || tokyo.Stats == nil || len(tokyo.Stats) != 0 {
 		t.Errorf("target fields override the profile, got logs %q stats %v", tokyo.Logs, tokyo.Stats)
 	}
 	if got := tokyo.ModeNames(); !slices.Equal(got, []string{"top"}) {
@@ -154,7 +159,7 @@ targets:
 	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
 		t.Errorf("shell argv = %q", shell.Argv)
 	}
-	if local.Group != DefaultGroup || local.Watch || local.Expand || !local.Stats {
+	if local.Group != DefaultGroup || local.Watch || local.Expand || local.Stats != nil {
 		t.Errorf("unset fields should take their defaults, got %+v", local)
 	}
 }
@@ -386,16 +391,52 @@ func TestHookFailureCarriesItsStderr(t *testing.T) {
 }
 
 func TestStatsFlowThroughExec(t *testing.T) {
+	metrics := probe.Metrics{{Type: probe.TypeGauge, Label: "where", Value: "echo 1", Max: "2"}}
 	for name, target := range map[string]Target{
-		"local": {},
-		"via":   {Via: []string{"false"}, Exec: []string{"sh", "-c", "exec sh"}},
+		"local": {Stats: metrics},
+		"via":   {Stats: metrics, Via: []string{"false"}, Exec: []string{"sh", "-c", "exec sh"}},
 	} {
-		stats, err := System{}.Stats(target)
+		readings, err := System{}.Stats(target)
 		if err != nil {
 			t.Fatalf("%s: stats through a local shell: %v", name, err)
 		}
-		if stats.Cores < 1 || stats.MemTotal == 0 {
-			t.Errorf("%s: the probe script should report this machine, got %+v", name, stats)
+		if len(readings) != 1 || !readings[0].OK || readings[0].Value != 1 {
+			t.Errorf("%s: the declared metrics should come back, got %+v", name, readings)
 		}
+	}
+}
+
+func TestStatsAreValidated(t *testing.T) {
+	targets, err := load(t, `
+targets:`+host+`
+  - name: broken
+    stats: [{ type: load }, { type: gauge, label: gpu }]
+    modes: [{ name: shell }]
+  - name: legacy
+    stats: false
+    modes: [{ name: shell }]
+`)
+	if err == nil {
+		t.Fatal("broken stats must be reported")
+	}
+	for _, want := range []string{`"broken": stats #2: gauge needs a value`, "use [] for none"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q:\n%v", want, err)
+		}
+	}
+	if len(targets) == 0 || targets[0].Name != "host" {
+		t.Errorf("the host should survive, got %+v", targets)
+	}
+}
+
+func TestAnchoredStatsAreShared(t *testing.T) {
+	targets := mustLoad(t, `
+x-linux: &linux [{ type: load }, { type: mem }]
+targets:
+  - { name: one, stats: *linux, modes: [{ name: shell }] }
+  - { name: two, stats: *linux, modes: [{ name: shell }] }
+`)
+	if len(find(t, targets, "one").Stats) != 2 || len(find(t, targets, "two").Stats) != 2 {
+		t.Errorf("an anchored list should reach every target, got %+v", targets)
 	}
 }

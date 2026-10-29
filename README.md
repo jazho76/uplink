@@ -139,6 +139,8 @@ The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`.
 Without a `targets` section, Uplink offers only the host.
 
 ```yaml
+x-linux: &linux [{ type: load }, { type: mem }, { type: disk }, { type: uptime }]
+
 profiles:
   lima:
     group: vms
@@ -148,6 +150,7 @@ profiles:
     down: limactl stop {name}
     logs: tail -n 500 ~/.lima/{name}/serial.log
     watch: true
+    stats: *linux
     modes:
       - { name: tmux, run: tmux new-session -A -s 0 }
       - { name: shell }
@@ -157,6 +160,7 @@ targets:
     group: local
     expand: true
     logs: journalctl --system -n 500 --no-pager -o short
+    stats: *linux
     modes:
       - { name: tmux, run: tmux new-session -A -s host }
       - { name: shell }
@@ -191,7 +195,7 @@ without `via` runs here.
 | `logs` | Host-side command whose output fills the log view |
 | `watch` | `true` checks status in the background, not only while selected |
 | `expand` | `true` gives each mode its own row in the dashboard |
-| `stats` | `false` skips the load, memory, and disk probe |
+| `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
 | `modes` | Ways to enter the target; the first is the default |
 | `profile` | Profile to take every unset field from |
 
@@ -214,7 +218,6 @@ profiles:
     up: docker start {name}
     down: docker stop {name}
     logs: docker logs --tail 500 {name}
-    stats: false
     modes:
       - { name: shell }
 
@@ -253,18 +256,49 @@ profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
 `logs`, and `run` becomes the target's name. Inside a flow mapping, quote values
 that contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
 
-To share other values, define a YAML anchor under a top-level key Uplink does
-not use, such as `x-ssh: &ssh ssh -t -o ConnectTimeout=2`, and refer to it
-with `via: *ssh`.
+To share values between targets that do not share a profile, define a YAML
+anchor under a top-level key Uplink does not use, such as the `x-linux` list
+above, and refer to it with `stats: *linux`.
+
+### Stats
+
+`stats` lists what the live block shows, in order. A profile's list is taken
+whole; `stats: []` turns an inherited list off.
+
+```yaml
+stats:
+  - { type: load }
+  - { type: disk, path: /srv }
+  - { type: gauge, label: gpu, value: "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", max: 100 }
+  - { type: gauge, label: cache, value: du -sb ~/.cache | cut -f1, max: df -B1 --output=size ~ | tail -1, unit: bytes }
+  - { type: text, label: agents, value: pgrep -c claude }
+```
+
+| Type | Fields | Shows |
+| --- | --- | --- |
+| `load` | `label` | Load average out of the core count |
+| `mem` | `label` | Used memory out of total |
+| `disk` | `path` (default `/`), `label` | Used space out of the filesystem's size |
+| `uptime` | none | Uptime, next to the target's name |
+| `gauge` | `label`, `value`, `max`, `unit` | `value` out of `max` as a bar |
+| `text` | `label`, `value` | `value`'s output as is |
+
+`value` and `max` are shell commands run on the target; the first line of
+their output is used. A `max` that is a plain number is used as is. `unit:
+bytes` formats both as sizes. `{name}` works in `value`, `max`, and `path`. The
+first gauge is also charted over time.
+
+The built-ins read `/proc`, so they need a Linux target. Every metric runs in
+one script piped through `exec` into `sh`, one round trip per refresh. A metric
+whose command fails or prints no number shows `?`; the others are unaffected.
 
 ### Probes and timeouts
 
-Stats come from a small POSIX script piped through `exec` into `sh`, so the
-target needs `/proc`; set `stats: false` otherwise. Probes, hooks, and logs run
-without a terminal, so a transport that wants a password shows the target as
-down instead of prompting. Logs give up after 2 seconds, `status` hooks after 5,
-probes after 30, and `up` and `down` after 10 minutes. Add
-`-o ConnectTimeout=2` to an ssh `via` to report an unreachable host sooner.
+Probes, hooks, and logs run without a terminal, so a transport that wants a
+password shows the target as down instead of prompting. Logs give up after 2
+seconds, `status` hooks after 5, probes after 30, and `up` and `down` after 10
+minutes. Add `-o ConnectTimeout=2` to an ssh `via` to report an unreachable
+host sooner.
 
 ### Checking the config
 

@@ -18,7 +18,7 @@ const (
 )
 
 type Backend interface {
-	Stats(Target) (probe.Stats, error)
+	Stats(Target) ([]probe.Reading, error)
 	Status(Target) error
 	Up(Target) error
 	Down(Target) error
@@ -27,8 +27,8 @@ type Backend interface {
 
 type System struct{}
 
-func (System) Stats(t Target) (probe.Stats, error) {
-	return probe.Run(probeCeiling, t.ExecArgvFor("sh")...)
+func (System) Stats(t Target) ([]probe.Reading, error) {
+	return probe.Run(probeCeiling, t.Stats, t.ExecArgvFor("sh")...)
 }
 
 func (System) Status(t Target) error {

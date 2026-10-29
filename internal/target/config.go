@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/probe"
 )
 
 const (
@@ -32,26 +33,27 @@ type ModeSpec struct {
 }
 
 type Spec struct {
-	Name    string     `yaml:"name"`
-	Profile string     `yaml:"profile"`
-	Kind    string     `yaml:"kind"`
-	Group   string     `yaml:"group"`
-	Via     string     `yaml:"via"`
-	Exec    string     `yaml:"exec"`
-	Status  string     `yaml:"status"`
-	Up      string     `yaml:"up"`
-	Down    string     `yaml:"down"`
-	Logs    string     `yaml:"logs"`
-	Watch   *bool      `yaml:"watch"`
-	Expand  *bool      `yaml:"expand"`
-	Stats   *bool      `yaml:"stats"`
-	Modes   []ModeSpec `yaml:"modes"`
+	Name    string        `yaml:"name"`
+	Profile string        `yaml:"profile"`
+	Kind    string        `yaml:"kind"`
+	Group   string        `yaml:"group"`
+	Via     string        `yaml:"via"`
+	Exec    string        `yaml:"exec"`
+	Status  string        `yaml:"status"`
+	Up      string        `yaml:"up"`
+	Down    string        `yaml:"down"`
+	Logs    string        `yaml:"logs"`
+	Watch   *bool         `yaml:"watch"`
+	Expand  *bool         `yaml:"expand"`
+	Stats   probe.Metrics `yaml:"stats"`
+	Modes   []ModeSpec    `yaml:"modes"`
 }
 
 var defaultHost = Spec{
 	Name:   "host",
 	Group:  "local",
 	Expand: new(true),
+	Stats:  probe.Metrics{{Type: probe.TypeLoad}, {Type: probe.TypeMem}, {Type: probe.TypeDisk}, {Type: probe.TypeUptime}},
 	Modes: []ModeSpec{
 		{Name: "tmux", Run: "tmux new-session -A -s host"},
 		{Name: "shell"},
@@ -148,6 +150,11 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	if err != nil {
 		return Target{}, err
 	}
+	for i, m := range spec.Stats {
+		if err := m.Validate(); err != nil {
+			return Target{}, fmt.Errorf("stats #%d: %w", i+1, err)
+		}
+	}
 
 	t := Target{
 		Name:   spec.Name,
@@ -160,7 +167,7 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 		Logs:   spec.Logs,
 		Watch:  valueOr(spec.Watch, false),
 		Expand: valueOr(spec.Expand, false),
-		Stats:  valueOr(spec.Stats, true),
+		Stats:  spec.Stats,
 	}
 
 	modes, err := t.modes(spec.Modes)
@@ -202,7 +209,9 @@ func (s Spec) over(base Spec) Spec {
 	s.Logs = cmp.Or(s.Logs, base.Logs)
 	s.Watch = cmp.Or(s.Watch, base.Watch)
 	s.Expand = cmp.Or(s.Expand, base.Expand)
-	s.Stats = cmp.Or(s.Stats, base.Stats)
+	if s.Stats == nil {
+		s.Stats = base.Stats
+	}
 	if len(s.Modes) == 0 {
 		s.Modes = base.Modes
 	}
@@ -219,6 +228,14 @@ func (s Spec) interpolate() Spec {
 		modes[i] = m
 	}
 	s.Modes = modes
+	if s.Stats != nil {
+		stats := make(probe.Metrics, len(s.Stats))
+		for i, m := range s.Stats {
+			m.Path, m.Value, m.Max = fill(m.Path), fill(m.Value), fill(m.Max)
+			stats[i] = m
+		}
+		s.Stats = stats
+	}
 	return s
 }
 

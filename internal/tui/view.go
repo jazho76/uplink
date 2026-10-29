@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/humanize"
+	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
 )
@@ -107,7 +110,7 @@ func (m model) previewBody(width, height int) string {
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
 	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
 
-	if it.t.Stats {
+	if len(it.t.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.name(), width, height))
 	}
@@ -148,35 +151,90 @@ func (m model) renderLive(name string, width, height int) string {
 		return renderFields([]field{{"load", labelStyle.Render("unavailable")}}, width)
 	}
 
-	s := e.stats
-	load := loadFraction(s.Load, s.Cores)
-	gauges := []gaugeRow{
-		{"load", load, fmt.Sprintf("%.2f / %d", s.Load, s.Cores)},
-		usageGauge("memory", s.MemUsed, s.MemTotal),
-		usageGauge("disk", s.DiskUsed, s.DiskTotal),
+	var gauges []gaugeRow
+	var labels []string
+	for _, r := range e.readings {
+		if r.Gauge() {
+			gauges = append(gauges, gaugeOf(r))
+		}
+		if r.Type != probe.TypeUptime {
+			labels = append(labels, r.Name())
+		}
 	}
 
-	indent := gaugeIndent(gauges)
-	return renderFields(gaugeFields(gauges, width-indent), width) +
-		renderLoadChart(e, load, width-indent, height, indent)
+	indent := labelIndent(labels)
+	gaugeRows := gaugeFields(gauges, width-indent)
+	var fields []field
+	for _, r := range e.readings {
+		switch {
+		case r.Gauge():
+			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
+		case r.Type == probe.TypeText:
+			fields = append(fields, field{r.Name(), valueStyle.Render(cmp.Or(r.Text, "?"))})
+		}
+	}
+
+	live := renderFields(fields, width)
+	if gauge, ok := firstGauge(e.readings); ok && gauge.OK {
+		live += renderGaugeChart(e, gauge, width-indent, height, indent)
+	}
+	return live
 }
 
 type gaugeRow struct {
 	label    string
 	fraction float64
 	reading  string
+	missing  bool
+}
+
+func gaugeOf(r probe.Reading) gaugeRow {
+	switch {
+	case !r.OK:
+		return gaugeRow{label: r.Name(), reading: "?", missing: true}
+	case r.Bytes():
+		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
+	default:
+		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: gaugeValue(r, r.Value) + " / " + number(r.Max)}
+	}
+}
+
+func gaugeValue(r probe.Reading, v float64) string {
+	switch {
+	case r.Bytes():
+		return humanize.Bytes(uint64(v))
+	case r.Type == probe.TypeLoad:
+		return fmt.Sprintf("%.2f", v)
+	default:
+		return number(v)
+	}
+}
+
+func number(v float64) string {
+	if v == math.Trunc(v) {
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+func firstGauge(readings []probe.Reading) (probe.Reading, bool) {
+	i := slices.IndexFunc(readings, func(r probe.Reading) bool { return r.Gauge() })
+	if i < 0 {
+		return probe.Reading{}, false
+	}
+	return readings[i], true
 }
 
 func usageGauge(label string, used, total uint64) gaugeRow {
-	return gaugeRow{label, usedFraction(used, total), amount(used, total)}
+	return gaugeRow{label: label, fraction: usedFraction(used, total), reading: amount(used, total)}
 }
 
-func gaugeIndent(gauges []gaugeRow) int {
-	labels := 0
-	for _, g := range gauges {
-		labels = max(labels, lipgloss.Width(g.label))
+func labelIndent(labels []string) int {
+	widest := 0
+	for _, label := range labels {
+		widest = max(widest, lipgloss.Width(label))
 	}
-	return labels + fieldGap
+	return widest + fieldGap
 }
 
 func gaugeFields(gauges []gaugeRow, width int) []field {
@@ -194,6 +252,9 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 	for _, g := range gauges {
 		reading := valueStyle.Render(pad(g.reading, readings, plainStyle))
 		percent := labelStyle.Render(fmt.Sprintf("%3.0f%%", g.fraction*100))
+		if g.missing {
+			percent = labelStyle.Render(fmt.Sprintf("%*s", percentWidth, "?"))
+		}
 		gap := strings.Repeat(" ", percentGap)
 		fields = append(fields, field{g.label,
 			gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent, gaugeGap)})
@@ -201,7 +262,7 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 	return fields
 }
 
-func renderLoadChart(e liveEntry, load float64, width, height, indent int) string {
+func renderGaugeChart(e liveEntry, gauge probe.Reading, width, height, indent int) string {
 	if width < 1 {
 		return ""
 	}
@@ -209,13 +270,13 @@ func renderLoadChart(e liveEntry, load float64, width, height, indent int) strin
 	ceiling := chartCeiling(visible)
 
 	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
-	head := labelStyle.Render("load · last " + window)
-	peak := labelStyle.Render(fmt.Sprintf("peak %.2f", ceiling*float64(e.stats.Cores)))
+	head := labelStyle.Render(gauge.Name() + " · last " + window)
+	peak := labelStyle.Render("peak " + gaugeValue(gauge, ceiling*gauge.Max))
 	if width < lipgloss.Width(head)+1+lipgloss.Width(peak) {
 		return ""
 	}
 
-	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(load))
+	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(gauge.Fraction()))
 	if len(plot) == 0 {
 		return ""
 	}
@@ -253,10 +314,14 @@ func unitOf(size string) string {
 
 func (m model) uptimeOf(it item) string {
 	e := m.live[it.name()]
-	if !it.t.Stats || !e.statsOK || m.statusOf(it.t) != statusUp {
+	if !e.statsOK || m.statusOf(it.t) != statusUp {
 		return ""
 	}
-	if up := humanize.Duration(e.stats.Uptime); up != "" {
+	i := slices.IndexFunc(e.readings, func(r probe.Reading) bool { return r.Type == probe.TypeUptime && r.OK })
+	if i < 0 {
+		return ""
+	}
+	if up := humanize.Duration(e.readings[i].Uptime()); up != "" {
 		return "up " + up
 	}
 	return ""

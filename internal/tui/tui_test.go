@@ -21,11 +21,34 @@ type fakeBackend struct {
 	statuses int
 }
 
-func (f *fakeBackend) Stats(t target.Target) (probe.Stats, error) {
+func (f *fakeBackend) Stats(t target.Target) ([]probe.Reading, error) {
 	if f.down[t.Name] {
-		return probe.Stats{}, errBoom{}
+		return nil, errBoom{}
 	}
-	return probe.Stats{Cores: 4, Load: 0.10}, nil
+	readings := make([]probe.Reading, len(t.Stats))
+	for i, m := range t.Stats {
+		readings[i] = reading(m, 0.1, 4)
+	}
+	return readings, nil
+}
+
+var linuxMetrics = probe.Metrics{{Type: probe.TypeLoad}, {Type: probe.TypeMem}, {Type: probe.TypeDisk}, {Type: probe.TypeUptime}}
+
+func reading(m probe.Metric, value, max float64) probe.Reading {
+	return probe.Reading{Metric: m, Value: value, Max: max, OK: true}
+}
+
+func loadReading(load, cores float64) probe.Reading {
+	return reading(linuxMetrics[0], load, cores)
+}
+
+func linuxReadings(load, cores, used, total float64, uptime time.Duration) []probe.Reading {
+	return []probe.Reading{
+		loadReading(load, cores),
+		reading(linuxMetrics[1], used, total),
+		reading(linuxMetrics[2], used, total),
+		reading(linuxMetrics[3], uptime.Seconds(), 0),
+	}
 }
 
 func (f *fakeBackend) Status(t target.Target) error {
@@ -59,7 +82,7 @@ func hostTarget() target.Target {
 		Group:  "local",
 		Expand: true,
 		Logs:   "journalctl",
-		Stats:  true,
+		Stats:  linuxMetrics,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
@@ -75,7 +98,7 @@ func vm(name string) target.Target {
 		Group: "vms",
 		Via:   via,
 		Logs:  "tail serial.log",
-		Stats: true,
+		Stats: linuxMetrics,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: append(via, "tmux")},
 			{Name: "shell", Argv: via},
@@ -107,7 +130,7 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{name: name, up: up, full: true, stats: probe.Stats{Cores: 4}, statsOK: up})
+	next, _ := m.Update(liveMsg{name: name, up: up, full: true, readings: linuxReadings(0, 4, 0, 0, 0), statsOK: up})
 	return next.(model)
 }
 
@@ -150,7 +173,7 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Logs, quiet.Stats = "", false
+	quiet.Logs, quiet.Stats = "", nil
 	m = load(withTargets(m, vm("forge"), quiet))
 
 	m = sized(focus(m, "forge"))
@@ -224,7 +247,7 @@ func TestProbeResultSetsStatus(t *testing.T) {
 func TestReachabilityStandsInForStats(t *testing.T) {
 	m, backend := newTestModel()
 	quiet := remote("dojo")
-	quiet.Stats = false
+	quiet.Stats = nil
 	m = sized(load(withTargets(m, quiet)))
 	m = focus(m, "dojo")
 
@@ -847,14 +870,15 @@ func TestFieldValuesNeverOverrunTheirWidth(t *testing.T) {
 
 func TestLiveGaugesAlignTheirPercentColumn(t *testing.T) {
 	block := ansi.Strip(renderFields(gaugeFields([]gaugeRow{
-		{"load", 0.34, "4.10 / 12"},
-		{"memory", 0.26, "8/31GiB"},
-		{"disk", 0.75, "112/150GiB"},
+		{label: "load", fraction: 0.34, reading: "4.10 / 12"},
+		{label: "memory", fraction: 0.26, reading: "8/31GiB"},
+		{label: "gpu", reading: "?", missing: true},
+		{label: "disk", fraction: 0.75, reading: "112/150GiB"},
 	}, 12), 60))
 
 	var columns []int
 	for _, line := range strings.Split(strings.TrimRight(block, "\n"), "\n") {
-		columns = append(columns, strings.Index(line, "%"))
+		columns = append(columns, strings.LastIndexAny(line, "%?"))
 	}
 	for i, at := range columns {
 		if at < 0 || at != columns[0] {
@@ -873,7 +897,7 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 		history = appendSample(history, float64(i%7)/7)
 	}
 	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, history: history,
-		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+		readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	gauges, chart := strings.Index(preview, "disk"), strings.Index(preview, "load · last")
@@ -894,13 +918,13 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 }
 
 func TestLoadChartSpansTheAvailableWidth(t *testing.T) {
-	e := liveEntry{stats: probe.Stats{Cores: 4, Load: 1}}
+	var e liveEntry
 	for i := 0; i < 20; i++ {
 		e.history = appendSample(e.history, float64(i%7)/7)
 	}
 
 	for _, width := range []int{28, 40, 96} {
-		block := ansi.Strip(renderLoadChart(e, 0.25, width, 40, 0))
+		block := ansi.Strip(renderGaugeChart(e, loadReading(1, 4), width, 40, 0))
 		for i, line := range strings.Split(strings.Trim(block, "\n"), "\n") {
 			if got := lipgloss.Width(line); got != width {
 				t.Errorf("%d cols: chart line %d spans %d", width, i, got)
@@ -910,13 +934,13 @@ func TestLoadChartSpansTheAvailableWidth(t *testing.T) {
 }
 
 func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
-	e := liveEntry{stats: probe.Stats{Cores: 10}}
+	var e liveEntry
 	e.history = appendSample(e.history, 0.9)
 	for i := 0; i < 60; i++ {
 		e.history = appendSample(e.history, 0.2)
 	}
 
-	narrow := ansi.Strip(renderLoadChart(e, 0.2, 30, 40, 0))
+	narrow := ansi.Strip(renderGaugeChart(e, loadReading(2, 10), 30, 40, 0))
 	if strings.Contains(narrow, "peak 9.00") {
 		t.Errorf("a spike scrolled off the chart must not be claimed as its peak:\n%s", narrow)
 	}
@@ -924,21 +948,21 @@ func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
 		t.Errorf("the peak should be the tallest column actually drawn:\n%s", narrow)
 	}
 
-	wide := ansi.Strip(renderLoadChart(e, 0.2, 100, 40, 0))
+	wide := ansi.Strip(renderGaugeChart(e, loadReading(2, 10), 100, 40, 0))
 	if !strings.Contains(wide, "peak 9.00") {
 		t.Errorf("a chart wide enough to include the spike should report it:\n%s", wide)
 	}
 }
 
 func TestLoadChartWindowFollowsWhatIsVisible(t *testing.T) {
-	e := liveEntry{stats: probe.Stats{Cores: 4}}
+	var e liveEntry
 	for i := 0; i < maxLiveSamples; i++ {
 		e.history = appendSample(e.history, 0.3)
 	}
 
 	const narrowWidth = 30
-	wide := ansi.Strip(renderLoadChart(e, 0.3, 120, 40, 0))
-	narrow := ansi.Strip(renderLoadChart(e, 0.3, narrowWidth, 40, 0))
+	wide := ansi.Strip(renderGaugeChart(e, loadReading(1.2, 4), 120, 40, 0))
+	narrow := ansi.Strip(renderGaugeChart(e, loadReading(1.2, 4), narrowWidth, 40, 0))
 	if wide == narrow {
 		t.Fatalf("a wider chart shows a longer window")
 	}
@@ -951,7 +975,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
@@ -972,7 +996,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
+	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
 
 	if got := m.uptimeOf(m.selected()); got == "" {
 		t.Fatalf("a reachable target should report uptime")
@@ -1396,5 +1420,61 @@ func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 		if got := m.selected().label(); got != want {
 			t.Fatalf("down should reach %q, got %q", want, got)
 		}
+	}
+}
+
+func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
+	gpu := probe.Metric{Type: probe.TypeGauge, Label: "gpu", Value: "x", Max: "100"}
+	cache := probe.Metric{Type: probe.TypeGauge, Label: "cache", Value: "x", Max: "x", Unit: probe.UnitBytes}
+	agents := probe.Metric{Type: probe.TypeText, Label: "agents", Value: "x"}
+	broken := probe.Metric{Type: probe.TypeGauge, Label: "broken", Value: "x", Max: "1"}
+
+	m, _ := newTestModel()
+	box := vm("box")
+	box.Stats = probe.Metrics{gpu, cache, agents, broken}
+	m = sized(load(withTargets(m, box)))
+	m = focus(m, "box")
+	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
+		history:  []float64{0.2, 0.37},
+		readings: []probe.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
+
+	preview := ansi.Strip(m.previewBody(70, 40))
+	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?", "gpu · last", "peak 37"}
+	last := -1
+	for _, want := range order {
+		at := strings.Index(preview[last+1:], want)
+		if at < 0 {
+			t.Fatalf("live block missing %q after position %d:\n%s", want, last, preview)
+		}
+		last += at + 1
+	}
+	if strings.Contains(preview, "load") || strings.Contains(preview, "memory") {
+		t.Errorf("only declared metrics are shown:\n%s", preview)
+	}
+}
+
+func TestNoGaugeMeansNoChart(t *testing.T) {
+	agents := probe.Metric{Type: probe.TypeText, Label: "agents", Value: "x"}
+	m, _ := newTestModel()
+	box := vm("box")
+	box.Stats = probe.Metrics{agents}
+	m = sized(load(withTargets(m, box)))
+	m = focus(m, "box")
+	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
+		readings: []probe.Reading{{Metric: agents, Text: "3", OK: true}}}
+
+	if preview := ansi.Strip(m.previewBody(70, 40)); strings.Contains(preview, "· last") {
+		t.Errorf("text alone draws no chart:\n%s", preview)
+	}
+}
+
+func TestHistoryFollowsTheFirstGauge(t *testing.T) {
+	m, _ := newTestModel()
+	m = probed(m, "forge", true)
+	next, _ := m.Update(liveMsg{name: "forge", up: true, full: true, statsOK: true,
+		readings: []probe.Reading{{Metric: linuxMetrics[0]}, reading(linuxMetrics[1], 1, 4)}})
+	m = next.(model)
+	if got := len(m.live["forge"].history); got != 1 {
+		t.Errorf("a sample whose first gauge is missing adds nothing to the chart, history has %d", got)
 	}
 }

@@ -95,7 +95,7 @@ func TestLiveHistoryKeepsTheNewestSamples(t *testing.T) {
 }
 
 func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
-	gauges := []gaugeRow{{"memory", 0.5, "7.6/31GiB"}}
+	gauges := []gaugeRow{{label: "memory", fraction: 0.5, reading: "7.6/31GiB"}}
 
 	cramped := ansi.Strip(gaugeFields(gauges, 24)[0].value)
 	if strings.ContainsAny(cramped, blockGlyphs.fill+blockGlyphs.track) {

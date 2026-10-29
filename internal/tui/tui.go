@@ -82,15 +82,15 @@ type peek struct {
 }
 
 type liveEntry struct {
-	state   status
-	action  status
-	stats   probe.Stats
-	statsOK bool
-	history []float64
-	at      time.Time
-	checked time.Time
-	pending bool
-	epoch   int
+	state    status
+	action   status
+	readings []probe.Reading
+	statsOK  bool
+	history  []float64
+	at       time.Time
+	checked  time.Time
+	pending  bool
+	epoch    int
 }
 
 func Run(targets []target.Target, backend target.Backend, configWarning error) error {
@@ -274,12 +274,12 @@ type logViewMsg struct {
 type hostStatsMsg struct{ stats probe.Stats }
 
 type liveMsg struct {
-	name    string
-	epoch   int
-	up      bool
-	full    bool
-	stats   probe.Stats
-	statsOK bool
+	name     string
+	epoch    int
+	up       bool
+	full     bool
+	readings []probe.Reading
+	statsOK  bool
 }
 
 type hookDoneMsg struct {
@@ -312,16 +312,16 @@ func hostCmd() tea.Cmd {
 func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea.Cmd {
 	return func() tea.Msg {
 		msg := liveMsg{name: t.Name, epoch: epoch, full: full}
-		probeStats := full && t.Stats
+		probeStats := full && len(t.Stats) > 0
 		if probeStats && t.Status == "" {
-			stats, err := backend.Stats(t)
-			msg.up, msg.stats, msg.statsOK = err == nil, stats, err == nil
+			readings, err := backend.Stats(t)
+			msg.up, msg.readings, msg.statsOK = err == nil, readings, err == nil
 			return msg
 		}
 		msg.up = backend.Status(t) == nil
 		if msg.up && probeStats {
-			stats, err := backend.Stats(t)
-			msg.stats, msg.statsOK = stats, err == nil
+			readings, err := backend.Stats(t)
+			msg.readings, msg.statsOK = readings, err == nil
 		}
 		return msg
 	}
@@ -383,8 +383,10 @@ func (m model) settle(msg liveMsg) liveEntry {
 		e.at = e.checked
 		e.statsOK = msg.statsOK
 		if msg.statsOK {
-			e.stats = msg.stats
-			e.history = appendSample(e.history, loadFraction(msg.stats.Load, msg.stats.Cores))
+			e.readings = msg.readings
+			if gauge, ok := firstGauge(msg.readings); ok && gauge.OK {
+				e.history = appendSample(e.history, gauge.Fraction())
+			}
 		}
 	}
 	if !msg.up {
