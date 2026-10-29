@@ -1606,3 +1606,48 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 		t.Errorf("a failure to open the editor wins over the reload summary, got %q", got)
 	}
 }
+
+func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = probed(focus(m, "forge"), "forge", true)
+	m.load = func() ([]target.Target, error) { return m.targets, nil }
+
+	next, _ := m.Update(configEditedMsg{})
+	m = next.(model)
+	if !m.live["forge"].pending {
+		t.Errorf("a reload must not leave the selection on readings from the old config")
+	}
+}
+
+func TestReloadDropsHistoryOfChangedStats(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(load(m))
+	m = probed(probed(m, "forge", true), "tokyo", true)
+
+	changed := vm("forge")
+	changed.Stats = probe.Metrics{{Type: probe.TypeMem}}
+	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+
+	next, _ := m.Update(configEditedMsg{})
+	m = next.(model)
+	if forge := m.live["forge"]; forge.history != nil || forge.readings != nil || forge.state != statusUp {
+		t.Errorf("changed stats start a fresh chart but keep the status, got %+v", forge)
+	}
+	if len(m.live["tokyo"].history) == 0 {
+		t.Errorf("unchanged stats keep their history")
+	}
+}
+
+func TestConfigEditedReportsOnlyFailuresToStart(t *testing.T) {
+	exitErr := exec.Command("sh", "-c", "exit 1").Run()
+	for err, want := range map[error]string{
+		nil:                     "",
+		exitErr:                 "",
+		errors.New("not found"): "config edit: not found",
+	} {
+		if got := configEdited(err).(configEditedMsg).status; got != want {
+			t.Errorf("configEdited(%v) = %q, want %q", err, got, want)
+		}
+	}
+}

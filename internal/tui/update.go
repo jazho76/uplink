@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"slices"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -74,11 +75,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		m.status = msg.status
-		if name := m.selected().name(); name != "" {
-			e := m.live[name]
-			e.at = time.Time{}
-			m.live[name] = e
-		}
+		m.forgetProbe(m.selected().name())
 		return m, m.onSelectionChange()
 
 	case tea.KeyMsg:
@@ -118,13 +115,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.runHook(false)
 
 	case "ctrl+e":
-		return m, tea.ExecProcess(exec.Command(m.self, "config", "edit"), func(err error) tea.Msg {
-			var exitErr *exec.ExitError
-			if err != nil && !errors.As(err, &exitErr) {
-				return configEditedMsg{status: fmt.Sprintf("config edit: %v", err)}
-			}
-			return configEditedMsg{}
-		})
+		return m, tea.ExecProcess(exec.Command(m.self, "config", "edit"), configEdited)
 
 	case "ctrl+l":
 		if it := m.selected(); it.t.Logs != "" {
@@ -188,10 +179,33 @@ func sessionEnded(name string, err error) execDoneMsg {
 	}
 }
 
+func configEdited(err error) tea.Msg {
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		return configEditedMsg{status: fmt.Sprintf("config edit: %v", err)}
+	}
+	return configEditedMsg{}
+}
+
 func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	targets, problems := m.load()
+	for _, t := range targets {
+		if previous, ok := m.targetNamed(t.Name); ok && !slices.Equal(previous.Stats, t.Stats) {
+			e := m.live[t.Name]
+			e.readings, e.statsOK, e.history = nil, false, nil
+			m.live[t.Name] = e
+		}
+	}
 	m.targets, m.modeIdx = targets, 0
 	m.rebuild()
+	m.forgetProbe(m.selected().name())
 	m.status = cmp.Or(editStatus, configStatus(problems))
 	return m, tea.Batch(m.onSelectionChange(), m.watchFetch())
+}
+
+func (m model) forgetProbe(name string) {
+	if e, ok := m.live[name]; ok {
+		e.at = time.Time{}
+		m.live[name] = e
+	}
 }
