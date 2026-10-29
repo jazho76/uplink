@@ -47,7 +47,18 @@ func connect(spec, modeName string) error {
 		return err
 	}
 
+	if err := bringUp(t); err != nil {
+		return err
+	}
 	return run.Exec(mode.Argv[0], mode.Argv[1:]...)
+}
+
+func bringUp(t target.Target) error {
+	if t.Up == "" || (target.System{}).Status(t) == nil {
+		return nil
+	}
+	ui.Info("starting %s", t.Name)
+	return run.Stream("sh", "-c", t.Up)
 }
 
 func splitTargetAndMode(spec string) (name, mode string) {

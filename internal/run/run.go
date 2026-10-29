@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -45,6 +46,15 @@ func NonInteractive(limit time.Duration, stdin, bin string, args ...string) (str
 		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w", line(bin, args), err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+func StderrTail(err error) string {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(exitErr.Stderr)), "\n")
+	return lines[len(lines)-1]
 }
 
 func Output(bin string, args ...string) (string, error) {

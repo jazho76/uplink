@@ -2,20 +2,16 @@ package target
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 )
 
-type Kind string
-
 const (
-	KindLocal  Kind = "local"
-	KindVM     Kind = "vm"
-	KindRemote Kind = "remote"
+	DefaultGroup = "ungrouped"
+	loginShell   = `exec "${SHELL:-/bin/sh}"`
 )
 
-var Kinds = []Kind{KindLocal, KindVM, KindRemote}
+var localVia = []string{"sh", "-c"}
 
 type Mode struct {
 	Name string
@@ -24,15 +20,19 @@ type Mode struct {
 }
 
 type Target struct {
-	Name  string
-	Kind  Kind
-	Via   []string
-	Logs  string
-	Stats bool
-	Modes []Mode
+	Name   string
+	Group  string
+	Via    []string
+	Exec   []string
+	Status string
+	Up     string
+	Down   string
+	Logs   string
+	Watch  bool
+	Expand bool
+	Stats  bool
+	Modes  []Mode
 }
-
-func (t Target) Local() bool { return t.Kind == KindLocal }
 
 func (t Target) DefaultMode() Mode {
 	if len(t.Modes) == 0 {
@@ -59,25 +59,21 @@ func (t Target) ModeNames() []string {
 }
 
 func (t Target) ArgvFor(command string) []string {
-	if t.Local() {
-		shell := userShell()
-		if command == "" {
-			return []string{shell}
-		}
-		return []string{shell, "-c", command}
-	}
-	argv := append([]string(nil), t.Via...)
-	if command == "" {
-		return argv
-	}
-	return append(argv, command)
+	return withCommand(t.Via, command)
 }
 
-func userShell() string {
-	if shell := os.Getenv("SHELL"); shell != "" {
-		return shell
+func (t Target) ExecArgvFor(command string) []string {
+	if len(t.Exec) == 0 {
+		return t.ArgvFor(command)
 	}
-	return "/bin/sh"
+	return withCommand(t.Exec, command)
+}
+
+func withCommand(prefix []string, command string) []string {
+	if len(prefix) == 0 {
+		prefix = localVia
+	}
+	return append(slices.Clone(prefix), command)
 }
 
 func (m Mode) Command() string { return Quote(m.Argv) }

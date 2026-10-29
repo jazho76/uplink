@@ -15,24 +15,39 @@ import (
 )
 
 type fakeBackend struct {
-	logs map[string]string
-	down map[string]bool
+	logs     map[string]string
+	down     map[string]bool
+	hooks    []string
+	statuses int
 }
 
 func (f *fakeBackend) Stats(t target.Target) (probe.Stats, error) {
 	if f.down[t.Name] {
 		return probe.Stats{}, errBoom{}
 	}
-	if t.Local() {
-		return probe.Stats{Cores: 8, Load: 0.42, MemUsed: 1 << 30, MemTotal: 8 << 30}, nil
-	}
-	return probe.Stats{Load: 0.10}, nil
+	return probe.Stats{Cores: 4, Load: 0.10}, nil
 }
 
-func (f *fakeBackend) Reachable(t target.Target) error {
+func (f *fakeBackend) Status(t target.Target) error {
+	f.statuses++
 	if f.down[t.Name] {
 		return errBoom{}
 	}
+	return nil
+}
+
+func (f *fakeBackend) Up(t target.Target) error {
+	f.hooks = append(f.hooks, "up "+t.Name)
+	f.down[t.Name] = false
+	return nil
+}
+
+func (f *fakeBackend) Down(t target.Target) error {
+	f.hooks = append(f.hooks, "down "+t.Name)
+	if t.Name == "stuck" {
+		return errBoom{}
+	}
+	f.down[t.Name] = true
 	return nil
 }
 
@@ -40,10 +55,11 @@ func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name
 
 func hostTarget() target.Target {
 	return target.Target{
-		Name:  "host",
-		Kind:  target.KindLocal,
-		Logs:  "journalctl",
-		Stats: true,
+		Name:   "host",
+		Group:  "local",
+		Expand: true,
+		Logs:   "journalctl",
+		Stats:  true,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
@@ -56,7 +72,7 @@ func vm(name string) target.Target {
 	via := []string{"ssh", "lima-" + name}
 	return target.Target{
 		Name:  name,
-		Kind:  target.KindVM,
+		Group: "vms",
 		Via:   via,
 		Logs:  "tail serial.log",
 		Stats: true,
@@ -70,7 +86,7 @@ func vm(name string) target.Target {
 
 func remote(name string) target.Target {
 	t := vm(name)
-	t.Kind = target.KindRemote
+	t.Group = "remotes"
 	return t
 }
 
@@ -91,7 +107,7 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveStatsMsg{name: name, stats: probe.Stats{Cores: 4}, err: !up})
+	next, _ := m.Update(liveMsg{name: name, up: up, full: true, stats: probe.Stats{Cores: 4}, statsOK: up})
 	return next.(model)
 }
 
@@ -107,7 +123,7 @@ func itemNamed(m model, name string) item {
 }
 
 func load(m model) model {
-	next, _ := m.Update(liveStatsMsg{name: "host", stats: probe.Stats{Cores: 8, Load: 0.42}})
+	next, _ := m.Update(hostStatsMsg{stats: probe.Stats{Cores: 8, Load: 0.42}})
 	return next.(model)
 }
 
@@ -123,8 +139,8 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 		t.Fatalf("want a local and a vms pane, got %d", len(m.panes))
 	}
 	local, vms := m.panes[0], m.panes[1]
-	if !local.items[0].t.Local() {
-		t.Fatalf("the first pane should hold the local target, got %q", local.items[0].t.Kind)
+	if local.section != "local" || local.items[0].name() != "host" {
+		t.Fatalf("the first pane should hold the host, got %q", local.section)
 	}
 	if vms.items[0].name() != "forge" || vms.items[1].name() != "tokyo" {
 		t.Fatalf("unexpected vm order: %q %q", vms.items[0].name(), vms.items[1].name())
@@ -310,25 +326,24 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 	}
 }
 
-func TestGlyphDistinguishesKindAndState(t *testing.T) {
-	shape := func(kind target.Kind, s status) string {
-		mark, _ := glyphOf(kind, s)
+func TestGlyphDistinguishesState(t *testing.T) {
+	shape := func(expand bool, s status) string {
+		mark, _ := glyphOf(target.Target{Expand: expand}, s)
 		return mark
 	}
 
-	host := shape(target.KindLocal, statusUp)
-	vmUp := shape(target.KindVM, statusUp)
-	vmOff := shape(target.KindVM, statusDown)
-	remoteUp := shape(target.KindRemote, statusUp)
-	remoteDown := shape(target.KindRemote, statusDown)
-	remoteUnprobed := shape(target.KindRemote, statusUnknown)
+	host := shape(true, statusUp)
+	up := shape(false, statusUp)
+	down := shape(false, statusDown)
+	unknown := shape(false, statusUnknown)
+	starting := shape(false, statusStarting)
 
 	distinct := map[string]string{
-		"host vs vm":                  host + vmUp,
-		"remote vs vm, both up":       remoteUp + vmUp,
-		"remote vs vm, both down":     remoteDown + vmOff,
-		"unreachable vs never probed": remoteDown + remoteUnprobed,
-		"reachable vs unreachable":    remoteUp + remoteDown,
+		"host vs up":          host + up,
+		"up vs down":          up + down,
+		"down vs unknown":     down + unknown,
+		"starting vs down":    starting + down,
+		"starting vs unknown": starting + unknown,
 	}
 	for name, pair := range distinct {
 		half := len(pair) / 2
@@ -337,14 +352,180 @@ func TestGlyphDistinguishesKindAndState(t *testing.T) {
 		}
 	}
 
-	widths := map[string]string{
-		"host": host, "vm up": vmUp, "vm off": vmOff,
-		"remote up": remoteUp, "remote down": remoteDown, "remote unprobed": remoteUnprobed,
-	}
-	for name, g := range widths {
+	for name, g := range map[string]string{"host": host, "up": up, "down": down, "unknown": unknown, "starting": starting} {
 		if w := lipgloss.Width(g); w != 1 {
 			t.Errorf("%s glyph occupies %d columns, want 1", name, w)
 		}
+	}
+}
+
+func TestGroupsBecomePanesInConfigOrder(t *testing.T) {
+	m, _ := newTestModel()
+	stray := remote("stray")
+	stray.Group = target.DefaultGroup
+	m = withTargets(m, remote("berlin"), vm("forge"), stray, remote("dojo"))
+
+	var sections []string
+	for _, p := range m.panes {
+		sections = append(sections, p.section)
+	}
+	if got := strings.Join(sections, " "); got != "local remotes vms ungrouped" {
+		t.Errorf("panes follow first appearance, got %q", got)
+	}
+	if remotes := m.panes[1]; len(remotes.items) != 2 || remotes.items[1].name() != "dojo" {
+		t.Errorf("a later member joins its group's pane, got %+v", remotes.items)
+	}
+}
+
+func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
+	m, backend := newTestModel()
+	watched := vm("nakama")
+	watched.Watch = true
+	m = withTargets(m, watched, remote("dojo"))
+	backend.down["nakama"] = true
+
+	m = applyCmd(m, m.watchFetch())
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+		t.Errorf("a watched target resolves without being selected, got %q", got)
+	}
+	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusUnknown {
+		t.Errorf("an unwatched target waits for selection, got %q", got)
+	}
+	if m.watchFetch() != nil {
+		t.Errorf("a fresh check should not repeat before the watch interval")
+	}
+}
+
+func TestWatchChecksAreCapped(t *testing.T) {
+	m, _ := newTestModel()
+	var many []target.Target
+	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
+		t := vm(name)
+		t.Watch = true
+		many = append(many, t)
+	}
+	m = withTargets(m, many...)
+
+	m.watchFetch()
+	pending := 0
+	for _, e := range m.live {
+		if e.pending {
+			pending++
+		}
+	}
+	if pending != maxWatchChecks {
+		t.Errorf("at most %d checks may be in flight, got %d", maxWatchChecks, pending)
+	}
+}
+
+func TestStartAndStopRunTheHooks(t *testing.T) {
+	m, backend := newTestModel()
+	box := vm("nakama")
+	box.Up, box.Down = "limactl start nakama", "limactl stop nakama"
+	m = sized(load(withTargets(m, box, vm("plain"))))
+	m = focus(m, "nakama").withSelectionRefreshed()
+
+	if footer := m.renderFooter(); strings.Contains(footer, "start") || !strings.Contains(footer, "stop") {
+		t.Errorf("an up target offers stop only: %s", footer)
+	}
+	if m = keyThenApply(m, "ctrl+s"); len(backend.hooks) != 0 {
+		t.Errorf("starting an up target does nothing, ran %v", backend.hooks)
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = next.(model)
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusStopping {
+		t.Errorf("a running hook shows its transition, got %q", got)
+	}
+	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).live["nakama"].action != statusStopping {
+		t.Errorf("a second press must not stack hooks")
+	}
+	if footer := m.renderFooter(); strings.Contains(footer, "start") || strings.Contains(footer, "stop") {
+		t.Errorf("a target mid-transition offers neither: %s", footer)
+	}
+	m = finishHook(m, cmd)
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+		t.Errorf("after stopping, the target is checked again, got %q", got)
+	}
+
+	if footer := m.renderFooter(); !strings.Contains(footer, "start") || strings.Contains(footer, "stop") {
+		t.Errorf("a down target offers start only: %s", footer)
+	}
+
+	m = pressHook(m, tea.KeyCtrlS)
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusUp {
+		t.Errorf("after starting, the target is up, got %q", got)
+	}
+	if got := strings.Join(backend.hooks, ", "); got != "down nakama, up nakama" {
+		t.Errorf("hooks ran %q", got)
+	}
+
+	m = focus(m, "plain")
+	if footer := m.renderFooter(); strings.Contains(footer, "start") || strings.Contains(footer, "stop") {
+		t.Errorf("a target without hooks offers neither: %s", footer)
+	}
+}
+
+func pressHook(m model, key tea.KeyType) model {
+	next, cmd := m.Update(tea.KeyMsg{Type: key})
+	return finishHook(next.(model), cmd)
+}
+
+func finishHook(m model, cmd tea.Cmd) model {
+	if cmd == nil {
+		return m
+	}
+	next, recheck := m.Update(cmd())
+	return applyCmd(next.(model), recheck)
+}
+
+func TestStatsStandInForTheDefaultStatus(t *testing.T) {
+	m, backend := newTestModel()
+	hooked := remote("hooked")
+	hooked.Status = "check hooked"
+	m = sized(load(withTargets(m, remote("dojo"), hooked)))
+
+	m = focus(m, "dojo").withSelectionRefreshed()
+	if backend.statuses != 0 || m.statusOf(itemNamed(m, "dojo").t) != statusUp {
+		t.Errorf("a successful probe proves the target up without a second round trip, ran %d checks", backend.statuses)
+	}
+
+	m = focus(m, "hooked").withSelectionRefreshed()
+	if backend.statuses != 1 {
+		t.Errorf("a status hook is always consulted, ran %d checks", backend.statuses)
+	}
+}
+
+func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
+	m, backend := newTestModel()
+	box := vm("nakama")
+	box.Down = "limactl stop nakama"
+	m = sized(load(withTargets(m, box)))
+	m = focus(m, "nakama").withSelectionRefreshed()
+
+	stale := m.check(box, false)
+	m = pressHook(m, tea.KeyCtrlX)
+	backend.down["nakama"] = false
+	next, _ := m.Update(stale())
+	m = next.(model)
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+		t.Errorf("a check issued before the hook must not overwrite its outcome, got %q", got)
+	}
+}
+
+func TestFailedHookReportsAndRechecks(t *testing.T) {
+	m, _ := newTestModel()
+	stuck := vm("stuck")
+	stuck.Down = "false"
+	m = sized(load(withTargets(m, stuck)))
+	m = focus(m, "stuck").withSelectionRefreshed()
+
+	m = pressHook(m, tea.KeyCtrlX)
+	if !strings.Contains(m.status, "stop stuck failed") {
+		t.Errorf("a failed hook should be reported, got %q", m.status)
+	}
+	if got := m.statusOf(itemNamed(m, "stuck").t); got != statusUp {
+		t.Errorf("a failed stop leaves the target as it is, got %q", got)
 	}
 }
 
@@ -691,7 +872,7 @@ func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		history = appendSample(history, float64(i%7)/7)
 	}
-	m.live["forge"] = liveEntry{at: time.Now(), history: history,
+	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, history: history,
 		stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
@@ -770,7 +951,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
+	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, stats: probe.Stats{Cores: 4, Load: 1, MemUsed: 1 << 30, MemTotal: 4 << 30}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
@@ -791,7 +972,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
+	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, stats: probe.Stats{Cores: 4, Uptime: 76 * time.Hour}}
 
 	if got := m.uptimeOf(m.selected()); got == "" {
 		t.Fatalf("a reachable target should report uptime")
@@ -1067,6 +1248,8 @@ var specialKeys = map[string]tea.KeyType{
 	"tab":       tea.KeyTab,
 	"shift+tab": tea.KeyShiftTab,
 	"ctrl+l":    tea.KeyCtrlL,
+	"ctrl+s":    tea.KeyCtrlS,
+	"ctrl+x":    tea.KeyCtrlX,
 }
 
 func TestLocalExpandsToOneRowPerMode(t *testing.T) {
@@ -1116,7 +1299,7 @@ func TestLaunchRowFixesItsMode(t *testing.T) {
 }
 
 func TestLaunchRowsWithoutModesSurvive(t *testing.T) {
-	bare := item{t: target.Target{Kind: target.KindLocal, Name: "host"}}
+	bare := item{t: target.Target{Expand: true, Name: "host"}}
 	if rows := launcherRows(bare); len(rows) != 1 || rows[0].launcher {
 		t.Errorf("a modeless host stays one plain row, got %+v", rows)
 	}
@@ -1201,7 +1384,7 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	}
 }
 
-func TestCursorSkipsAnEmptyKind(t *testing.T) {
+func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(withTargets(m)))
 

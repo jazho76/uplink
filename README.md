@@ -107,13 +107,14 @@ uplink box:shell
 
 ## The dashboard
 
-The left side groups targets by kind: `local`, `vms`, and `remotes`. The right
+The left side lists targets in the groups your config gives them, in the order
+they first appear. The right
 side shows the selected target's status, the exact command each mode runs, live
 load, memory, disk, and uptime, and recent logs. The bottom bar keeps the host's
 resource usage visible while you browse other machines.
 
-A target's status is learned by probing it while it is selected, so targets you
-have not visited yet show as unknown.
+A target's status is checked while it is selected, and in the background for
+targets with `watch: true`; others show as unknown until you visit them.
 
 | Key | Action |
 | --- | --- |
@@ -122,6 +123,8 @@ have not visited yet show as unknown.
 | `Tab` / `Shift+Tab` | Cycle through launch modes |
 | `Enter` | Enter the selected target using the selected mode |
 | `Ctrl+L` | Open the target's logs |
+| `Ctrl+S` | Start the target (its `up` hook) |
+| `Ctrl+X` | Stop the target (its `down` hook) |
 | `q`, `Esc`, `Ctrl+C` | Quit, or leave the log view |
 
 ## Configuration
@@ -138,16 +141,21 @@ Without a `targets` section, Uplink offers only the host.
 ```yaml
 profiles:
   lima:
-    kind: vm
+    group: vms
     via: ssh -t -F ~/.lima/{name}/ssh.config lima-{name}
+    status: limactl list --format '{{.Status}}' {name} | grep -qx Running
+    up: limactl start {name}
+    down: limactl stop {name}
     logs: tail -n 500 ~/.lima/{name}/serial.log
+    watch: true
     modes:
       - { name: tmux, run: tmux new-session -A -s 0 }
       - { name: shell }
 
 targets:
   - name: host
-    kind: local
+    group: local
+    expand: true
     logs: journalctl --system -n 500 --no-pager -o short
     modes:
       - { name: tmux, run: tmux new-session -A -s host }
@@ -157,86 +165,106 @@ targets:
   - { name: devbox, profile: lima }
 
   - name: prod
-    kind: remote
+    group: remotes
     via: ssh -t -i ~/.ssh/prod_ed25519 deploy@example.com
     modes:
       - { name: tmux, run: "bash -lc 'cd /srv/app && tmux new-session -A -s prod'" }
       - { name: shell }
 ```
 
+Every command runs on one of two sides. **Host-side** fields (`status`, `up`,
+`down`, `logs`) run on this machine through `sh -c`. **Target-side** commands
+(modes and the stats probe) run inside the target through `via`. A target
+without `via` runs here.
+
 ### Target fields
 
 | Field | Meaning |
 | --- | --- |
 | `name` | Name shown in the dashboard and used by `uplink <name>` |
-| `kind` | `local`, `vm`, or `remote`; only picks the pane and glyph |
-| `via` | Command that reaches the target; required unless `kind` is `local` |
-| `logs` | Host command whose output fills the log view |
+| `group` | Pane the target is listed under; `ungrouped` when left out |
+| `via` | Command that reaches the target; leave it out to run on this machine |
+| `exec` | `via` for background probes, where no terminal is attached; defaults to `via` |
+| `status` | Host-side check, exit 0 means up; defaults to running `true` through `exec` |
+| `up` | Host-side start, run by `Ctrl+S` and before entering a target that is down |
+| `down` | Host-side stop, run by `Ctrl+X` |
+| `logs` | Host-side command whose output fills the log view |
+| `watch` | `true` checks status in the background, not only while selected |
+| `expand` | `true` gives each mode its own row in the dashboard |
 | `stats` | `false` skips the load, memory, and disk probe |
 | `modes` | Ways to enter the target; the first is the default |
 | `profile` | Profile to take every unset field from |
 
-Exactly one target is `local`: the machine Uplink runs on. It takes no `via`,
-runs its modes through `$SHELL -c`, and feeds the bottom bar. Each of its modes
-gets its own row.
+The bottom bar always shows the machine Uplink runs on, whatever the config.
 
 ### How `via` works
 
 Uplink runs the `via` words with **one** extra argument: the mode's `run`,
-untouched. A mode without `run` runs `via` alone. That fits `ssh`, which hands
-its argument to the remote shell. For tools that take an argument list instead,
-end `via` with `sh -c`:
+untouched. Without `via`, that is `sh -c <run>` on this machine. That fits
+`ssh`, which hands its argument to the remote shell. For tools that take an
+argument list instead, end `via` with `sh -c`:
 
 ```yaml
 profiles:
   docker:
-    kind: vm
+    group: containers
     via: docker exec -it {name} sh -c
+    exec: docker exec -i {name} sh -c
+    status: "[ \"$(docker inspect -f '{{.State.Running}}' {name})\" = true ]"
+    up: docker start {name}
+    down: docker stop {name}
     logs: docker logs --tail 500 {name}
+    stats: false
     modes:
-      - { name: shell, run: exec bash }
+      - { name: shell }
 
   pod:
-    kind: remote
+    group: pods
     via: kubectl exec -it {name} -- sh -c
     modes:
-      - { name: shell, run: exec sh }
+      - { name: shell }
 ```
 
-Such transports cannot open a shell with no command, so give every mode a `run`.
+`exec` exists for transports like `docker exec -it`, which refuse to run without
+a terminal. `ssh -t` only warns, so ssh targets can leave it out.
 
-`via` is split like a shell command, quotes included, and a leading `~/` in any
-word is expanded. Nothing else is: Uplink never runs `via` through a local
-shell.
+`via` and `exec` are split like a shell command, quotes included, and a leading
+`~/` in any word is expanded. Nothing else is: Uplink never runs them through a
+local shell.
 
-The remote side runs `run` with its default, non-login shell. When a mode needs
-something from the login profile, such as a function or `PATH` entry, wrap it:
-`run: "bash -lc 'lc && tmux'"`.
+A mode without `run` opens the target user's shell: `exec "${SHELL:-/bin/sh}"`.
+That shell is not a login shell. When a mode needs something from the login
+profile, such as a function or `PATH` entry, ask for one:
+`run: exec "$SHELL" -l`, or `run: "bash -lc 'lc && tmux'"`.
 
 ### Modes
 
 | Field | Meaning |
 | --- | --- |
 | `name` | Name shown in the dashboard |
-| `run` | Shell command to run on the target; omit it to open `via` alone |
+| `run` | Shell command to run on the target; omit it to open the user's shell |
 | `back` | Return to the dashboard when the command exits |
 
 ### Profiles
 
 A profile holds any target field except `name`. A target with `profile: lima`
 takes every field it leaves unset from the profile; `modes` replace the
-profile's modes as a whole. `{name}` in `via`, `logs`, and `run` becomes the
-target's name. Inside a flow mapping, quote values that contain `{name}`:
-`{ name: tmux, run: "tmux new-session -A -s {name}" }`.
+profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
+`logs`, and `run` becomes the target's name. Inside a flow mapping, quote values
+that contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
+
+To share other values, define a YAML anchor under a top-level key Uplink does
+not use, such as `x-ssh: &ssh ssh -t -o ConnectTimeout=2`, and refer to it
+with `via: *ssh`.
 
 ### Probes and timeouts
 
-Stats come from a small POSIX script piped through `via` into `sh`, so the
-target needs `/proc`; set `stats: false` otherwise, and Uplink only checks that
-`via true` succeeds. Probes and logs run without a terminal, so a transport that
-wants a password shows the target as down instead of prompting. Logs give up
-after 2 seconds and probes after 30; add `-o ConnectTimeout=2` to an ssh `via`
-to report an unreachable host sooner.
+Stats come from a small POSIX script piped through `exec` into `sh`, so the
+target needs `/proc`; set `stats: false` otherwise. Probes, hooks, and logs run
+without a terminal, so a transport that wants a password shows the target as
+down instead of prompting. Logs give up after 2 seconds, `status` hooks after 5,
+probes after 30, and `up` and `down` after 10 minutes. Add
+`-o ConnectTimeout=2` to an ssh `via` to report an unreachable host sooner.
 
 ### Checking the config
 

@@ -12,7 +12,6 @@ import (
 
 const host = `
   - name: host
-    kind: local
     modes:
       - { name: shell }
 `
@@ -80,7 +79,7 @@ func TestShellWords(t *testing.T) {
 
 func TestMissingTargetsFallBackToTheHost(t *testing.T) {
 	targets := mustLoad(t, "")
-	if len(targets) != 1 || !targets[0].Local() || targets[0].Name != "host" {
+	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand {
 		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
 	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
@@ -92,7 +91,8 @@ func TestProfileFillsWhatTheTargetLeavesOut(t *testing.T) {
 	targets := mustLoad(t, `
 profiles:
   lima:
-    kind: vm
+    group: vms
+    watch: true
     via: ssh -F ~/.lima/{name}/ssh.config lima-{name}
     logs: tail ~/.lima/{name}/serial.log
     modes:
@@ -110,8 +110,8 @@ targets:`+host+`
 	home, _ := os.UserHomeDir()
 
 	forge := find(t, targets, "forge")
-	if forge.Kind != KindVM || !forge.Stats {
-		t.Errorf("forge should inherit kind and default to stats, got %+v", forge)
+	if forge.Group != "vms" || !forge.Watch || !forge.Stats {
+		t.Errorf("forge should inherit group and watch and default to stats, got %+v", forge)
 	}
 	wantVia := []string{"ssh", "-F", filepath.Join(home, ".lima/forge/ssh.config"), "lima-forge"}
 	if !slices.Equal(forge.Via, wantVia) {
@@ -123,8 +123,8 @@ targets:`+host+`
 	if got := forge.DefaultMode().Argv; !slices.Equal(got, append(wantVia, "tmux new-session -A -s forge")) {
 		t.Errorf("tmux argv = %q", got)
 	}
-	if shell, _ := forge.Mode("shell"); !slices.Equal(shell.Argv, wantVia) {
-		t.Errorf("a mode without run opens via alone, got %q", shell.Argv)
+	if shell, _ := forge.Mode("shell"); !slices.Equal(shell.Argv, append(wantVia, loginShell)) {
+		t.Errorf("a mode without run opens the user's shell, got %q", shell.Argv)
 	}
 
 	tokyo := find(t, targets, "tokyo")
@@ -139,22 +139,73 @@ targets:`+host+`
 	}
 }
 
-func TestLocalModesRunThroughTheLoginShell(t *testing.T) {
-	t.Setenv("SHELL", "/bin/zsh")
+func TestTargetsWithoutViaRunHere(t *testing.T) {
 	targets := mustLoad(t, `
 targets:
   - name: host
-    kind: local
     modes:
       - { name: tmux, run: tmux new-session -A -s host }
       - { name: shell }
 `)
 	local := find(t, targets, "host")
-	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"/bin/zsh", "-c", "tmux new-session -A -s host"}) {
+	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"sh", "-c", "tmux new-session -A -s host"}) {
 		t.Errorf("tmux argv = %q", got)
 	}
-	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"/bin/zsh"}) {
+	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
 		t.Errorf("shell argv = %q", shell.Argv)
+	}
+	if local.Group != DefaultGroup || local.Watch || local.Expand || !local.Stats {
+		t.Errorf("unset fields should take their defaults, got %+v", local)
+	}
+}
+
+func TestExecDefaultsToVia(t *testing.T) {
+	targets := mustLoad(t, `
+targets:
+  - name: box
+    via: docker exec -it box sh -c
+    exec: docker exec -i box sh -c
+    modes: [{ name: shell }]
+  - name: plain
+    via: ssh -t plain
+    modes: [{ name: shell }]
+`)
+	if got := find(t, targets, "box").ExecArgvFor("true"); !slices.Equal(got, []string{"docker", "exec", "-i", "box", "sh", "-c", "true"}) {
+		t.Errorf("exec should drive background commands, got %q", got)
+	}
+	if got := find(t, targets, "plain").ExecArgvFor("true"); !slices.Equal(got, []string{"ssh", "-t", "plain", "true"}) {
+		t.Errorf("without exec, via drives background commands, got %q", got)
+	}
+}
+
+func TestHooksInterpolateTheName(t *testing.T) {
+	targets := mustLoad(t, `
+profiles:
+  lima:
+    via: ssh lima-{name}
+    status: limactl list {name}
+    up: limactl start {name}
+    down: limactl stop {name}
+    modes: [{ name: shell }]
+targets:
+  - { name: forge, profile: lima }
+`)
+	forge := find(t, targets, "forge")
+	if forge.Status != "limactl list forge" || forge.Up != "limactl start forge" || forge.Down != "limactl stop forge" {
+		t.Errorf("hooks should interpolate the name, got %+v", forge)
+	}
+}
+
+func TestAnchorsShareValuesAcrossSections(t *testing.T) {
+	targets := mustLoad(t, `
+x-ssh: &ssh ssh -t shared
+targets:
+  - name: one
+    via: *ssh
+    modes: [{ name: shell }]
+`)
+	if got := find(t, targets, "one").Via; !slices.Equal(got, []string{"ssh", "-t", "shared"}) {
+		t.Errorf("an alias defined in a scratch section should resolve, got %q", got)
 	}
 }
 
@@ -162,7 +213,6 @@ func TestModeCommandTravelsAsOneArgument(t *testing.T) {
 	targets := mustLoad(t, `
 targets:`+host+`
   - name: dojo
-    kind: remote
     via: ssh -t dojo
     modes:
       - { name: tmux, run: "bash -lc 'lc && tmux'" }
@@ -180,41 +230,33 @@ func TestInvalidTargetsAreSkippedAndReported(t *testing.T) {
 	targets, err := load(t, `
 targets:`+host+`
   - name: good
-    kind: remote
     via: ssh good
-    modes: [{ name: shell }]
-  - name: nokind
-    via: ssh x
-    modes: [{ name: shell }]
-  - name: novia
-    kind: vm
     modes: [{ name: shell }]
   - name: noprofile
     profile: missing
   - name: nomodes
-    kind: remote
     via: ssh x
   - name: dupmodes
-    kind: remote
     via: ssh x
     modes: [{ name: a }, { name: a }]
   - name: badquote
-    kind: remote
     via: ssh 'x
     modes: [{ name: shell }]
+  - name: badexec
+    via: ssh x
+    exec: ssh 'x
+    modes: [{ name: shell }]
   - name: good
-    kind: remote
     via: ssh other
     modes: [{ name: shell }]
-  - kind: remote
-    via: ssh x
+  - via: ssh x
     modes: [{ name: shell }]
 `)
 	if err == nil {
 		t.Fatal("every broken target must be reported")
 	}
-	for _, want := range []string{"nokind", "novia", "unknown profile", "nomodes", `duplicate mode "a"`,
-		"badquote", `duplicate target "good"`, "#10"} {
+	for _, want := range []string{"unknown profile", "nomodes", `duplicate mode "a"`,
+		"badquote", `"badexec": exec`, `duplicate target "good"`, "#9"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q:\n%v", want, err)
 		}
@@ -235,75 +277,46 @@ func TestMalformedNamesAndViaAreRejected(t *testing.T) {
 	_, err := load(t, `
 targets:`+host+`
   - name: "db:prod"
-    kind: remote
     via: ssh db
     modes: [{ name: shell }]
   - name: "my box"
-    kind: remote
     via: ssh box
     modes: [{ name: shell }]
   - name: blank
-    kind: remote
     via: "   "
     modes: [{ name: shell }]
 `)
 	if err == nil {
 		t.Fatal("malformed targets must be reported")
 	}
-	for _, want := range []string{`"db:prod"`, `"my box"`, `"blank": via is required`} {
+	for _, want := range []string{`"db:prod"`, `"my box"`, `"blank": via is blank`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %s:\n%v", want, err)
 		}
 	}
 }
 
-func TestBrokenHostIsNotReportedAsMissing(t *testing.T) {
-	_, err := load(t, `
-targets:
-  - name: host
-    kind: local
-    modes: [{ name: a }, { name: a }]
-`)
-	if err == nil || !strings.Contains(err.Error(), "duplicate mode") {
-		t.Fatalf("the real problem must be reported, got %v", err)
-	}
-	if strings.Contains(err.Error(), "declare the host") {
-		t.Errorf("a declared but broken host is not a missing one:\n%v", err)
-	}
-}
-
-func TestExactlyOneLocalTarget(t *testing.T) {
-	if _, err := load(t, `
-targets:
+func TestKindPointsAtGroup(t *testing.T) {
+	targets, err := load(t, `
+profiles:
+  old:
+    kind: vm
+targets:`+host+`
   - name: box
     kind: remote
     via: ssh box
     modes: [{ name: shell }]
-`); err == nil || !strings.Contains(err.Error(), "no target is local") {
-		t.Errorf("a config without the host must be reported, got %v", err)
-	}
-
-	targets, err := load(t, `
-targets:`+host+`
-  - name: other
-    kind: local
-    modes: [{ name: shell }]
 `)
-	if err == nil || !strings.Contains(err.Error(), "only one target can be local") {
-		t.Errorf("a second local target must be reported, got %v", err)
+	if err == nil {
+		t.Fatal("kind must be reported")
+	}
+	for _, want := range []string{`profile "old"`, `target "box"`, "use group"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %s:\n%v", want, err)
+		}
 	}
 	if len(targets) != 1 {
-		t.Errorf("the first local target should survive, got %d", len(targets))
-	}
-
-	if _, err := load(t, `
-targets:
-  - name: host
-    kind: local
-    via: ssh host
-    modes: [{ name: shell }]
-`); err == nil || !strings.Contains(err.Error(), "takes no via") {
-		t.Errorf("a local target with via must be reported, got %v", err)
+		t.Errorf("only the host should survive, got %d targets", len(targets))
 	}
 }
 
@@ -341,23 +354,48 @@ func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
 	}
 }
 
-func TestReachableUsesVia(t *testing.T) {
-	up := Target{Kind: KindRemote, Via: []string{"sh", "-c"}}
-	if err := (System{}).Reachable(up); err != nil {
-		t.Errorf("sh -c true should be reachable: %v", err)
+func TestStatusPrefersTheHook(t *testing.T) {
+	if err := (System{}).Status(Target{Status: "true", Via: []string{"false"}}); err != nil {
+		t.Errorf("a passing hook means up, regardless of via: %v", err)
 	}
-	down := Target{Kind: KindRemote, Via: []string{"false"}}
-	if err := (System{}).Reachable(down); err == nil {
-		t.Errorf("a failing transport is unreachable")
+	if err := (System{}).Status(Target{Status: "false"}); err == nil {
+		t.Errorf("a failing hook means down")
+	}
+	if err := (System{}).Status(Target{}); err != nil {
+		t.Errorf("a local target without a hook is up: %v", err)
+	}
+	if err := (System{}).Status(Target{Via: []string{"false"}}); err == nil {
+		t.Errorf("without a hook, a failing transport means down")
+	}
+	if err := (System{}).Status(Target{Via: []string{"false"}, Exec: []string{"sh", "-c"}}); err != nil {
+		t.Errorf("without a hook, exec carries the check: %v", err)
 	}
 }
 
-func TestStatsFlowThroughVia(t *testing.T) {
-	stats, err := System{}.Stats(Target{Kind: KindRemote, Via: []string{"sh", "-c", "exec sh"}})
-	if err != nil {
-		t.Fatalf("stats through a local shell: %v", err)
+func TestHookFailureCarriesItsStderr(t *testing.T) {
+	err := (System{}).Up(Target{Up: "echo progress; echo 'no such instance' >&2; exit 1"})
+	if err == nil || err.Error() != "no such instance" {
+		t.Errorf("a failed hook should say why and nothing else, got %v", err)
 	}
-	if stats.Cores < 1 || stats.MemTotal == 0 {
-		t.Errorf("the probe script should report this machine, got %+v", stats)
+	if err := (System{}).Up(Target{Up: "exit 3"}); err == nil || !strings.Contains(err.Error(), "exit status 3") {
+		t.Errorf("a silent failure still reports its exit, got %v", err)
+	}
+	if err := (System{}).Down(Target{}); err == nil {
+		t.Errorf("a missing hook cannot succeed")
+	}
+}
+
+func TestStatsFlowThroughExec(t *testing.T) {
+	for name, target := range map[string]Target{
+		"local": {},
+		"via":   {Via: []string{"false"}, Exec: []string{"sh", "-c", "exec sh"}},
+	} {
+		stats, err := System{}.Stats(target)
+		if err != nil {
+			t.Fatalf("%s: stats through a local shell: %v", name, err)
+		}
+		if stats.Cores < 1 || stats.MemTotal == 0 {
+			t.Errorf("%s: the probe script should report this machine, got %+v", name, stats)
+		}
 	}
 }

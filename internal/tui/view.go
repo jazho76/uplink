@@ -53,24 +53,22 @@ var (
 )
 
 func (m model) glyph(it item, base lipgloss.Style) string {
-	mark, color := glyphOf(it.t.Kind, m.statusOf(it.t))
+	mark, color := glyphOf(it.t, m.statusOf(it.t))
 	return base.Foreground(color).Render(mark)
 }
 
-func glyphOf(kind target.Kind, s status) (string, lipgloss.TerminalColor) {
+func glyphOf(t target.Target, s status) (string, lipgloss.TerminalColor) {
 	switch {
-	case kind == target.KindLocal:
+	case t.Expand:
 		return "⬢", ui.Cyan
-	case kind == target.KindRemote && s == statusUp:
-		return "◆", ui.Green
-	case kind == target.KindRemote && s == statusDown:
-		return "×", ui.Red
-	case kind == target.KindRemote:
-		return "◇", ui.Comment
 	case s == statusUp:
 		return "●", ui.Green
-	default:
+	case s == statusDown:
 		return "○", ui.Comment
+	case s == statusStarting || s == statusStopping:
+		return "◐", ui.Yellow
+	default:
+		return "◌", ui.Comment
 	}
 }
 
@@ -146,7 +144,7 @@ func (m model) renderLive(name string, width, height int) string {
 	if e.at.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
-	if e.err {
+	if !e.statsOK {
 		return renderFields([]field{{"load", labelStyle.Render("unavailable")}}, width)
 	}
 
@@ -255,7 +253,7 @@ func unitOf(size string) string {
 
 func (m model) uptimeOf(it item) string {
 	e := m.live[it.name()]
-	if !it.t.Stats || e.at.IsZero() || e.err {
+	if !it.t.Stats || !e.statsOK || m.statusOf(it.t) != statusUp {
 		return ""
 	}
 	if up := humanize.Duration(e.stats.Uptime); up != "" {
@@ -329,6 +327,12 @@ func (m model) renderFooter() string {
 	if it.t.Logs != "" {
 		pairs = append(pairs, [2]string{"^l", "logs"})
 	}
+	if m.canHook(it.t, true) {
+		pairs = append(pairs, [2]string{"^s", "start"})
+	}
+	if m.canHook(it.t, false) {
+		pairs = append(pairs, [2]string{"^x", "stop"})
+	}
 	pairs = append(pairs, [2]string{"q", "quit"})
 
 	var parts []string
@@ -351,7 +355,7 @@ type barSegment struct {
 }
 
 func (m model) hostSegments() []barSegment {
-	host := m.hostEntry()
+	host := m.host
 	h := host.stats
 	load := loadFraction(h.Load, h.Cores)
 

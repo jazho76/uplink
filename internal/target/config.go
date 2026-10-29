@@ -1,8 +1,10 @@
 package target
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,16 +34,24 @@ type ModeSpec struct {
 type Spec struct {
 	Name    string     `yaml:"name"`
 	Profile string     `yaml:"profile"`
-	Kind    Kind       `yaml:"kind"`
+	Kind    string     `yaml:"kind"`
+	Group   string     `yaml:"group"`
 	Via     string     `yaml:"via"`
+	Exec    string     `yaml:"exec"`
+	Status  string     `yaml:"status"`
+	Up      string     `yaml:"up"`
+	Down    string     `yaml:"down"`
 	Logs    string     `yaml:"logs"`
+	Watch   *bool      `yaml:"watch"`
+	Expand  *bool      `yaml:"expand"`
 	Stats   *bool      `yaml:"stats"`
 	Modes   []ModeSpec `yaml:"modes"`
 }
 
 var defaultHost = Spec{
-	Name: "host",
-	Kind: KindLocal,
+	Name:   "host",
+	Group:  "local",
+	Expand: new(true),
 	Modes: []ModeSpec{
 		{Name: "tmux", Run: "tmux new-session -A -s host"},
 		{Name: "shell"},
@@ -62,6 +72,11 @@ func Load(cfg *config.File) ([]Target, error) {
 	if _, err := cfg.Section(profilesSection, &profiles); err != nil {
 		errs = append(errs, err)
 	}
+	for _, name := range slices.Sorted(maps.Keys(profiles)) {
+		if profiles[name].Kind != "" {
+			errs = append(errs, fmt.Errorf("profile %q: %w", name, errKind))
+		}
+	}
 	var specs []Spec
 	present, err := cfg.Section(targetsSection, &specs)
 	if err != nil {
@@ -75,16 +90,15 @@ func Load(cfg *config.File) ([]Target, error) {
 	return targets, errors.Join(append(errs, resolveErr)...)
 }
 
+var errKind = errors.New("kind is no longer supported; use group, see the README")
+
 func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 	var (
-		targets       []Target
-		errs          []error
-		seen          = map[string]bool{}
-		locals        int
-		declaredLocal bool
+		targets []Target
+		errs    []error
+		seen    = map[string]bool{}
 	)
 	for i, spec := range specs {
-		declaredLocal = declaredLocal || spec.mergedKind(profiles) == KindLocal
 		t, err := resolve(spec, profiles)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), err))
@@ -94,18 +108,8 @@ func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 			errs = append(errs, fmt.Errorf("duplicate target %q", t.Name))
 			continue
 		}
-		if t.Local() {
-			locals++
-			if locals > 1 {
-				errs = append(errs, fmt.Errorf("target %q: only one target can be %s", t.Name, KindLocal))
-				continue
-			}
-		}
 		seen[t.Name] = true
 		targets = append(targets, t)
-	}
-	if !declaredLocal {
-		errs = append(errs, fmt.Errorf("no target is %s; declare the host machine", KindLocal))
 	}
 	return targets, errors.Join(errs...)
 }
@@ -117,19 +121,15 @@ func label(spec Spec, index int) string {
 	return fmt.Sprintf("#%d", index+1)
 }
 
-func (s Spec) mergedKind(profiles map[string]Spec) Kind {
-	if s.Kind == "" {
-		return profiles[s.Profile].Kind
-	}
-	return s.Kind
-}
-
 func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	if spec.Name == "" {
 		return Target{}, errors.New("no name")
 	}
 	if !namePattern.MatchString(spec.Name) {
 		return Target{}, errors.New("name may only hold letters, digits, '.', '_' and '-'")
+	}
+	if spec.Kind != "" {
+		return Target{}, errKind
 	}
 	if spec.Profile != "" {
 		profile, ok := profiles[spec.Profile]
@@ -140,30 +140,27 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	}
 	spec = spec.interpolate()
 
-	if !slices.Contains(Kinds, spec.Kind) {
-		return Target{}, fmt.Errorf("kind must be one of %s", kindList())
-	}
-	if spec.Kind == KindLocal && spec.Via != "" {
-		return Target{}, fmt.Errorf("a %s target runs on this machine and takes no via", KindLocal)
-	}
-	if spec.Kind != KindLocal && spec.Via == "" {
-		return Target{}, errors.New("via is required to reach it")
-	}
-
-	via, err := shellWords(spec.Via)
+	via, err := prefix("via", spec.Via)
 	if err != nil {
-		return Target{}, fmt.Errorf("via: %w", err)
+		return Target{}, err
 	}
-	if spec.Kind != KindLocal && len(via) == 0 {
-		return Target{}, errors.New("via is required to reach it")
+	exec, err := prefix("exec", spec.Exec)
+	if err != nil {
+		return Target{}, err
 	}
 
 	t := Target{
-		Name:  spec.Name,
-		Kind:  spec.Kind,
-		Via:   expandHome(via),
-		Logs:  spec.Logs,
-		Stats: spec.Stats == nil || *spec.Stats,
+		Name:   spec.Name,
+		Group:  cmp.Or(spec.Group, DefaultGroup),
+		Via:    via,
+		Exec:   exec,
+		Status: spec.Status,
+		Up:     spec.Up,
+		Down:   spec.Down,
+		Logs:   spec.Logs,
+		Watch:  valueOr(spec.Watch, false),
+		Expand: valueOr(spec.Expand, false),
+		Stats:  valueOr(spec.Stats, true),
 	}
 
 	modes, err := t.modes(spec.Modes)
@@ -174,19 +171,38 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	return t, nil
 }
 
+func prefix(field, value string) ([]string, error) {
+	if value == "" {
+		return nil, nil
+	}
+	words, err := shellWords(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+	if len(words) == 0 {
+		return nil, fmt.Errorf("%s is blank; leave it out to run on this machine", field)
+	}
+	return expandHome(words), nil
+}
+
+func valueOr(flag *bool, fallback bool) bool {
+	if flag == nil {
+		return fallback
+	}
+	return *flag
+}
+
 func (s Spec) over(base Spec) Spec {
-	if s.Kind == "" {
-		s.Kind = base.Kind
-	}
-	if s.Via == "" {
-		s.Via = base.Via
-	}
-	if s.Logs == "" {
-		s.Logs = base.Logs
-	}
-	if s.Stats == nil {
-		s.Stats = base.Stats
-	}
+	s.Group = cmp.Or(s.Group, base.Group)
+	s.Via = cmp.Or(s.Via, base.Via)
+	s.Exec = cmp.Or(s.Exec, base.Exec)
+	s.Status = cmp.Or(s.Status, base.Status)
+	s.Up = cmp.Or(s.Up, base.Up)
+	s.Down = cmp.Or(s.Down, base.Down)
+	s.Logs = cmp.Or(s.Logs, base.Logs)
+	s.Watch = cmp.Or(s.Watch, base.Watch)
+	s.Expand = cmp.Or(s.Expand, base.Expand)
+	s.Stats = cmp.Or(s.Stats, base.Stats)
 	if len(s.Modes) == 0 {
 		s.Modes = base.Modes
 	}
@@ -195,7 +211,8 @@ func (s Spec) over(base Spec) Spec {
 
 func (s Spec) interpolate() Spec {
 	fill := func(v string) string { return strings.ReplaceAll(v, namePlaceholder, s.Name) }
-	s.Via, s.Logs = fill(s.Via), fill(s.Logs)
+	s.Via, s.Exec, s.Logs = fill(s.Via), fill(s.Exec), fill(s.Logs)
+	s.Status, s.Up, s.Down = fill(s.Status), fill(s.Up), fill(s.Down)
 	modes := make([]ModeSpec, len(s.Modes))
 	for i, m := range s.Modes {
 		m.Run = fill(m.Run)
@@ -219,7 +236,7 @@ func (t Target) modes(specs []ModeSpec) ([]Mode, error) {
 			return nil, fmt.Errorf("duplicate mode %q", s.Name)
 		}
 		seen[s.Name] = true
-		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(s.Run), Back: s.Back})
+		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(cmp.Or(s.Run, loginShell)), Back: s.Back})
 	}
 	return modes, nil
 }
@@ -240,12 +257,4 @@ func expandHome(words []string) []string {
 		out[i] = w
 	}
 	return out
-}
-
-func kindList() string {
-	names := make([]string, len(Kinds))
-	for i, k := range Kinds {
-		names[i] = string(k)
-	}
-	return strings.Join(names, ", ")
 }

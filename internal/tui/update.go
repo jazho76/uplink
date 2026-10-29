@@ -39,18 +39,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, logTickCmd(m.logRound)
 
 	case tickMsg:
-		return m, tea.Batch(m.hostCmd(), tickCmd())
+		return m, tea.Batch(hostCmd(), tickCmd())
 
 	case liveTickMsg:
-		return m, tea.Batch(m.liveFetch(), liveTickCmd())
+		return m, tea.Batch(m.liveFetch(), m.watchFetch(), liveTickCmd())
 
-	case liveStatsMsg:
-		entry := liveEntry{stats: msg.stats, at: time.Now(), err: msg.err, history: m.live[msg.name].history}
-		if !msg.err {
-			entry.history = appendSample(entry.history, loadFraction(msg.stats.Load, msg.stats.Cores))
-		}
-		m.live[msg.name] = entry
+	case hostStatsMsg:
+		m.host.stats = msg.stats
+		m.host.history = appendSample(m.host.history, loadFraction(msg.stats.Load, msg.stats.Cores))
 		return m, nil
+
+	case liveMsg:
+		m.live[msg.name] = m.settle(msg)
+		return m, nil
+
+	case hookDoneMsg:
+		e := m.live[msg.name]
+		e.action, e.at = "", time.Time{}
+		e.epoch++
+		m.live[msg.name] = e
+		if msg.err != nil {
+			m.status = fmt.Sprintf("%s %s failed: %v", msg.verb, msg.name, msg.err)
+		}
+		t, ok := m.targetNamed(msg.name)
+		if !ok {
+			return m, nil
+		}
+		return m, m.check(t, t.Name == m.selected().name())
 
 	case execDoneMsg:
 		m.status = msg.status
@@ -89,6 +104,11 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "enter":
 		return m.connect()
+
+	case "ctrl+s":
+		return m.runHook(true)
+	case "ctrl+x":
+		return m.runHook(false)
 
 	case "ctrl+l":
 		if it := m.selected(); it.t.Logs != "" {
