@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/stats"
 )
 
 const (
@@ -18,7 +18,7 @@ const (
 )
 
 type Backend interface {
-	Stats(Target) ([]probe.Reading, error)
+	Stats(Target) ([]stats.Reading, error)
 	Status(Target) error
 	Up(Target) error
 	Down(Target) error
@@ -27,8 +27,8 @@ type Backend interface {
 
 type System struct{}
 
-func (System) Stats(t Target) ([]probe.Reading, error) {
-	return probe.Run(probeCeiling, t.Stats, t.ExecArgvFor("sh")...)
+func (System) Stats(t Target) ([]stats.Reading, error) {
+	return stats.Run(probeCeiling, t.Stats, t.ExecArgvFor("sh"))
 }
 
 func (System) Status(t Target) error {

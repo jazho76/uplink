@@ -10,7 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -23,35 +23,35 @@ type fakeBackend struct {
 	sessions []string
 }
 
-func (f *fakeBackend) Stats(t target.Target) ([]probe.Reading, error) {
+func (f *fakeBackend) Stats(t target.Target) ([]stats.Reading, error) {
 	f.stats++
 	if f.down[t.Name] {
 		return nil, errBoom{}
 	}
-	readings := make([]probe.Reading, len(t.Stats))
+	readings := make([]stats.Reading, len(t.Stats))
 	for i, m := range t.Stats {
 		readings[i] = reading(m, 0.1, 4)
 	}
 	return readings, nil
 }
 
-var linuxMetrics = probe.Metrics{
-	{Type: probe.TypeGauge, Label: "load", Value: "x", Max: "x"},
-	{Type: probe.TypeGauge, Label: "memory", Value: "x", Max: "x", Unit: probe.UnitBytes},
-	{Type: probe.TypeGauge, Label: "disk", Value: "x", Max: "x", Unit: probe.UnitBytes},
-	{Type: probe.TypeText, Label: "up", Value: "x", Unit: probe.UnitSeconds},
+var linuxMetrics = []stats.Metric{
+	{Type: stats.TypeGauge, Label: "load", Value: "x", Max: "x"},
+	{Type: stats.TypeGauge, Label: "memory", Value: "x", Max: "x", Unit: stats.UnitBytes},
+	{Type: stats.TypeGauge, Label: "disk", Value: "x", Max: "x", Unit: stats.UnitBytes},
+	{Type: stats.TypeText, Label: "up", Value: "x", Unit: stats.UnitSeconds},
 }
 
-func reading(m probe.Metric, value, max float64) probe.Reading {
-	return probe.Reading{Metric: m, Value: value, Max: max, OK: true}
+func reading(m stats.Metric, value, max float64) stats.Reading {
+	return stats.Reading{Metric: m, Value: value, Max: max, OK: true}
 }
 
-func loadReading(load, cores float64) probe.Reading {
+func loadReading(load, cores float64) stats.Reading {
 	return reading(linuxMetrics[0], load, cores)
 }
 
-func linuxReadings(load, cores, used, total float64, uptime time.Duration) []probe.Reading {
-	return []probe.Reading{
+func linuxReadings(load, cores, used, total float64, uptime time.Duration) []stats.Reading {
+	return []stats.Reading{
 		loadReading(load, cores),
 		reading(linuxMetrics[1], used, total),
 		reading(linuxMetrics[2], used, total),
@@ -1345,18 +1345,18 @@ func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 }
 
 func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
-	gpu := probe.Metric{Type: probe.TypeGauge, Label: "gpu", Value: "x", Max: "100"}
-	cache := probe.Metric{Type: probe.TypeGauge, Label: "cache", Value: "x", Max: "x", Unit: probe.UnitBytes}
-	agents := probe.Metric{Type: probe.TypeText, Label: "agents", Value: "x"}
-	broken := probe.Metric{Type: probe.TypeGauge, Label: "broken", Value: "x", Max: "1"}
+	gpu := stats.Metric{Type: stats.TypeGauge, Label: "gpu", Value: "x", Max: "100"}
+	cache := stats.Metric{Type: stats.TypeGauge, Label: "cache", Value: "x", Max: "x", Unit: stats.UnitBytes}
+	agents := stats.Metric{Type: stats.TypeText, Label: "agents", Value: "x"}
+	broken := stats.Metric{Type: stats.TypeGauge, Label: "broken", Value: "x", Max: "1"}
 
 	m, _ := newTestModel()
 	box := vm("box")
-	box.Stats = probe.Metrics{gpu, cache, agents, broken}
+	box.Stats = []stats.Metric{gpu, cache, agents, broken}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
 	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
-		readings: []probe.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
+		readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}

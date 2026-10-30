@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
@@ -176,7 +176,7 @@ func checkConfig() error {
 	return problems
 }
 
-func statNames(metrics probe.Metrics) string {
+func statNames(metrics []stats.Metric) string {
 	names := make([]string, len(metrics))
 	for i, m := range metrics {
 		names[i] = m.Label

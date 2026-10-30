@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,18 +31,18 @@ type ModeSpec struct {
 }
 
 type Spec struct {
-	Name    string        `yaml:"name"`
-	Profile string        `yaml:"profile"`
-	Group   string        `yaml:"group"`
-	Via     string        `yaml:"via"`
-	Exec    string        `yaml:"exec"`
-	Status  string        `yaml:"status"`
-	Up      string        `yaml:"up"`
-	Down    string        `yaml:"down"`
-	Logs    string        `yaml:"logs"`
-	Watch   *bool         `yaml:"watch"`
-	Stats   probe.Metrics `yaml:"stats"`
-	Modes   []ModeSpec    `yaml:"modes"`
+	Name    string         `yaml:"name"`
+	Profile string         `yaml:"profile"`
+	Group   string         `yaml:"group"`
+	Via     string         `yaml:"via"`
+	Exec    string         `yaml:"exec"`
+	Status  string         `yaml:"status"`
+	Up      string         `yaml:"up"`
+	Down    string         `yaml:"down"`
+	Logs    string         `yaml:"logs"`
+	Watch   *bool          `yaml:"watch"`
+	Stats   []stats.Metric `yaml:"stats"`
+	Modes   []ModeSpec     `yaml:"modes"`
 }
 
 type document struct {
@@ -229,12 +229,12 @@ func (s Spec) interpolate() Spec {
 	}
 	s.Modes = modes
 	if s.Stats != nil {
-		stats := make(probe.Metrics, len(s.Stats))
+		metrics := make([]stats.Metric, len(s.Stats))
 		for i, m := range s.Stats {
 			m.Value, m.Max = fill(m.Value), fill(m.Max)
-			stats[i] = m
+			metrics[i] = m
 		}
-		s.Stats = stats
+		s.Stats = metrics
 	}
 	return s
 }

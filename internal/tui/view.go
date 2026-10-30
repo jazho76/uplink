@@ -11,7 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/humanize"
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/ui"
 )
 
@@ -144,10 +144,10 @@ func (m model) renderLive(name string, width int) string {
 	var gauges []gaugeRow
 	var labels []string
 	for _, r := range e.readings {
-		if r.Gauge() {
+		if r.Metric.Gauge() {
 			gauges = append(gauges, gaugeOf(r))
 		}
-		labels = append(labels, r.Label)
+		labels = append(labels, r.Metric.Label)
 	}
 
 	indent := labelIndent(labels)
@@ -155,10 +155,10 @@ func (m model) renderLive(name string, width int) string {
 	var fields []field
 	for _, r := range e.readings {
 		switch {
-		case r.Gauge():
+		case r.Metric.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
-		case r.Type == probe.TypeText:
-			fields = append(fields, field{r.Label, valueStyle.Render(cmp.Or(textOf(r), "?"))})
+		case r.Metric.Type == stats.TypeText:
+			fields = append(fields, field{r.Metric.Label, valueStyle.Render(cmp.Or(textOf(r), "?"))})
 		}
 	}
 
@@ -172,20 +172,20 @@ type gaugeRow struct {
 	missing  bool
 }
 
-func gaugeOf(r probe.Reading) gaugeRow {
+func gaugeOf(r stats.Reading) gaugeRow {
 	switch {
 	case !r.OK:
-		return gaugeRow{label: r.Label, reading: "?", missing: true}
-	case r.Unit == probe.UnitBytes:
-		return gaugeRow{label: r.Label, fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
+		return gaugeRow{label: r.Metric.Label, reading: "?", missing: true}
+	case r.Metric.Unit == stats.UnitBytes:
+		return gaugeRow{label: r.Metric.Label, fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
 	default:
-		return gaugeRow{label: r.Label, fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
+		return gaugeRow{label: r.Metric.Label, fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
 	}
 }
 
-func textOf(r probe.Reading) string {
+func textOf(r stats.Reading) string {
 	switch {
-	case r.Unit == "":
+	case r.Metric.Unit == "":
 		return r.Text
 	case !r.OK:
 		return ""
@@ -194,11 +194,11 @@ func textOf(r probe.Reading) string {
 	}
 }
 
-func inUnit(r probe.Reading, v float64) string {
-	switch r.Unit {
-	case probe.UnitBytes:
+func inUnit(r stats.Reading, v float64) string {
+	switch r.Metric.Unit {
+	case stats.UnitBytes:
 		return humanize.Bytes(uint64(v))
-	case probe.UnitSeconds:
+	case stats.UnitSeconds:
 		return humanize.Duration(time.Duration(v * float64(time.Second)))
 	default:
 		return number(v)

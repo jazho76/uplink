@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 )
 
 const host = `
@@ -359,7 +359,7 @@ func TestHookFailureCarriesItsStderr(t *testing.T) {
 }
 
 func TestStatsFlowThroughExec(t *testing.T) {
-	metrics := probe.Metrics{{Type: probe.TypeGauge, Label: "where", Value: "echo 1", Max: "2"}}
+	metrics := []stats.Metric{{Type: stats.TypeGauge, Label: "where", Value: "echo 1", Max: "2"}}
 	for name, target := range map[string]Target{
 		"local": {Stats: metrics},
 		"via":   {Stats: metrics, Via: []string{"false"}, Exec: []string{"sh", "-c", "exec sh"}},

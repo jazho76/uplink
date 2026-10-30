@@ -8,7 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -74,7 +74,7 @@ type peek struct {
 type liveEntry struct {
 	state    status
 	action   status
-	readings []probe.Reading
+	readings []stats.Reading
 	statsOK  bool
 	at       time.Time
 	checked  time.Time
@@ -247,7 +247,7 @@ type liveMsg struct {
 	epoch    int
 	up       bool
 	full     bool
-	readings []probe.Reading
+	readings []stats.Reading
 	statsOK  bool
 }
 

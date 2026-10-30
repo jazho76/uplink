@@ -1,18 +1,16 @@
-package probe
+package stats
 
 import (
 	"strings"
 	"testing"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
-func runLocally(t *testing.T, metrics Metrics) []Reading {
+func runLocally(t *testing.T, metrics []Metric) []Reading {
 	t.Helper()
-	readings, err := Run(10*time.Second, metrics, "sh")
+	readings, err := Run(10*time.Second, metrics, []string{"sh"})
 	if err != nil {
-		t.Fatalf("probe: %v", err)
+		t.Fatalf("stats: %v", err)
 	}
 	if len(readings) != len(metrics) {
 		t.Fatalf("one reading per metric, got %d for %d", len(readings), len(metrics))
@@ -21,7 +19,7 @@ func runLocally(t *testing.T, metrics Metrics) []Reading {
 }
 
 func TestUnitTextReadsANumber(t *testing.T) {
-	readings := runLocally(t, Metrics{
+	readings := runLocally(t, []Metric{
 		{Type: TypeText, Label: "up", Value: "echo 3600", Unit: UnitSeconds},
 		{Type: TypeText, Label: "up", Value: "echo soon", Unit: UnitSeconds},
 	})
@@ -34,7 +32,7 @@ func TestUnitTextReadsANumber(t *testing.T) {
 }
 
 func TestCustomMetrics(t *testing.T) {
-	readings := runLocally(t, Metrics{
+	readings := runLocally(t, []Metric{
 		{Type: TypeGauge, Label: "fixed", Value: "echo 37", Max: "100"},
 		{Type: TypeGauge, Label: "computed", Value: "echo 3", Max: "echo 4"},
 		{Type: TypeText, Label: "note", Value: `printf 'it'\''s \\n fine\nsecond line\n'`},
@@ -51,7 +49,7 @@ func TestCustomMetrics(t *testing.T) {
 }
 
 func TestBrokenMetricsDoNotSpoilTheRest(t *testing.T) {
-	readings := runLocally(t, Metrics{
+	readings := runLocally(t, []Metric{
 		{Type: TypeGauge, Label: "fails", Value: "exit 1", Max: "10"},
 		{Type: TypeText, Label: "greedy", Value: "cat"},
 		{Type: TypeGauge, Label: "words", Value: "echo many", Max: "10"},
@@ -74,7 +72,7 @@ func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
 	t.Cleanup(func() { metricTimeout = previous })
 
 	start := time.Now()
-	readings := runLocally(t, Metrics{
+	readings := runLocally(t, []Metric{
 		{Type: TypeText, Label: "syntax", Value: "echo ( unbalanced"},
 		{Type: TypeText, Label: "spoof", Value: "echo first; echo '3 value 999'"},
 		{Type: TypeGauge, Label: "hang", Value: "sleep 30; echo 1", Max: "2"},
@@ -98,7 +96,7 @@ func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
 }
 
 func TestParseIgnoresNoise(t *testing.T) {
-	metrics := Metrics{{Type: TypeGauge, Label: "load", Value: "x", Max: "x"}, {Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds}}
+	metrics := []Metric{{Type: TypeGauge, Label: "load", Value: "x", Max: "x"}, {Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds}}
 	readings := Parse("motd banner\n0 value 0.5\n7 value 1\nx max 2\n0 max 4\n1 value nope\n", metrics)
 	if r := readings[0]; !r.OK || r.Value != 0.5 || r.Max != 4 {
 		t.Errorf("load = %+v", r)
@@ -130,17 +128,5 @@ func TestValidate(t *testing.T) {
 		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%+v: want %q, got %v", m, want, err)
 		}
-	}
-}
-
-func TestMetricsDecoding(t *testing.T) {
-	var spec struct {
-		Stats Metrics `yaml:"stats"`
-	}
-	if err := yaml.Unmarshal([]byte("stats: []"), &spec); err != nil || spec.Stats == nil || len(spec.Stats) != 0 {
-		t.Errorf("an empty list means none, distinct from absent: %v %#v", err, spec.Stats)
-	}
-	if err := yaml.Unmarshal([]byte("x: &l [{ type: text, label: a, value: b }]\nstats: *l"), &spec); err != nil || len(spec.Stats) != 1 {
-		t.Errorf("an alias should decode: %v %#v", err, spec.Stats)
 	}
 }

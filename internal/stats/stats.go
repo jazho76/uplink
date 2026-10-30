@@ -1,4 +1,4 @@
-package probe
+package stats
 
 import (
 	"errors"
@@ -28,51 +28,33 @@ type Metric struct {
 	Unit  string `yaml:"unit"`
 }
 
-type Metrics []Metric
-
 type Reading struct {
-	Metric
-	Value float64
-	Max   float64
-	Text  string
-	OK    bool
-}
-
-type rule struct {
-	allowed  []string
-	required []string
-}
-
-var rules = map[string]rule{
-	TypeGauge: {allowed: []string{"label", "value", "max", "unit"}, required: []string{"label", "value", "max"}},
-	TypeText:  {allowed: []string{"label", "value", "unit"}, required: []string{"label", "value"}},
+	Metric Metric
+	Value  float64
+	Max    float64
+	Text   string
+	OK     bool
 }
 
 var (
-	types      = []string{TypeGauge, TypeText}
-	units      = []string{UnitBytes, UnitSeconds}
-	fieldNames = []string{"label", "value", "max", "unit"}
+	types = []string{TypeGauge, TypeText}
+	units = []string{UnitBytes, UnitSeconds}
 )
 
-func (m Metric) fields() map[string]string {
-	return map[string]string{"label": m.Label, "value": m.Value, "max": m.Max, "unit": m.Unit}
-}
-
 func (m Metric) Validate() error {
-	r, ok := rules[m.Type]
-	if !ok {
+	if !slices.Contains(types, m.Type) {
 		return fmt.Errorf("type must be one of %s, got %q", strings.Join(types, ", "), m.Type)
 	}
-	fields := m.fields()
-	for _, field := range fieldNames {
-		if fields[field] != "" && !slices.Contains(r.allowed, field) {
-			return fmt.Errorf("%s takes no %s", m.Type, field)
-		}
+	if m.Type == TypeText && m.Max != "" {
+		return errors.New("text takes no max")
 	}
-	for _, field := range r.required {
-		if fields[field] == "" {
-			return fmt.Errorf("%s needs a %s", m.Type, field)
-		}
+	switch {
+	case m.Label == "":
+		return fmt.Errorf("%s needs a label", m.Type)
+	case m.Value == "":
+		return fmt.Errorf("%s needs a value", m.Type)
+	case m.Gauge() && m.Max == "":
+		return errors.New("gauge needs a max")
 	}
 	if m.Unit != "" && !slices.Contains(units, m.Unit) {
 		return fmt.Errorf("unit must be one of %s, got %q", strings.Join(units, ", "), m.Unit)
@@ -87,11 +69,11 @@ func (m Metric) constantMax() (float64, bool) {
 	return v, err == nil && !math.IsNaN(v)
 }
 
-func (m Metric) commands() (value, ceiling string) {
-	if _, constant := m.constantMax(); m.Max == "" || constant {
-		return m.Value, ""
+func (m Metric) maxCommand() string {
+	if _, constant := m.constantMax(); constant {
+		return ""
 	}
-	return m.Value, m.Max
+	return m.Max
 }
 
 func capture(tag, command string) string {
@@ -104,19 +86,18 @@ func quote(s string) string {
 
 var metricTimeout = 5 * time.Second
 
-func compile(metrics Metrics) string {
+func compile(metrics []Metric) string {
 	lines := []string{fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))}
 	for i, m := range metrics {
-		value, ceiling := m.commands()
-		lines = append(lines, capture(fmt.Sprintf("%d value", i), value))
-		if ceiling != "" {
-			lines = append(lines, capture(fmt.Sprintf("%d max", i), ceiling))
+		lines = append(lines, capture(fmt.Sprintf("%d value", i), m.Value))
+		if command := m.maxCommand(); command != "" {
+			lines = append(lines, capture(fmt.Sprintf("%d max", i), command))
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-func Parse(out string, metrics Metrics) []Reading {
+func Parse(out string, metrics []Metric) []Reading {
 	values := map[int]string{}
 	maxes := map[int]string{}
 	for _, line := range strings.Split(out, "\n") {
@@ -163,11 +144,11 @@ func (r Reading) Fraction() float64 {
 	return r.Value / r.Max
 }
 
-func Run(limit time.Duration, metrics Metrics, transport ...string) ([]Reading, error) {
-	if len(transport) == 0 {
-		return nil, errors.New("probe: no transport given")
+func Run(limit time.Duration, metrics []Metric, argv []string) ([]Reading, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("stats: no command to run")
 	}
-	out, err := run.NonInteractive(limit, compile(metrics), transport[0], transport[1:]...)
+	out, err := run.NonInteractive(limit, compile(metrics), argv[0], argv[1:]...)
 	if err != nil {
 		return nil, err
 	}

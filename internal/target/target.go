@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/probe"
+	"github.com/jazho76/uplink/internal/stats"
 )
 
 const (
@@ -29,7 +29,7 @@ type Target struct {
 	Down   string
 	Logs   string
 	Watch  bool
-	Stats  probe.Metrics
+	Stats  []stats.Metric
 	Modes  []Mode
 }
 
