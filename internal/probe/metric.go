@@ -1,7 +1,6 @@
 package probe
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"math"
@@ -101,8 +100,6 @@ func (m Metric) Validate() error {
 	return nil
 }
 
-func (m Metric) Name() string { return cmp.Or(m.Label, m.Type) }
-
 func (m Metric) Gauge() bool { return m.Type == TypeGauge }
 
 func (m Metric) constantMax() (float64, bool) {
@@ -127,7 +124,7 @@ func quote(s string) string {
 
 var metricTimeout = 5 * time.Second
 
-func Compile(metrics Metrics) string {
+func compile(metrics Metrics) string {
 	lines := []string{fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))}
 	for i, m := range metrics {
 		value, ceiling := m.commands()
@@ -190,7 +187,7 @@ func Run(limit time.Duration, metrics Metrics, transport ...string) ([]Reading, 
 	if len(transport) == 0 {
 		return nil, errors.New("probe: no transport given")
 	}
-	out, err := run.NonInteractive(limit, Compile(metrics), transport[0], transport[1:]...)
+	out, err := run.NonInteractive(limit, compile(metrics), transport[0], transport[1:]...)
 	if err != nil {
 		return nil, err
 	}

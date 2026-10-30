@@ -147,7 +147,7 @@ func (m model) renderLive(name string, width int) string {
 		if r.Gauge() {
 			gauges = append(gauges, gaugeOf(r))
 		}
-		labels = append(labels, r.Name())
+		labels = append(labels, r.Label)
 	}
 
 	indent := labelIndent(labels)
@@ -158,7 +158,7 @@ func (m model) renderLive(name string, width int) string {
 		case r.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
 		case r.Type == probe.TypeText:
-			fields = append(fields, field{r.Name(), valueStyle.Render(cmp.Or(textOf(r), "?"))})
+			fields = append(fields, field{r.Label, valueStyle.Render(cmp.Or(textOf(r), "?"))})
 		}
 	}
 
@@ -175,11 +175,11 @@ type gaugeRow struct {
 func gaugeOf(r probe.Reading) gaugeRow {
 	switch {
 	case !r.OK:
-		return gaugeRow{label: r.Name(), reading: "?", missing: true}
+		return gaugeRow{label: r.Label, reading: "?", missing: true}
 	case r.Unit == probe.UnitBytes:
-		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
+		return gaugeRow{label: r.Label, fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
 	default:
-		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
+		return gaugeRow{label: r.Label, fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
 	}
 }
 

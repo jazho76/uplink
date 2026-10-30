@@ -41,11 +41,28 @@ func mustLoad(t *testing.T, body string) []Target {
 
 func find(t *testing.T, targets []Target, name string) Target {
 	t.Helper()
-	found, err := Resolve(targets, name)
-	if err != nil {
-		t.Fatal(err)
+	i := slices.IndexFunc(targets, func(found Target) bool { return found.Name == name })
+	if i < 0 {
+		t.Fatalf("no target %q", name)
 	}
-	return found
+	return targets[i]
+}
+
+func modeNames(target Target) []string {
+	names := make([]string, 0, len(target.Modes))
+	for _, m := range target.Modes {
+		names = append(names, m.Name)
+	}
+	return names
+}
+
+func modeNamed(t *testing.T, target Target, name string) Mode {
+	t.Helper()
+	i := slices.IndexFunc(target.Modes, func(m Mode) bool { return m.Name == name })
+	if i < 0 {
+		t.Fatalf("%s has no mode %q", target.Name, name)
+	}
+	return target.Modes[i]
 }
 
 func TestShellWords(t *testing.T) {
@@ -83,7 +100,7 @@ func TestMissingTargetsFallBackToTheHost(t *testing.T) {
 	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || targets[0].Stats != nil {
 		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
-	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
+	if got := modeNames(targets[0]); !slices.Equal(got, []string{"tmux", "shell"}) {
 		t.Errorf("default host modes = %v", got)
 	}
 }
@@ -128,7 +145,7 @@ targets:`+host+`
 	if got := forge.DefaultMode().Argv; !slices.Equal(got, append(wantVia, "tmux new-session -A -s forge")) {
 		t.Errorf("tmux argv = %q", got)
 	}
-	if shell, _ := forge.Mode("shell"); !slices.Equal(shell.Argv, append(wantVia, loginShell)) {
+	if shell := modeNamed(t, forge, "shell"); !slices.Equal(shell.Argv, append(wantVia, loginShell)) {
 		t.Errorf("a mode without run opens the user's shell, got %q", shell.Argv)
 	}
 
@@ -136,10 +153,10 @@ targets:`+host+`
 	if tokyo.Logs != "echo own" || tokyo.Stats == nil || len(tokyo.Stats) != 0 {
 		t.Errorf("target fields override the profile, got logs %q stats %v", tokyo.Logs, tokyo.Stats)
 	}
-	if got := tokyo.ModeNames(); !slices.Equal(got, []string{"top"}) {
+	if got := modeNames(tokyo); !slices.Equal(got, []string{"top"}) {
 		t.Errorf("target modes replace the profile's wholesale, got %v", got)
 	}
-	if top, _ := tokyo.Mode("top"); top.Argv[len(top.Argv)-1] != "htop" {
+	if top := modeNamed(t, tokyo, "top"); top.Argv[len(top.Argv)-1] != "htop" {
 		t.Errorf("a mode still carrying the retired back key should load, got %q", top.Argv)
 	}
 }
@@ -156,7 +173,7 @@ targets:
 	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"sh", "-c", "tmux new-session -A -s host"}) {
 		t.Errorf("tmux argv = %q", got)
 	}
-	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
+	if shell := modeNamed(t, local, "shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
 		t.Errorf("shell argv = %q", shell.Argv)
 	}
 	if local.Group != DefaultGroup || local.Watch || local.Stats != nil {
@@ -363,13 +380,6 @@ remotes:
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %s:\n%v", want, err)
 		}
-	}
-}
-
-func TestResolveListsKnownTargets(t *testing.T) {
-	targets := mustLoad(t, "")
-	if _, err := Resolve(targets, "nope"); err == nil || !strings.Contains(err.Error(), "host") {
-		t.Errorf("an unknown name should list the known targets, got %v", err)
 	}
 }
 

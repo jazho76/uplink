@@ -148,7 +148,11 @@ func checkConfig() error {
 	resolved, problems := target.Load(cfg)
 	for _, t := range resolved {
 		fmt.Println()
-		ui.Info("%s  %s%s", t.Name, t.Group, flags(t))
+		header := t.Name + "  " + t.Group
+		if t.Watch {
+			header += "  watch"
+		}
+		ui.Info("%s", header)
 		for _, f := range []struct{ key, value string }{
 			{"via", target.Quote(t.Via)},
 			{"exec", target.Quote(t.Exec)},
@@ -178,23 +182,10 @@ func checkConfig() error {
 	return problems
 }
 
-func flags(t target.Target) string {
-	var set string
-	for _, f := range []struct {
-		name string
-		on   bool
-	}{{"watch", t.Watch}} {
-		if f.on {
-			set += "  " + f.name
-		}
-	}
-	return set
-}
-
 func statNames(metrics probe.Metrics) string {
 	names := make([]string, len(metrics))
 	for i, m := range metrics {
-		names[i] = m.Name()
+		names[i] = m.Label
 	}
 	return strings.Join(names, ", ")
 }

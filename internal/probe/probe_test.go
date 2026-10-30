@@ -135,16 +135,6 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestNames(t *testing.T) {
-	for want, m := range map[string]Metric{
-		"text": {Type: TypeText}, "gpu": {Type: TypeGauge, Label: "gpu"},
-	} {
-		if got := m.Name(); got != want {
-			t.Errorf("%+v: name %q, want %q", m, got, want)
-		}
-	}
-}
-
 func TestMetricsDecoding(t *testing.T) {
 	var spec struct {
 		Stats Metrics `yaml:"stats"`

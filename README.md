@@ -194,7 +194,7 @@ without `via` runs here.
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Name shown in the dashboard and used by `uplink <name>` |
+| `name` | Name shown in the dashboard |
 | `group` | Pane the target is listed under; `ungrouped` when left out |
 | `via` | Command that reaches the target; leave it out to run on this machine |
 | `exec` | `via` for background probes, where no terminal is attached; defaults to `via` |
@@ -313,11 +313,10 @@ x-macos: &macos
     max: df -P -k /System/Volumes/Data | awk 'NR==2{print $2*1024}'
 ```
 
-All metrics travel in
-one script piped through `exec` into `sh`, one round trip per refresh, but each
-command runs in its own `sh -c` with no stdin and, where the target has
-`timeout`, a 5 second limit. A metric that fails, hangs, or prints no number
-shows `?`; the others are unaffected.
+All metrics travel in one script piped through `exec` into `sh`, one round trip
+per refresh, but each command runs in its own `sh -c` with no stdin and, where
+the target has the `timeout` command, a 5 second limit. A metric that fails,
+hangs, or prints no number shows `?`; the others are unaffected.
 
 ### Probes and timeouts
 
