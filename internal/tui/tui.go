@@ -88,7 +88,6 @@ type liveEntry struct {
 	action   status
 	readings []probe.Reading
 	statsOK  bool
-	history  []float64
 	at       time.Time
 	checked  time.Time
 	pending  bool
@@ -389,9 +388,6 @@ func (m model) settle(msg liveMsg) liveEntry {
 		e.statsOK = msg.statsOK
 		if msg.statsOK {
 			e.readings = msg.readings
-			if gauge, ok := firstGauge(msg.readings); ok && gauge.OK {
-				e.history = appendSample(e.history, gauge.Fraction())
-			}
 		}
 	}
 	if !msg.up {

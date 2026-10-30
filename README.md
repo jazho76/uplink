@@ -289,8 +289,7 @@ stats:
 
 `value` and `max` are shell commands run on the target; the first line of
 their output is used. A `max` that is a plain number is used as is. `unit:
-bytes` formats both as sizes. `{name}` works in `value`, `max`, and `path`. The
-first gauge is also charted over time.
+bytes` formats both as sizes. `{name}` works in `value`, `max`, and `path`.
 
 The built-ins read `/proc`, so they need a Linux target. All metrics travel in
 one script piped through `exec` into `sh`, one round trip per refresh, but each

@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -112,7 +111,7 @@ func (m model) previewBody(width, height int) string {
 
 	if len(it.t.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
-		b.WriteString(m.renderLive(it.name(), width, height))
+		b.WriteString(m.renderLive(it.name(), width))
 	}
 
 	b.WriteString("\n" + rule("spec", width))
@@ -142,7 +141,7 @@ func (m model) logsFor(it item) string {
 	return m.logPeek.text
 }
 
-func (m model) renderLive(name string, width, height int) string {
+func (m model) renderLive(name string, width int) string {
 	e := m.live[name]
 	if e.at.IsZero() {
 		return labelStyle.Render("…") + "\n"
@@ -174,11 +173,7 @@ func (m model) renderLive(name string, width, height int) string {
 		}
 	}
 
-	live := renderFields(fields, width)
-	if gauge, ok := firstGauge(e.readings); ok && gauge.OK {
-		live += renderGaugeChart(e, gauge, width-indent, height, indent)
-	}
-	return live
+	return renderFields(fields, width)
 }
 
 type gaugeRow struct {
@@ -217,14 +212,6 @@ func number(v float64) string {
 	return fmt.Sprintf("%.2f", v)
 }
 
-func firstGauge(readings []probe.Reading) (probe.Reading, bool) {
-	i := slices.IndexFunc(readings, func(r probe.Reading) bool { return r.Gauge() })
-	if i < 0 {
-		return probe.Reading{}, false
-	}
-	return readings[i], true
-}
-
 func usageGauge(label string, used, total uint64) gaugeRow {
 	return gaugeRow{label: label, fraction: usedFraction(used, total), reading: amount(used, total)}
 }
@@ -260,37 +247,6 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 			gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent, gaugeGap)})
 	}
 	return fields
-}
-
-func renderGaugeChart(e liveEntry, gauge probe.Reading, width, height, indent int) string {
-	if width < 1 {
-		return ""
-	}
-	visible := newest(e.history, width)
-	ceiling := chartCeiling(visible)
-
-	window := humanize.Duration(time.Duration(len(visible)) * liveInterval)
-	head := labelStyle.Render(gauge.Name() + " · last " + window)
-	peak := labelStyle.Render("peak " + gaugeValue(gauge, ceiling*gauge.Max))
-	if width < lipgloss.Width(head)+1+lipgloss.Width(peak) {
-		return ""
-	}
-
-	plot := areaChart(visible, width, chartHeight(height), ceiling, meterStyle(gauge.Fraction()))
-	if len(plot) == 0 {
-		return ""
-	}
-
-	gutter := strings.Repeat(" ", indent)
-	lines := append([]string{spread(head, peak, width, plainStyle)}, plot...)
-	lines = append(lines, labelStyle.Render(strings.Repeat(thinGlyphs.track, width)))
-
-	var b strings.Builder
-	b.WriteString("\n")
-	for _, line := range lines {
-		b.WriteString(gutter + line + "\n")
-	}
-	return b.String()
 }
 
 func gauge(bar, reading string, gap int) string {

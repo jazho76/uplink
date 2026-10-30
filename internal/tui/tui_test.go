@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/humanize"
 	"github.com/jazho76/uplink/internal/probe"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -884,90 +883,6 @@ func TestLiveGaugesAlignTheirPercentColumn(t *testing.T) {
 	}
 }
 
-func TestLoadChartAppearsBelowTheGauges(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(load(m))
-	m = focus(probed(m, "forge", true), "forge")
-
-	var history []float64
-	for i := 0; i < 20; i++ {
-		history = appendSample(history, float64(i%7)/7)
-	}
-	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, history: history,
-		readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
-
-	preview := ansi.Strip(m.previewBody(70, 40))
-	gauges, chart := strings.Index(preview, "disk"), strings.Index(preview, "load · last")
-	if chart < 0 {
-		t.Fatalf("a roomy preview should carry the chart:\n%s", preview)
-	}
-	if gauges > chart {
-		t.Errorf("the chart belongs under the gauges:\n%s", preview)
-	}
-	if !strings.Contains(preview, "peak ") {
-		t.Errorf("the chart must state the ceiling it scaled to:\n%s", preview)
-	}
-
-	cramped := ansi.Strip(m.previewBody(20, 40))
-	if strings.Contains(cramped, "load · last") {
-		t.Errorf("a pane too narrow to plot drops the chart:\n%s", cramped)
-	}
-}
-
-func TestLoadChartSpansTheAvailableWidth(t *testing.T) {
-	var e liveEntry
-	for i := 0; i < 20; i++ {
-		e.history = appendSample(e.history, float64(i%7)/7)
-	}
-
-	for _, width := range []int{28, 40, 96} {
-		block := ansi.Strip(renderGaugeChart(e, loadReading(1, 4), width, 40, 0))
-		for i, line := range strings.Split(strings.Trim(block, "\n"), "\n") {
-			if got := lipgloss.Width(line); got != width {
-				t.Errorf("%d cols: chart line %d spans %d", width, i, got)
-			}
-		}
-	}
-}
-
-func TestLoadChartPeakDescribesWhatIsPlotted(t *testing.T) {
-	var e liveEntry
-	e.history = appendSample(e.history, 0.9)
-	for i := 0; i < 60; i++ {
-		e.history = appendSample(e.history, 0.2)
-	}
-
-	narrow := ansi.Strip(renderGaugeChart(e, loadReading(2, 10), 30, 40, 0))
-	if strings.Contains(narrow, "peak 9.00") {
-		t.Errorf("a spike scrolled off the chart must not be claimed as its peak:\n%s", narrow)
-	}
-	if !strings.Contains(narrow, "peak 2.00") {
-		t.Errorf("the peak should be the tallest column actually drawn:\n%s", narrow)
-	}
-
-	wide := ansi.Strip(renderGaugeChart(e, loadReading(2, 10), 100, 40, 0))
-	if !strings.Contains(wide, "peak 9.00") {
-		t.Errorf("a chart wide enough to include the spike should report it:\n%s", wide)
-	}
-}
-
-func TestLoadChartWindowFollowsWhatIsVisible(t *testing.T) {
-	var e liveEntry
-	for i := 0; i < maxLiveSamples; i++ {
-		e.history = appendSample(e.history, 0.3)
-	}
-
-	const narrowWidth = 30
-	wide := ansi.Strip(renderGaugeChart(e, loadReading(1.2, 4), 120, 40, 0))
-	narrow := ansi.Strip(renderGaugeChart(e, loadReading(1.2, 4), narrowWidth, 40, 0))
-	if wide == narrow {
-		t.Fatalf("a wider chart shows a longer window")
-	}
-	if !strings.Contains(narrow, humanize.Duration(narrowWidth*liveInterval)) {
-		t.Errorf("the window must describe the visible samples, not the whole buffer:\n%s", narrow)
-	}
-}
-
 func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
@@ -1432,11 +1347,10 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	m = sized(load(withTargets(m, box)))
 	m = focus(m, "box")
 	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
-		history:  []float64{0.2, 0.37},
 		readings: []probe.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
-	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?", "gpu · last", "peak 37"}
+	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}
 	last := -1
 	for _, want := range order {
 		at := strings.Index(preview[last+1:], want)
@@ -1447,32 +1361,6 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	}
 	if strings.Contains(preview, "load") || strings.Contains(preview, "memory") {
 		t.Errorf("only declared metrics are shown:\n%s", preview)
-	}
-}
-
-func TestNoGaugeMeansNoChart(t *testing.T) {
-	agents := probe.Metric{Type: probe.TypeText, Label: "agents", Value: "x"}
-	m, _ := newTestModel()
-	box := vm("box")
-	box.Stats = probe.Metrics{agents}
-	m = sized(load(withTargets(m, box)))
-	m = focus(m, "box")
-	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
-		readings: []probe.Reading{{Metric: agents, Text: "3", OK: true}}}
-
-	if preview := ansi.Strip(m.previewBody(70, 40)); strings.Contains(preview, "· last") {
-		t.Errorf("text alone draws no chart:\n%s", preview)
-	}
-}
-
-func TestHistoryFollowsTheFirstGauge(t *testing.T) {
-	m, _ := newTestModel()
-	m = probed(m, "forge", true)
-	next, _ := m.Update(liveMsg{name: "forge", up: true, full: true, statsOK: true,
-		readings: []probe.Reading{{Metric: linuxMetrics[0]}, reading(linuxMetrics[1], 1, 4)}})
-	m = next.(model)
-	if got := len(m.live["forge"].history); got != 1 {
-		t.Errorf("a sample whose first gauge is missing adds nothing to the chart, history has %d", got)
 	}
 }
 
@@ -1620,7 +1508,7 @@ func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
 	}
 }
 
-func TestReloadDropsHistoryOfChangedStats(t *testing.T) {
+func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(load(m))
 	m = probed(probed(m, "forge", true), "tokyo", true)
@@ -1631,11 +1519,11 @@ func TestReloadDropsHistoryOfChangedStats(t *testing.T) {
 
 	next, _ := m.Update(configEditedMsg{})
 	m = next.(model)
-	if forge := m.live["forge"]; forge.history != nil || forge.readings != nil || forge.state != statusUp {
-		t.Errorf("changed stats start a fresh chart but keep the status, got %+v", forge)
+	if forge := m.live["forge"]; forge.readings != nil || forge.state != statusUp {
+		t.Errorf("changed stats drop their readings but keep the status, got %+v", forge)
 	}
-	if len(m.live["tokyo"].history) == 0 {
-		t.Errorf("unchanged stats keep their history")
+	if m.live["tokyo"].readings == nil {
+		t.Errorf("unchanged stats keep their readings")
 	}
 }
 

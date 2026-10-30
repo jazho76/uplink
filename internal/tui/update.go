@@ -192,7 +192,7 @@ func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	for _, t := range targets {
 		if previous, ok := m.targetNamed(t.Name); ok && !slices.Equal(previous.Stats, t.Stats) {
 			e := m.live[t.Name]
-			e.readings, e.statsOK, e.history = nil, false, nil
+			e.readings, e.statsOK = nil, false
 			m.live[t.Name] = e
 		}
 	}

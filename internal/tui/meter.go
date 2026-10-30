@@ -2,7 +2,6 @@ package tui
 
 import (
 	"math"
-	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -21,16 +20,9 @@ const (
 	meterCritical = 0.90
 
 	maxLiveSamples = 180
-
-	minChartRows    = 2
-	maxChartRows    = 4
-	chartPaneShare  = 4
-	minChartCeiling = 0.02
 )
 
 var sparkLevels = []rune("▁▂▃▄▅▆▇█")
-
-const blank = " "
 
 func clampFraction(f float64) float64 {
 	return min(max(f, 0), 1)
@@ -65,74 +57,8 @@ func meter(fraction float64, width int, glyphs meterGlyphs) string {
 		labelStyle.Render(strings.Repeat(glyphs.track, width-filled))
 }
 
-func chartCeiling(samples []float64) float64 {
-	ceiling := minChartCeiling
-	for _, s := range samples {
-		ceiling = max(ceiling, s)
-	}
-	return ceiling
-}
-
-func areaChart(samples []float64, width, height int, ceiling float64, fill lipgloss.Style) []string {
-	if width < 1 || height < 1 {
-		return nil
-	}
-	samples = newest(samples, width)
-
-	window := slices.Repeat([]string{blank}, width-len(samples))
-	rows := make([][]string, height)
-	for r := range rows {
-		rows[r] = append(make([]string, 0, width), window...)
-	}
-	for _, s := range samples {
-		reached := clampFraction(s/ceiling) * float64(height)
-		for r := range rows {
-			rows[r] = append(rows[r], areaCell(reached-float64(height-1-r)))
-		}
-	}
-
-	out := make([]string, height)
-	for r := range rows {
-		out[r] = renderColumns(rows[r], fill)
-	}
-	return out
-}
-
-func renderColumns(row []string, fill lipgloss.Style) string {
-	var b strings.Builder
-	for start := 0; start < len(row); {
-		empty := row[start] == blank
-		end := start + 1
-		for end < len(row) && (row[end] == blank) == empty {
-			end++
-		}
-		run := strings.Join(row[start:end], "")
-		if !empty {
-			run = fill.Render(run)
-		}
-		b.WriteString(run)
-		start = end
-	}
-	return b.String()
-}
-
-func areaCell(covered float64) string {
-	switch {
-	case covered >= 1:
-		return blockGlyphs.fill
-	case covered > 0:
-		return string(sparkLevels[stepIndex(covered, len(sparkLevels))])
-	default:
-		return blank
-	}
-}
-
 func stepIndex(fraction float64, steps int) int {
 	return min(max(int(math.Ceil(fraction*float64(steps)))-1, 0), steps-1)
-}
-
-func chartHeight(available int) int {
-	return min(maxChartRows, max(available/chartPaneShare, minChartRows))
 }
 
 func sparkline(samples []float64, width int, fill lipgloss.Style) string {
