@@ -49,6 +49,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case hookDoneMsg:
+		connect := msg.verb == "start" && msg.err == nil &&
+			m.connectAfterStart == msg.name && m.selected().name() == msg.name
+		if m.connectAfterStart == msg.name {
+			m.connectAfterStart = ""
+		}
 		e := m.live[msg.name]
 		e.action, e.at = "", time.Time{}
 		e.epoch++
@@ -60,7 +65,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		return m, m.check(t, t.Name == m.selected().name())
+		recheck := m.check(t, t.Name == m.selected().name())
+		if connect {
+			return m, tea.Batch(recheck, m.session())
+		}
+		return m, recheck
 
 	case configEditedMsg:
 		return m.reload(msg.status)
@@ -107,7 +116,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.runHook(false)
 
 	case "ctrl+e":
-		return m, tea.ExecProcess(exec.Command(m.self, "config", "edit"), configEdited)
+		return m, m.exec(exec.Command(m.self, "config", "edit"), configEdited)
 
 	case "ctrl+l":
 		if it := m.selected(); it.t.Logs != "" {
@@ -147,14 +156,23 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	mode := m.mode()
-	args := []string{"connect", it.name()}
-	if mode.Name != "" {
-		args = append(args, "--mode", mode.Name)
+	switch e := m.live[it.name()]; {
+	case e.action != "":
+		return m, nil
+	case e.state == statusDown && it.t.Up != "":
+		m.connectAfterStart = it.name()
+		return m.runHook(true)
 	}
+	return m, m.session()
+}
 
-	name := it.name()
-	return m, tea.ExecProcess(exec.Command(m.self, args...), func(err error) tea.Msg {
+func (m model) session() tea.Cmd {
+	mode := m.mode()
+	if len(mode.Argv) == 0 {
+		return nil
+	}
+	name := m.selected().name()
+	return m.exec(exec.Command(mode.Argv[0], mode.Argv[1:]...), func(err error) tea.Msg {
 		return sessionEnded(name, err)
 	})
 }

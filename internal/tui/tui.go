@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"time"
 
@@ -59,6 +60,9 @@ type model struct {
 	logPeek   peek
 	live      map[string]liveEntry
 	load      func() ([]target.Target, error)
+	exec      func(*exec.Cmd, tea.ExecCallback) tea.Cmd
+
+	connectAfterStart string
 }
 
 type peek struct {
@@ -98,6 +102,7 @@ func newModel(targets []target.Target, backend target.Backend) model {
 		targets: targets,
 		backend: backend,
 		live:    map[string]liveEntry{},
+		exec:    tea.ExecProcess,
 	}
 	m.rebuild()
 	return m

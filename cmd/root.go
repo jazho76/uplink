@@ -9,18 +9,15 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "uplink [target][:mode]",
+	Use:           "uplink",
 	Short:         "Launcher for local, virtual, and remote shells",
-	Long:          "Run bare to open the dashboard, or with a target to connect to it directly.",
+	Long:          "Run bare to open the dashboard.",
 	Version:       version.Version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Args:          cobra.MaximumNArgs(1),
+	Args:          cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return dashboard()
-		}
-		return connect(args[0], "")
+		return dashboard()
 	},
 }
 

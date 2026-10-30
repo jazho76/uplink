@@ -22,15 +22,6 @@ func Stream(bin string, args ...string) error {
 	return nil
 }
 
-func Exec(bin string, args ...string) error {
-	path, err := exec.LookPath(bin)
-	if err != nil {
-		return fmt.Errorf("%s: %w", bin, err)
-	}
-	argv := append([]string{path}, args...)
-	return syscall.Exec(path, argv, os.Environ())
-}
-
 func NonInteractive(limit time.Duration, stdin, bin string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()

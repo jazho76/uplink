@@ -101,13 +101,6 @@ terminal emulator, bind your preferred shortcut to:
 <terminal> -e uplink dashboard
 ```
 
-You can also skip the dashboard and go straight to a target and mode:
-
-```sh
-uplink box          # default mode
-uplink box:shell
-```
-
 ## The dashboard
 
 The left side lists targets in the groups your config gives them, in the order

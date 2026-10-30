@@ -20,6 +20,7 @@ type fakeBackend struct {
 	hooks    []string
 	statuses int
 	stats    int
+	sessions []string
 }
 
 func (f *fakeBackend) Stats(t target.Target) ([]probe.Reading, error) {
@@ -68,6 +69,9 @@ func (f *fakeBackend) Status(t target.Target) error {
 
 func (f *fakeBackend) Up(t target.Target) error {
 	f.hooks = append(f.hooks, "up "+t.Name)
+	if t.Name == "jammed" {
+		return errBoom{}
+	}
 	f.down[t.Name] = false
 	return nil
 }
@@ -126,6 +130,10 @@ func newTestModel() (model, *fakeBackend) {
 	}
 	m := newModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
 	m.self = "/tmp/uplink"
+	m.exec = func(cmd *exec.Cmd, _ tea.ExecCallback) tea.Cmd {
+		backend.sessions = append(backend.sessions, strings.Join(cmd.Args, " "))
+		return nil
+	}
 	return m, backend
 }
 
@@ -489,6 +497,100 @@ func finishHook(m model, cmd tea.Cmd) model {
 	}
 	next, recheck := m.Update(cmd())
 	return applyCmd(next.(model), recheck)
+}
+
+func startable(name string) target.Target {
+	t := vm(name)
+	t.Up = "limactl start " + name
+	return t
+}
+
+func downed(m model, backend *fakeBackend, name string) model {
+	backend.down[name] = true
+	return focus(m, name).withSelectionRefreshed()
+}
+
+func TestEnterRunsTheSelectedMode(t *testing.T) {
+	m, backend := newTestModel()
+	m = focus(sized(m), "forge").withSelectionRefreshed()
+
+	m = key(m, "enter")
+	m = key(key(m, "tab"), "enter")
+	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-forge tmux, ssh lima-forge" {
+		t.Errorf("enter runs the selected mode's argv, ran %q", got)
+	}
+	if len(backend.hooks) != 0 {
+		t.Errorf("an up target needs no start, ran %v", backend.hooks)
+	}
+}
+
+func TestEnterStartsADownTargetThenConnects(t *testing.T) {
+	m, backend := newTestModel()
+	m = downed(sized(withTargets(m, startable("nakama"))), backend, "nakama")
+
+	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = next.(model)
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusStarting || len(backend.sessions) != 0 {
+		t.Fatalf("a down target starts before anything runs, got %q and sessions %v", got, backend.sessions)
+	}
+
+	m = finishHook(m, start)
+	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-nakama tmux" {
+		t.Errorf("once started, the selected mode runs once, ran %q", got)
+	}
+	if m.connectAfterStart != "" {
+		t.Errorf("a finished start forgets the pending connect, got %q", m.connectAfterStart)
+	}
+}
+
+func TestMovingAwayCancelsTheConnect(t *testing.T) {
+	m, backend := newTestModel()
+	m = downed(sized(withTargets(m, startable("nakama"), vm("plain"))), backend, "nakama")
+
+	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = focus(next.(model), "plain")
+	m = finishHook(m, start)
+	if len(backend.sessions) != 0 {
+		t.Errorf("a start finishing elsewhere connects nothing, ran %v", backend.sessions)
+	}
+	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusUp {
+		t.Errorf("the target still ends up started, got %q", got)
+	}
+}
+
+func TestFailedStartConnectsNothing(t *testing.T) {
+	m, backend := newTestModel()
+	m = downed(sized(withTargets(m, startable("jammed"))), backend, "jammed")
+
+	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = finishHook(next.(model), start)
+	if len(backend.sessions) != 0 || m.connectAfterStart != "" {
+		t.Errorf("a failed start connects nothing and forgets the intent, ran %v, pending %q", backend.sessions, m.connectAfterStart)
+	}
+	if !strings.Contains(m.status, "start jammed failed") {
+		t.Errorf("the failure reaches the status line, got %q", m.status)
+	}
+}
+
+func TestEnterOnADownTargetWithoutUpConnectsAnyway(t *testing.T) {
+	m, backend := newTestModel()
+	m = downed(sized(withTargets(m, vm("plain"))), backend, "plain")
+
+	if m = key(m, "enter"); len(backend.sessions) != 1 || len(backend.hooks) != 0 {
+		t.Errorf("without an up hook, enter just connects, ran %v and hooks %v", backend.sessions, backend.hooks)
+	}
+}
+
+func TestEnterWhileStoppingDoesNothing(t *testing.T) {
+	m, backend := newTestModel()
+	box := startable("nakama")
+	box.Down = "limactl stop nakama"
+	m = focus(sized(withTargets(m, box)), "nakama").withSelectionRefreshed()
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	if _, cmd := next.Update(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil || len(backend.sessions) != 0 {
+		t.Errorf("a target mid-stop must not be connected to, ran %v", backend.sessions)
+	}
 }
 
 func TestStatusAndStatsAreSeparateChecks(t *testing.T) {
