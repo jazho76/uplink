@@ -15,10 +15,10 @@ const (
 )
 
 type pane struct {
-	section string
-	key     rune
-	items   []item
-	cursor  int
+	group  string
+	key    rune
+	items  []item
+	cursor int
 }
 
 func assignPaneKeys(panes []pane) {
@@ -27,7 +27,7 @@ func assignPaneKeys(panes []pane) {
 		if len(panes[i].items) == 0 {
 			continue
 		}
-		panes[i].key, taken = claimLetter(panes[i].section, taken)
+		panes[i].key, taken = claimLetter(panes[i].group, taken)
 	}
 }
 
@@ -140,7 +140,7 @@ func (m model) paneSummary(p pane) string {
 	}
 	running := 0
 	for _, it := range p.items {
-		switch m.statusOf(it.t) {
+		switch m.statusOf(it.target) {
 		case statusUnknown:
 			return ""
 		case statusUp:
@@ -176,7 +176,7 @@ func (m model) renderPane(p pane, focused bool, width, height int) string {
 	blank := strings.Repeat(" ", interior)
 	side := border.Render(boxBorder.Left)
 	lines := []string{paneEdge(boxBorder.TopLeft, boxBorder.TopRight,
-		accentLetter(p.section, p.key, title), summary, width, border)}
+		accentLetter(p.group, p.key, title), summary, width, border)}
 	for i := start; i < start+rows; i++ {
 		row := blank
 		if i < len(p.items) {

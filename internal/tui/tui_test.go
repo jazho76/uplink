@@ -129,7 +129,7 @@ func newTestModel() (model, *fakeBackend) {
 		down: map[string]bool{},
 	}
 	m := newModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
-	m.self = "/tmp/uplink"
+	m.edit = func() (*exec.Cmd, error) { return exec.Command("vi", "/tmp/config.yaml"), nil }
 	m.exec = func(cmd *exec.Cmd, _ tea.ExecCallback) tea.Cmd {
 		backend.sessions = append(backend.sessions, strings.Join(cmd.Args, " "))
 		return nil
@@ -170,8 +170,8 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 		t.Fatalf("want a local and a vms pane, got %d", len(m.panes))
 	}
 	local, vms := m.panes[0], m.panes[1]
-	if local.section != "local" || local.items[0].name() != "host" {
-		t.Fatalf("the first pane should hold the host, got %q", local.section)
+	if local.group != "local" || local.items[0].name() != "host" {
+		t.Fatalf("the first pane should hold the host, got %q", local.group)
 	}
 	if vms.items[0].name() != "forge" || vms.items[1].name() != "tokyo" {
 		t.Fatalf("unexpected vm order: %q %q", vms.items[0].name(), vms.items[1].name())
@@ -192,7 +192,7 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	if strings.Contains(m.renderFooter(), "logs") || strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
 		t.Errorf("a target without logs or stats offers neither")
 	}
-	if m.liveFetch() == nil {
+	if m.checkSelectedIfStale() == nil {
 		t.Errorf("a target without stats is still checked for reachability")
 	}
 }
@@ -226,15 +226,15 @@ func TestProbeResultSetsStatus(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 
-	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+	if got := m.statusOf(itemNamed(m, "forge").target); got != statusUnknown {
 		t.Fatalf("an unprobed target is unknown, got %q", got)
 	}
 	m = probed(m, "forge", true)
 	m = probed(m, "tokyo", false)
-	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "forge").target); got != statusUp {
 		t.Fatalf("a successful probe marks forge up, got %q", got)
 	}
-	if got := m.statusOf(itemNamed(m, "tokyo").t); got != statusDown {
+	if got := m.statusOf(itemNamed(m, "tokyo").target); got != statusDown {
 		t.Fatalf("a failed probe marks tokyo down, got %q", got)
 	}
 
@@ -255,7 +255,7 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	m = focus(m, "dojo")
 
 	m = m.withSelectionRefreshed()
-	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusUp {
 		t.Fatalf("a reachable target without stats is up, got %q", got)
 	}
 	if strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
@@ -265,7 +265,7 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	backend.down["dojo"] = true
 	m.live = map[string]liveEntry{}
 	m = m.withSelectionRefreshed()
-	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusDown {
+	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusDown {
 		t.Errorf("an unreachable target is down, got %q", got)
 	}
 }
@@ -385,11 +385,11 @@ func TestGroupsBecomePanesInConfigOrder(t *testing.T) {
 	stray.Group = target.DefaultGroup
 	m = withTargets(m, remote("berlin"), vm("forge"), stray, remote("dojo"))
 
-	var sections []string
+	var groups []string
 	for _, p := range m.panes {
-		sections = append(sections, p.section)
+		groups = append(groups, p.group)
 	}
-	if got := strings.Join(sections, " "); got != "local remotes vms ungrouped" {
+	if got := strings.Join(groups, " "); got != "local remotes vms ungrouped" {
 		t.Errorf("panes follow first appearance, got %q", got)
 	}
 	if remotes := m.panes[1]; len(remotes.items) != 2 || remotes.items[1].name() != "dojo" {
@@ -404,14 +404,14 @@ func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
 	m = withTargets(m, watched, remote("dojo"))
 	backend.down["nakama"] = true
 
-	m = applyCmd(m, m.watchFetch())
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+	m = applyCmd(m, m.checkWatched())
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("a watched target resolves without being selected, got %q", got)
 	}
-	if got := m.statusOf(itemNamed(m, "dojo").t); got != statusUnknown {
+	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusUnknown {
 		t.Errorf("an unwatched target waits for selection, got %q", got)
 	}
-	if m.watchFetch() != nil {
+	if m.checkWatched() != nil {
 		t.Errorf("a fresh check should not repeat before the watch interval")
 	}
 }
@@ -426,7 +426,7 @@ func TestWatchChecksAreCapped(t *testing.T) {
 	}
 	m = withTargets(m, many...)
 
-	m.watchFetch()
+	m.checkWatched()
 	pending := 0
 	for _, e := range m.live {
 		if e.pending {
@@ -454,7 +454,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	m = next.(model)
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusStopping {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusStopping {
 		t.Errorf("a running hook shows its transition, got %q", got)
 	}
 	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).live["nakama"].action != statusStopping {
@@ -464,7 +464,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 		t.Errorf("a target mid-transition offers neither: %s", footer)
 	}
 	m = finishHook(m, cmd)
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("after stopping, the target is checked again, got %q", got)
 	}
 
@@ -473,7 +473,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 	}
 
 	m = pressHook(m, tea.KeyCtrlS)
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusUp {
 		t.Errorf("after starting, the target is up, got %q", got)
 	}
 	if got := strings.Join(backend.hooks, ", "); got != "down nakama, up nakama" {
@@ -530,7 +530,7 @@ func TestEnterStartsADownTargetThenConnects(t *testing.T) {
 
 	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = next.(model)
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusStarting || len(backend.sessions) != 0 {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusStarting || len(backend.sessions) != 0 {
 		t.Fatalf("a down target starts before anything runs, got %q and sessions %v", got, backend.sessions)
 	}
 
@@ -553,7 +553,7 @@ func TestMovingAwayCancelsTheConnect(t *testing.T) {
 	if len(backend.sessions) != 0 {
 		t.Errorf("a start finishing elsewhere connects nothing, ran %v", backend.sessions)
 	}
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusUp {
 		t.Errorf("the target still ends up started, got %q", got)
 	}
 }
@@ -567,8 +567,8 @@ func TestFailedStartConnectsNothing(t *testing.T) {
 	if len(backend.sessions) != 0 || m.connectAfterStart != "" {
 		t.Errorf("a failed start connects nothing and forgets the intent, ran %v, pending %q", backend.sessions, m.connectAfterStart)
 	}
-	if !strings.Contains(m.status, "start jammed failed") {
-		t.Errorf("the failure reaches the status line, got %q", m.status)
+	if !strings.Contains(m.notice, "start jammed failed") {
+		t.Errorf("the failure reaches the status line, got %q", m.notice)
 	}
 }
 
@@ -599,12 +599,12 @@ func TestStatusAndStatsAreSeparateChecks(t *testing.T) {
 	backend.down["gone"] = true
 
 	m = focus(m, "dojo").withSelectionRefreshed()
-	if backend.statuses != 1 || backend.stats != 1 || m.statusOf(itemNamed(m, "dojo").t) != statusUp {
+	if backend.statuses != 1 || backend.stats != 1 || m.statusOf(itemNamed(m, "dojo").target) != statusUp {
 		t.Errorf("an up target runs one status check, then its stats; ran %d checks and %d probes", backend.statuses, backend.stats)
 	}
 
 	m = focus(m, "gone").withSelectionRefreshed()
-	if backend.statuses != 2 || backend.stats != 1 || m.statusOf(itemNamed(m, "gone").t) != statusDown {
+	if backend.statuses != 2 || backend.stats != 1 || m.statusOf(itemNamed(m, "gone").target) != statusDown {
 		t.Errorf("a down target runs its status check and no stats; ran %d checks and %d probes", backend.statuses, backend.stats)
 	}
 }
@@ -621,7 +621,7 @@ func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 	backend.down["nakama"] = false
 	next, _ := m.Update(stale())
 	m = next.(model)
-	if got := m.statusOf(itemNamed(m, "nakama").t); got != statusDown {
+	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("a check issued before the hook must not overwrite its outcome, got %q", got)
 	}
 }
@@ -634,10 +634,10 @@ func TestFailedHookReportsAndRechecks(t *testing.T) {
 	m = focus(m, "stuck").withSelectionRefreshed()
 
 	m = pressHook(m, tea.KeyCtrlX)
-	if !strings.Contains(m.status, "stop stuck failed") {
-		t.Errorf("a failed hook should be reported, got %q", m.status)
+	if !strings.Contains(m.notice, "stop stuck failed") {
+		t.Errorf("a failed hook should be reported, got %q", m.notice)
 	}
-	if got := m.statusOf(itemNamed(m, "stuck").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "stuck").target); got != statusUp {
 		t.Errorf("a failed stop leaves the target as it is, got %q", got)
 	}
 }
@@ -648,13 +648,13 @@ func TestEveryStatusIsProbed(t *testing.T) {
 	m = probed(m, "tokyo", false)
 
 	m = focus(m, "forge")
-	if m.liveFetch() == nil {
+	if m.checkSelectedIfStale() == nil {
 		t.Error("an unknown target must be probed, or its status can never resolve")
 	}
 
 	m = focus(m, "tokyo")
 	m.live = map[string]liveEntry{}
-	if m.liveFetch() == nil {
+	if m.checkSelectedIfStale() == nil {
 		t.Error("a down target must be probed again, or it can never come back up")
 	}
 }
@@ -664,18 +664,18 @@ func TestSlowProbesNeverStack(t *testing.T) {
 	m = sized(m)
 	m = focus(m, "forge")
 
-	if m.liveFetch() == nil {
+	if m.checkSelectedIfStale() == nil {
 		t.Fatal("the first probe should go out")
 	}
-	if m.liveFetch() != nil {
+	if m.checkSelectedIfStale() != nil {
 		t.Error("a probe still running must not be joined by another")
 	}
 
 	m = probed(m, "forge", true)
 	landed := m.live["forge"]
-	landed.at = time.Now().Add(-liveInterval)
+	landed.statsAt = time.Now().Add(-liveInterval)
 	m.live["forge"] = landed
-	if m.liveFetch() == nil {
+	if m.checkSelectedIfStale() == nil {
 		t.Error("once the result lands and goes stale, the next probe may go out")
 	}
 }
@@ -684,13 +684,13 @@ func TestPendingProbeShowsNoReadings(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(m, "forge")
-	m.liveFetch()
+	m.checkSelectedIfStale()
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if strings.Contains(preview, "0.00") || !strings.Contains(preview, "…") {
 		t.Errorf("a probe in flight has no readings yet:\n%s", preview)
 	}
-	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
+	if got := m.statusOf(itemNamed(m, "forge").target); got != statusUnknown {
 		t.Errorf("a probe in flight leaves the status unknown, got %q", got)
 	}
 }
@@ -718,7 +718,7 @@ func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
-	m.status = errors.Join(errBoom{}, errBoom{}).Error()
+	m.notice = errors.Join(errBoom{}, errBoom{}).Error()
 
 	if lines := strings.Count(m.renderFooter(), "\n"); lines != 1 {
 		t.Errorf("footer must stay two rows regardless of error count, got %d newlines", lines)
@@ -738,7 +738,7 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 			t.Fatalf("down should reach %q, got %q", want, got)
 		}
 	}
-	if got := m.focusedSection(); got != "vms" {
+	if got := m.focusedGroup(); got != "vms" {
 		t.Errorf("spilling should carry the focus with it, got %q", got)
 	}
 
@@ -746,7 +746,7 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 	if got := m.selected().name(); got != "host" {
 		t.Fatalf("down from the last item wraps to the first, got %q", got)
 	}
-	if got := m.focusedSection(); got != "local" {
+	if got := m.focusedGroup(); got != "local" {
 		t.Errorf("wrapping should carry the focus too, got %q", got)
 	}
 
@@ -775,21 +775,21 @@ func TestSpillResetsTheMode(t *testing.T) {
 	}
 }
 
-func TestPaneKeysDerivedFromSection(t *testing.T) {
+func TestPaneKeysDerivedFromGroup(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 
 	if len(m.panes) != 2 {
-		t.Fatalf("want one pane per section, got %d", len(m.panes))
+		t.Fatalf("want one pane per group, got %d", len(m.panes))
 	}
-	if m.panes[0].section != "local" || m.panes[1].section != "vms" {
-		t.Fatalf("unexpected sections: %q %q", m.panes[0].section, m.panes[1].section)
+	if m.panes[0].group != "local" || m.panes[1].group != "vms" {
+		t.Fatalf("unexpected groups: %q %q", m.panes[0].group, m.panes[1].group)
 	}
 	if m.panes[0].key != 'l' || m.panes[1].key != 'v' {
 		t.Fatalf("unexpected pane keys: %q %q", m.panes[0].key, m.panes[1].key)
 	}
 	if !strings.Contains(m.View(), "local") {
-		t.Errorf("the local target should land in a pane named for its kind")
+		t.Errorf("the local target should land in a pane named for its group")
 	}
 }
 
@@ -863,9 +863,9 @@ func TestFirstFreeLetterSkipsTaken(t *testing.T) {
 
 func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 	panes := []pane{
-		{section: "remotes", items: []item{{}}},
-		{section: "rigs", items: []item{{}}},
-		{section: "queue", items: []item{{}}},
+		{group: "remotes", items: []item{{}}},
+		{group: "rigs", items: []item{{}}},
+		{group: "queue", items: []item{{}}},
 	}
 	assignPaneKeys(panes)
 
@@ -877,9 +877,9 @@ func TestPaneKeysFallThroughOnCollision(t *testing.T) {
 
 func TestItemKeysAvoidOtherPaneKeys(t *testing.T) {
 	panes := []pane{
-		{section: "local", items: []item{named("host")}},
-		{section: "vms", items: []item{named("vault")}},
-		{section: "remotes", items: []item{named("riga"), named("lisbon")}},
+		{group: "local", items: []item{named("host")}},
+		{group: "vms", items: []item{named("vault")}},
+		{group: "remotes", items: []item{named("riga"), named("lisbon")}},
 	}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
@@ -981,7 +981,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
+	m.live["forge"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -998,7 +998,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
+	m.live["forge"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1015,7 +1015,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 
 func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	m, _ := newTestModel()
-	up, off, unprobed := item{t: remote("up")}, item{t: remote("off")}, item{t: remote("new")}
+	up, off, unprobed := item{target: remote("up")}, item{target: remote("off")}, item{target: remote("new")}
 	m = probed(probed(m, "up", true), "off", false)
 
 	if got := m.paneSummary(pane{items: []item{up, off}}); got != "1 up" {
@@ -1063,8 +1063,8 @@ func TestPaneLetterThenItemLetterSelects(t *testing.T) {
 	if got := m.selected().name(); got != "tokyo" {
 		t.Fatalf("a letter no item holds must change nothing, got %q", got)
 	}
-	if m.status != "" {
-		t.Errorf("a miss must stay silent, got status %q", m.status)
+	if m.notice != "" {
+		t.Errorf("a miss must stay silent, got status %q", m.notice)
 	}
 }
 
@@ -1093,7 +1093,7 @@ func TestItemLettersOnlyRenderInFocusedPane(t *testing.T) {
 	if forge.key == 0 {
 		t.Fatalf("forge should have claimed a letter")
 	}
-	plain := m.paneRow(item{t: forge.t}, false, true, 30)
+	plain := m.paneRow(item{target: forge.target}, false, true, 30)
 
 	if accented := m.paneRow(forge, false, true, 30); accented == plain {
 		t.Errorf("the focused pane should mark its item letters: %q", accented)
@@ -1209,11 +1209,11 @@ func stylingEnabled(t *testing.T) {
 }
 
 func named(name string) item {
-	return item{t: target.Target{Name: name}}
+	return item{target: target.Target{Name: name}}
 }
 
 func panesOf(items ...item) []pane {
-	panes := []pane{{section: "pane", items: items}}
+	panes := []pane{{group: "pane", items: items}}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
 	return panes
@@ -1232,7 +1232,7 @@ func focus(m model, name string) model {
 }
 
 func (m model) withSelectionRefreshed() model {
-	return applyCmd(m, m.onSelectionChange())
+	return applyCmd(m, m.refreshSelected())
 }
 
 func applyCmd(m model, cmd tea.Cmd) model {
@@ -1273,6 +1273,7 @@ var specialKeys = map[string]tea.KeyType{
 	"esc":       tea.KeyEsc,
 	"tab":       tea.KeyTab,
 	"shift+tab": tea.KeyShiftTab,
+	"ctrl+e":    tea.KeyCtrlE,
 	"ctrl+l":    tea.KeyCtrlL,
 	"ctrl+s":    tea.KeyCtrlS,
 	"ctrl+x":    tea.KeyCtrlX,
@@ -1322,11 +1323,11 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 
-	if cmd := m.peekLogs(); cmd == nil {
+	if cmd := m.peekSelectedLogsIfStale(); cmd == nil {
 		t.Fatalf("the first peek should fetch")
 	}
 	m.logPeek = peek{name: m.selected().name(), text: "journal line", at: time.Now()}
-	if cmd := m.peekLogs(); cmd != nil {
+	if cmd := m.peekSelectedLogsIfStale(); cmd != nil {
 		t.Errorf("a fresh peek should not refetch on every poll")
 	}
 }
@@ -1336,7 +1337,7 @@ func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 	m = sized(withTargets(m))
 
 	if len(m.panes) != 1 {
-		t.Fatalf("a kind with no targets gets no pane, got %d panes", len(m.panes))
+		t.Fatalf("a group with no targets gets no pane, got %d panes", len(m.panes))
 	}
 	m = key(m, "down")
 	if got := m.selected().name(); got != "host" {
@@ -1355,7 +1356,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	box.Stats = []stats.Metric{gpu, cache, agents, broken}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
-	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
+	m.live["box"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true,
 		readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
@@ -1376,22 +1377,22 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 func TestTickRefreshesLogsInPlace(t *testing.T) {
 	m, backend := newTestModel()
 	m = sized(m)
-	m = applyCmd(m, m.peekLogs())
+	m = applyCmd(m, m.peekSelectedLogsIfStale())
 	if got := m.logsFor(m.selected()); got != "journal line" {
 		t.Fatalf("the first peek should land, got %q", got)
 	}
 
 	backend.logs["host"] = "journal line\nnew line"
-	if m.peekLogs() != nil {
+	if m.peekSelectedLogsIfStale() != nil {
 		t.Fatalf("a selection change right after a peek should not refetch")
 	}
-	m = applyCmd(m, m.peekSelected())
+	m = applyCmd(m, m.peekSelectedLogs())
 	if got := m.logsFor(m.selected()); !strings.HasSuffix(got, "new line") {
 		t.Errorf("the tick should refresh the tail while staying on a target, got %q", got)
 	}
 
 	m.screen = screenLogs
-	if m.peekSelected() != nil {
+	if m.peekSelectedLogs() != nil {
 		t.Errorf("the full log screen polls on its own, the preview should not")
 	}
 }
@@ -1401,13 +1402,13 @@ func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
 	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
 
-	if m.liveFetch() != nil {
+	if m.checkSelectedIfStale() != nil {
 		t.Fatalf("a selection change right after a probe should not refetch")
 	}
-	if m.probeSelected() == nil {
+	if m.checkSelected() == nil {
 		t.Errorf("the tick should probe even when the last result just landed")
 	}
-	if m.probeSelected() != nil {
+	if m.checkSelected() != nil {
 		t.Errorf("a probe still in flight must not be joined by another")
 	}
 }
@@ -1419,7 +1420,7 @@ func TestSessionEndReportsWithoutBlame(t *testing.T) {
 		exitErr:                 "forge: session ended with exit 3",
 		errors.New("not found"): "forge: not found",
 	} {
-		if got := sessionEnded("forge", err).status; got != want {
+		if got := sessionEnded("forge", err).notice; got != want {
 			t.Errorf("sessionEnded(%v) = %q, want %q", err, got, want)
 		}
 	}
@@ -1429,9 +1430,9 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
-	m.status = "stale message"
+	m.notice = "stale message"
 
-	for _, ended := range []execDoneMsg{{}, {status: "forge: session ended with exit 255"}} {
+	for _, ended := range []execDoneMsg{{}, {notice: "forge: session ended with exit 255"}} {
 		next, cmd := m.Update(ended)
 		m = next.(model)
 		if cmd != nil {
@@ -1439,8 +1440,8 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 				t.Fatalf("a session ending must never close the dashboard")
 			}
 		}
-		if m.status != ended.status {
-			t.Errorf("status = %q, want %q", m.status, ended.status)
+		if m.notice != ended.notice {
+			t.Errorf("status = %q, want %q", m.notice, ended.notice)
 		}
 		if !m.live["forge"].pending {
 			t.Errorf("the target should be checked again right away")
@@ -1457,8 +1458,8 @@ func TestConfigStatusSummarizesProblems(t *testing.T) {
 		one:    `config: target "box": no modes`,
 		nested: "config: 3 problems, see uplink config check",
 	} {
-		if got := configStatus(err); got != want {
-			t.Errorf("configStatus(%v) = %q, want %q", err, got, want)
+		if got := configNotice(err); got != want {
+			t.Errorf("configNotice(%v) = %q, want %q", err, got, want)
 		}
 	}
 }
@@ -1481,25 +1482,25 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	next, _ := m.Update(configEditedMsg{})
 	m = next.(model)
 
-	var sections []string
+	var groups []string
 	for _, p := range m.panes {
-		sections = append(sections, p.section)
+		groups = append(groups, p.group)
 	}
-	if got := strings.Join(sections, " "); got != "local far remotes" {
+	if got := strings.Join(groups, " "); got != "local far remotes" {
 		t.Errorf("panes should follow the new config, got %q", got)
 	}
-	if got := m.statusOf(itemNamed(m, "tokyo").t); got != statusUp {
+	if got := m.statusOf(itemNamed(m, "tokyo").target); got != statusUp {
 		t.Errorf("a surviving target keeps what is known about it, got %q", got)
 	}
 	if itemNamed(m, "forge").name() != "" {
 		t.Errorf("a removed target should disappear")
 	}
-	if m.status != "config: 2 problems, see uplink config check" {
-		t.Errorf("problems should be summarized, got %q", m.status)
+	if m.notice != "config: 2 problems, see uplink config check" {
+		t.Errorf("problems should be summarized, got %q", m.notice)
 	}
 
-	next, _ = m.Update(configEditedMsg{status: "config edit: no such file"})
-	if got := next.(model).status; got != "config edit: no such file" {
+	next, _ = m.Update(configEditedMsg{notice: "config edit: no such file"})
+	if got := next.(model).notice; got != "config edit: no such file" {
 		t.Errorf("a failure to open the editor wins over the reload summary, got %q", got)
 	}
 }
@@ -1543,7 +1544,7 @@ func TestConfigEditedReportsOnlyFailuresToStart(t *testing.T) {
 		exitErr:                 "",
 		errors.New("not found"): "config edit: not found",
 	} {
-		if got := configEdited(err).(configEditedMsg).status; got != want {
+		if got := configEdited(err).(configEditedMsg).notice; got != want {
 			t.Errorf("configEdited(%v) = %q, want %q", err, got, want)
 		}
 	}
@@ -1573,5 +1574,20 @@ func TestNoTargetsPointsAtTheConfig(t *testing.T) {
 	}
 	if lines := strings.Split(m.View(), "\n"); len(lines) != 24 {
 		t.Errorf("the empty dashboard should fill the terminal, got %d lines", len(lines))
+	}
+}
+
+func TestCtrlEOpensTheEditorDirectly(t *testing.T) {
+	m, backend := newTestModel()
+	m = sized(m)
+	if m = keyThenApply(m, "ctrl+e"); strings.Join(backend.sessions, ", ") != "vi /tmp/config.yaml" {
+		t.Errorf("ctrl+e should run the editor command, ran %v", backend.sessions)
+	}
+
+	m, backend = newTestModel()
+	m.edit = func() (*exec.Cmd, error) { return nil, errors.New("read-only file system") }
+	m = key(m, "ctrl+e")
+	if len(backend.sessions) != 0 || m.notice != "config edit: read-only file system" {
+		t.Errorf("a failed edit runs nothing and says why, ran %v, notice %q", backend.sessions, m.notice)
 	}
 }

@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os/exec"
+
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/tui"
@@ -21,5 +23,13 @@ func init() {
 }
 
 func dashboard() error {
-	return tui.Run(func() ([]target.Target, error) { return target.Load(config.Path()) }, target.System{})
+	load := func() ([]target.Target, error) { return target.Load(config.Path()) }
+	edit := func() (*exec.Cmd, error) {
+		path, err := config.Ensure()
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(config.Editor(), path), nil
+	}
+	return tui.Run(load, edit, target.System{})
 }

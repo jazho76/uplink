@@ -42,26 +42,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, logTickCmd(m.logRound)
 
 	case liveTickMsg:
-		return m, tea.Batch(m.probeSelected(), m.peekSelected(), m.watchFetch(), liveTickCmd())
+		return m, tea.Batch(m.checkSelected(), m.peekSelectedLogs(), m.checkWatched(), liveTickCmd())
 
 	case liveMsg:
 		m.live[msg.name] = m.settle(msg)
 		return m, nil
 
 	case hookDoneMsg:
-		connect := msg.verb == "start" && msg.err == nil &&
+		connect := msg.action == statusStarting && msg.err == nil &&
 			m.connectAfterStart == msg.name && m.selected().name() == msg.name
 		if m.connectAfterStart == msg.name {
 			m.connectAfterStart = ""
 		}
 		e := m.live[msg.name]
-		e.action, e.at = "", time.Time{}
+		e.action, e.statsAt = "", time.Time{}
 		e.epoch++
 		m.live[msg.name] = e
-		if msg.err != nil {
-			m.status = fmt.Sprintf("%s %s failed: %v", msg.verb, msg.name, msg.err)
-		}
 		t, ok := m.targetNamed(msg.name)
+		if msg.err != nil {
+			m.notice = fmt.Sprintf("%s %s failed: %v", m.hookFor(t, msg.action).verb, msg.name, msg.err)
+		}
 		if !ok {
 			return m, nil
 		}
@@ -72,12 +72,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, recheck
 
 	case configEditedMsg:
-		return m.reload(msg.status)
+		return m.reload(msg.notice)
 
 	case execDoneMsg:
-		m.status = msg.status
-		m.forgetProbe(m.selected().name())
-		return m, m.onSelectionChange()
+		m.notice = msg.notice
+		m.markStale(m.selected().name())
+		return m, m.refreshSelected()
 
 	case tea.KeyMsg:
 		if m.screen == screenLogs {
@@ -111,19 +111,24 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.connect()
 
 	case "ctrl+s":
-		return m.runHook(true)
+		return m.runHook(statusStarting)
 	case "ctrl+x":
-		return m.runHook(false)
+		return m.runHook(statusStopping)
 
 	case "ctrl+e":
-		return m, m.exec(exec.Command(m.self, "config", "edit"), configEdited)
+		cmd, err := m.edit()
+		if err != nil {
+			m.notice = fmt.Sprintf("config edit: %v", err)
+			return m, nil
+		}
+		return m, m.exec(cmd, configEdited)
 
 	case "ctrl+l":
-		if it := m.selected(); it.t.Logs != "" {
+		if it := m.selected(); it.target.Logs != "" {
 			m.screen = screenLogs
-			m.logTarget = it.t
+			m.logTarget = it.target
 			m.logRound++
-			m.status = ""
+			m.notice = ""
 			m.logView = m.logsFor(it)
 			return m, m.viewLogsCmd()
 		}
@@ -159,9 +164,9 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 	switch e := m.live[it.name()]; {
 	case e.action != "":
 		return m, nil
-	case e.state == statusDown && it.t.Up != "":
+	case e.state == statusDown && it.target.Up != "":
 		m.connectAfterStart = it.name()
-		return m.runHook(true)
+		return m.runHook(statusStarting)
 	}
 	return m, m.session()
 }
@@ -183,16 +188,16 @@ func sessionEnded(name string, err error) execDoneMsg {
 	case err == nil:
 		return execDoneMsg{}
 	case errors.As(err, &exitErr):
-		return execDoneMsg{status: fmt.Sprintf("%s: session ended with exit %d", name, exitErr.ExitCode())}
+		return execDoneMsg{notice: fmt.Sprintf("%s: session ended with exit %d", name, exitErr.ExitCode())}
 	default:
-		return execDoneMsg{status: fmt.Sprintf("%s: %v", name, err)}
+		return execDoneMsg{notice: fmt.Sprintf("%s: %v", name, err)}
 	}
 }
 
 func configEdited(err error) tea.Msg {
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) {
-		return configEditedMsg{status: fmt.Sprintf("config edit: %v", err)}
+		return configEditedMsg{notice: fmt.Sprintf("config edit: %v", err)}
 	}
 	return configEditedMsg{}
 }
@@ -208,14 +213,14 @@ func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	}
 	m.targets, m.modeIdx = targets, 0
 	m.rebuild()
-	m.forgetProbe(m.selected().name())
-	m.status = cmp.Or(editStatus, configStatus(problems))
-	return m, tea.Batch(m.onSelectionChange(), m.watchFetch())
+	m.markStale(m.selected().name())
+	m.notice = cmp.Or(editStatus, configNotice(problems))
+	return m, tea.Batch(m.refreshSelected(), m.checkWatched())
 }
 
-func (m model) forgetProbe(name string) {
+func (m model) markStale(name string) {
 	if e, ok := m.live[name]; ok {
-		e.at = time.Time{}
+		e.statsAt = time.Time{}
 		m.live[name] = e
 	}
 }

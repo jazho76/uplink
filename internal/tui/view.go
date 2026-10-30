@@ -32,9 +32,9 @@ var (
 
 	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
 	footerStyle    = lipgloss.NewStyle().Foreground(ui.Comment)
-	statusStyle    = lipgloss.NewStyle().Foreground(ui.Yellow)
+	noticeStyle    = lipgloss.NewStyle().Foreground(ui.Yellow)
 	labelStyle     = lipgloss.NewStyle().Foreground(ui.Comment)
-	sectionStyle   = lipgloss.NewStyle().Foreground(ui.Blue)
+	ruleStyle      = lipgloss.NewStyle().Foreground(ui.Blue)
 	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
 	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
 
@@ -51,7 +51,7 @@ var (
 )
 
 func (m model) glyph(it item, base lipgloss.Style) string {
-	mark, color := glyphOf(m.statusOf(it.t))
+	mark, color := glyphOf(m.statusOf(it.target))
 	return base.Foreground(color).Render(mark)
 }
 
@@ -100,10 +100,10 @@ func (m model) previewBody(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
+	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.target))
 	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
 
-	if len(it.t.Stats) > 0 {
+	if len(it.target.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.name(), width))
 	}
@@ -134,7 +134,7 @@ func (m model) logsFor(it item) string {
 
 func (m model) renderLive(name string, width int) string {
 	e := m.live[name]
-	if e.at.IsZero() {
+	if e.statsAt.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
 	if !e.statsOK {
@@ -265,7 +265,7 @@ func unitOf(size string) string {
 }
 
 func (m model) modeTag(it item) string {
-	n := len(it.t.Modes)
+	n := len(it.target.Modes)
 	if n < 2 {
 		return ""
 	}
@@ -319,16 +319,16 @@ func (m model) renderFooter() string {
 	if it.name() != "" {
 		pairs = append(pairs, [2]string{"↵", "connect"})
 	}
-	if len(it.t.Modes) > 1 {
+	if len(it.target.Modes) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
-	if it.t.Logs != "" {
+	if it.target.Logs != "" {
 		pairs = append(pairs, [2]string{"^l", "logs"})
 	}
-	if m.canHook(it.t, true) {
+	if m.canHook(it.target, statusStarting) {
 		pairs = append(pairs, [2]string{"^s", "start"})
 	}
-	if m.canHook(it.t, false) {
+	if m.canHook(it.target, statusStopping) {
 		pairs = append(pairs, [2]string{"^x", "stop"})
 	}
 	pairs = append(pairs, [2]string{"^e", "config"}, [2]string{"q", "quit"})
@@ -338,11 +338,11 @@ func (m model) renderFooter() string {
 		parts = append(parts, keyStyle.Render(p[0])+" "+footerStyle.Render(p[1]))
 	}
 	keys := truncate(strings.Join(parts, footerStyle.Render("  ")), m.width)
-	return keys + "\n" + truncate(statusStyle.Render(oneLine(m.status)), m.width)
+	return keys + "\n" + truncate(noticeStyle.Render(oneLine(m.notice)), m.width)
 }
 
 func rule(title string, width int) string {
-	head := sectionStyle.Render(title) + " "
+	head := ruleStyle.Render(title) + " "
 	dashes := max(width-lipgloss.Width(head), 0)
 	return head + footerStyle.Render(strings.Repeat("─", dashes)) + "\n"
 }

@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"slices"
 	"time"
@@ -30,11 +29,11 @@ const (
 )
 
 type item struct {
-	t   target.Target
-	key rune
+	target target.Target
+	key    rune
 }
 
-func (i item) name() string { return i.t.Name }
+func (i item) name() string { return i.target.Name }
 
 type screen int
 
@@ -44,7 +43,6 @@ const (
 )
 
 type model struct {
-	self      string
 	targets   []target.Target
 	backend   target.Backend
 	panes     []pane
@@ -52,7 +50,7 @@ type model struct {
 	modeIdx   int
 	width     int
 	height    int
-	status    string
+	notice    string
 	screen    screen
 	logTarget target.Target
 	logRound  int
@@ -60,6 +58,7 @@ type model struct {
 	logPeek   peek
 	live      map[string]liveEntry
 	load      func() ([]target.Target, error)
+	edit      func() (*exec.Cmd, error)
 	exec      func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 
 	connectAfterStart string
@@ -72,28 +71,23 @@ type peek struct {
 }
 
 type liveEntry struct {
-	state    status
-	action   status
-	readings []stats.Reading
-	statsOK  bool
-	at       time.Time
-	checked  time.Time
-	pending  bool
-	epoch    int
+	state     status
+	action    status
+	readings  []stats.Reading
+	statsOK   bool
+	statsAt   time.Time
+	checkedAt time.Time
+	pending   bool
+	epoch     int
 }
 
-func Run(load func() ([]target.Target, error), backend target.Backend) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
+func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), backend target.Backend) error {
 	targets, problems := load()
 	m := newModel(targets, backend)
-	m.self, m.load = exe, load
-	m.status = configStatus(problems)
+	m.load, m.edit = load, edit
+	m.notice = configNotice(problems)
 
-	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
+	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
@@ -109,23 +103,23 @@ func newModel(targets []target.Target, backend target.Backend) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.onSelectionChange(), m.watchFetch(), liveTickCmd())
+	return tea.Batch(m.refreshSelected(), m.checkWatched(), liveTickCmd())
 }
 
 func (m *model) rebuild() {
 	var panes []pane
 	for _, t := range m.targets {
-		i := slices.IndexFunc(panes, func(p pane) bool { return p.section == t.Group })
+		i := slices.IndexFunc(panes, func(p pane) bool { return p.group == t.Group })
 		if i < 0 {
-			panes = append(panes, pane{section: t.Group})
+			panes = append(panes, pane{group: t.Group})
 			i = len(panes) - 1
 		}
-		panes[i].items = append(panes[i].items, item{t: t})
+		panes[i].items = append(panes[i].items, item{target: t})
 	}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
 
-	previouslyFocused := m.focusedSection()
+	previouslyFocused := m.focusedGroup()
 	m.panes = carryOverCursors(panes, m.panes)
 	m.focus = paneToFocus(m.panes, previouslyFocused)
 }
@@ -145,16 +139,16 @@ func (m model) statusOf(t target.Target) status {
 func carryOverCursors(fresh, previous []pane) []pane {
 	cursors := map[string]int{}
 	for _, p := range previous {
-		cursors[p.section] = p.cursor
+		cursors[p.group] = p.cursor
 	}
 	for i := range fresh {
-		fresh[i].cursor = max(min(cursors[fresh[i].section], len(fresh[i].items)-1), 0)
+		fresh[i].cursor = max(min(cursors[fresh[i].group], len(fresh[i].items)-1), 0)
 	}
 	return fresh
 }
 
-func paneToFocus(panes []pane, section string) int {
-	return max(slices.IndexFunc(panes, func(p pane) bool { return p.section == section }), 0)
+func paneToFocus(panes []pane, group string) int {
+	return max(slices.IndexFunc(panes, func(p pane) bool { return p.group == group }), 0)
 }
 
 func (m model) focusedPane() (pane, bool) {
@@ -164,9 +158,9 @@ func (m model) focusedPane() (pane, bool) {
 	return m.panes[m.focus], true
 }
 
-func (m model) focusedSection() string {
+func (m model) focusedGroup() string {
 	p, _ := m.focusedPane()
-	return p.section
+	return p.group
 }
 
 func (m model) selected() item {
@@ -178,15 +172,15 @@ func (m model) selected() item {
 }
 
 func (m model) mode() target.Mode {
-	modes := m.selected().t.Modes
+	modes := m.selected().target.Modes
 	if m.modeIdx < 0 || m.modeIdx >= len(modes) {
-		return m.selected().t.DefaultMode()
+		return m.selected().target.DefaultMode()
 	}
 	return modes[m.modeIdx]
 }
 
 func (m *model) cycleMode(delta int) {
-	n := len(m.selected().t.Modes)
+	n := len(m.selected().target.Modes)
 	if n < 2 {
 		return
 	}
@@ -222,7 +216,7 @@ func (m *model) focusItem(inPane, cursor int) tea.Cmd {
 	m.panes = append([]pane(nil), m.panes...)
 	m.panes[inPane] = landed
 	m.focus, m.modeIdx = inPane, 0
-	return m.onSelectionChange()
+	return m.refreshSelected()
 }
 
 func wrap(i, n int) int {
@@ -252,15 +246,15 @@ type liveMsg struct {
 }
 
 type hookDoneMsg struct {
-	name string
-	verb string
-	err  error
+	name   string
+	action status
+	err    error
 }
 
-type configEditedMsg struct{ status string }
+type configEditedMsg struct{ notice string }
 
 type execDoneMsg struct {
-	status string
+	notice string
 }
 
 func liveTickCmd() tea.Cmd {
@@ -290,22 +284,22 @@ func (m model) check(t target.Target, full bool) tea.Cmd {
 	return checkCmd(m.backend, t, full, e.epoch)
 }
 
-func (m model) liveFetch() tea.Cmd {
-	if time.Since(m.live[m.selected().name()].at) < liveInterval {
+func (m model) checkSelectedIfStale() tea.Cmd {
+	if time.Since(m.live[m.selected().name()].statsAt) < liveInterval {
 		return nil
 	}
-	return m.probeSelected()
+	return m.checkSelected()
 }
 
-func (m model) probeSelected() tea.Cmd {
+func (m model) checkSelected() tea.Cmd {
 	it := m.selected()
 	if it.name() == "" || m.live[it.name()].pending {
 		return nil
 	}
-	return m.check(it.t, true)
+	return m.check(it.target, true)
 }
 
-func (m model) watchFetch() tea.Cmd {
+func (m model) checkWatched() tea.Cmd {
 	inFlight := 0
 	for _, e := range m.live {
 		if e.pending {
@@ -319,7 +313,7 @@ func (m model) watchFetch() tea.Cmd {
 			break
 		}
 		e := m.live[t.Name]
-		if !t.Watch || t.Name == m.selected().name() || e.pending || time.Since(e.checked) < watchInterval {
+		if !t.Watch || t.Name == m.selected().name() || e.pending || time.Since(e.checkedAt) < watchInterval {
 			continue
 		}
 		cmds = append(cmds, m.check(t, false))
@@ -333,13 +327,13 @@ func (m model) settle(msg liveMsg) liveEntry {
 	if msg.epoch != e.epoch {
 		return e
 	}
-	e.pending, e.checked = false, time.Now()
+	e.pending, e.checkedAt = false, time.Now()
 	e.state = statusDown
 	if msg.up {
 		e.state = statusUp
 	}
 	if msg.full {
-		e.at = e.checked
+		e.statsAt = e.checkedAt
 		e.statsOK = msg.statsOK
 		if msg.statsOK {
 			e.readings = msg.readings
@@ -351,29 +345,36 @@ func (m model) settle(msg liveMsg) liveEntry {
 	return e
 }
 
-func (m model) canHook(t target.Target, start bool) bool {
-	command, settled := t.Down, statusDown
-	if start {
-		command, settled = t.Up, statusUp
-	}
-	e := m.live[t.Name]
-	return command != "" && e.action == "" && e.state != settled
+type hook struct {
+	command string
+	settled status
+	verb    string
+	run     func(target.Target) error
 }
 
-func (m model) runHook(start bool) (tea.Model, tea.Cmd) {
-	t := m.selected().t
-	if !m.canHook(t, start) {
-		return m, nil
+func (m model) hookFor(t target.Target, action status) hook {
+	if action == statusStarting {
+		return hook{command: t.Up, settled: statusUp, verb: "start", run: m.backend.Up}
 	}
-	action, verb, hook := statusStopping, "stop", m.backend.Down
-	if start {
-		action, verb, hook = statusStarting, "start", m.backend.Up
+	return hook{command: t.Down, settled: statusDown, verb: "stop", run: m.backend.Down}
+}
+
+func (m model) canHook(t target.Target, action status) bool {
+	h, e := m.hookFor(t, action), m.live[t.Name]
+	return h.command != "" && e.action == "" && e.state != h.settled
+}
+
+func (m model) runHook(action status) (tea.Model, tea.Cmd) {
+	t := m.selected().target
+	if !m.canHook(t, action) {
+		return m, nil
 	}
 	e := m.live[t.Name]
 	e.action = action
 	m.live[t.Name] = e
-	m.status = ""
-	return m, func() tea.Msg { return hookDoneMsg{name: t.Name, verb: verb, err: hook(t)} }
+	m.notice = ""
+	run := m.hookFor(t, action).run
+	return m, func() tea.Msg { return hookDoneMsg{name: t.Name, action: action, err: run(t)} }
 }
 
 func (m model) targetNamed(name string) (target.Target, bool) {
@@ -384,23 +385,23 @@ func (m model) targetNamed(name string) (target.Target, bool) {
 	return m.targets[i], true
 }
 
-func (m model) onSelectionChange() tea.Cmd {
-	return tea.Batch(m.liveFetch(), m.peekLogs())
+func (m model) refreshSelected() tea.Cmd {
+	return tea.Batch(m.checkSelectedIfStale(), m.peekSelectedLogsIfStale())
 }
 
-func (m model) peekLogs() tea.Cmd {
+func (m model) peekSelectedLogsIfStale() tea.Cmd {
 	if m.logPeek.name == m.selected().name() && time.Since(m.logPeek.at) < liveInterval {
 		return nil
 	}
-	return m.peekSelected()
+	return m.peekSelectedLogs()
 }
 
-func (m model) peekSelected() tea.Cmd {
+func (m model) peekSelectedLogs() tea.Cmd {
 	it := m.selected()
-	if it.t.Logs == "" || m.screen == screenLogs {
+	if it.target.Logs == "" || m.screen == screenLogs {
 		return nil
 	}
-	return peekLogsCmd(m.backend, it.t)
+	return peekLogsCmd(m.backend, it.target)
 }
 
 func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
@@ -416,7 +417,7 @@ func (m model) viewLogsCmd() tea.Cmd {
 	}
 }
 
-func configStatus(problems error) string {
+func configNotice(problems error) string {
 	switch count := countProblems(problems); count {
 	case 0:
 		return ""
