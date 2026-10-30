@@ -17,14 +17,11 @@ import (
 )
 
 const (
-	gaugeGap      = 3
-	percentGap    = 2
-	percentWidth  = len("100%")
-	minHostBarGap = 3
-	hostGaugeGap  = 1
-	fieldGap      = 2
-	hostBarMeter  = 10
-	minLiveBar    = 8
+	gaugeGap     = 3
+	percentGap   = 2
+	percentWidth = len("100%")
+	fieldGap     = 2
+	minLiveBar   = 8
 )
 
 var (
@@ -91,7 +88,7 @@ func (m model) View() string {
 		m.renderPanes(l.paneColumnOuterW, l.bodyOuterH),
 		m.renderPreview(l.previewOuterW, l.bodyOuterH))
 
-	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderHostBar(m.width), m.renderFooter())
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.renderFooter())
 }
 
 func (m model) renderPreview(width, height int) string {
@@ -212,10 +209,6 @@ func number(v float64) string {
 	return fmt.Sprintf("%.2f", v)
 }
 
-func usageGauge(label string, used, total uint64) gaugeRow {
-	return gaugeRow{label: label, fraction: usedFraction(used, total), reading: amount(used, total)}
-}
-
 func labelIndent(labels []string) int {
 	widest := 0
 	for _, label := range labels {
@@ -244,7 +237,7 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 		}
 		gap := strings.Repeat(" ", percentGap)
 		fields = append(fields, field{g.label,
-			gauge(meter(g.fraction, bar, blockGlyphs), reading+gap+percent, gaugeGap)})
+			gauge(meter(g.fraction, bar), reading+gap+percent, gaugeGap)})
 	}
 	return fields
 }
@@ -362,94 +355,6 @@ func (m model) renderFooter() string {
 	}
 	keys := truncate(strings.Join(parts, footerStyle.Render("  ")), m.width)
 	return keys + "\n" + truncate(statusStyle.Render(oneLine(m.status)), m.width)
-}
-
-func (m model) renderHostBar(width int) string {
-	interior := width - chromeCells
-	content := spaceEvenly(fitInReadingOrder(m.hostSegments(), interior), interior)
-	return boxStyle.Width(width - borderCells).Render(content)
-}
-
-type barSegment struct {
-	text     string
-	priority int
-}
-
-func (m model) hostSegments() []barSegment {
-	host := m.host
-	h := host.stats
-	load := loadFraction(h.Load, h.Cores)
-
-	return []barSegment{
-		{text: titleStyle.Render(m.hostName), priority: 0},
-		{text: hostGauge("load", sparkline(host.history, hostBarMeter, meterStyle(load)), fmt.Sprintf("%.2f", h.Load)), priority: 1},
-		{text: hostUsage("ram", h.MemUsed, h.MemTotal), priority: 2},
-		{text: hostUsage("disk", h.DiskUsed, h.DiskTotal), priority: 4},
-		{text: labelStyle.Render("cores ") + valueStyle.Render(strconv.Itoa(h.Cores)), priority: 3},
-	}
-}
-
-func hostUsage(label string, used, total uint64) string {
-	g := usageGauge(label, used, total)
-	return hostGauge(g.label, meter(g.fraction, hostBarMeter, thinGlyphs), g.reading)
-}
-
-func hostGauge(label, bar, reading string) string {
-	return labelStyle.Render(label+" ") + gauge(bar, reading, hostGaugeGap)
-}
-
-func fitInReadingOrder(segments []barSegment, width int) []string {
-	order := make([]int, len(segments))
-	for i := range order {
-		order[i] = i
-	}
-	slices.SortStableFunc(order, func(a, b int) int {
-		return segments[a].priority - segments[b].priority
-	})
-
-	keep := make([]bool, len(segments))
-	used := 0
-	for _, i := range order {
-		if !visible(segments[i].text) {
-			continue
-		}
-		cost := lipgloss.Width(segments[i].text)
-		if used > 0 {
-			cost += minHostBarGap
-		}
-		if used+cost > width {
-			continue
-		}
-		used += cost
-		keep[i] = true
-	}
-
-	var kept []string
-	for i, s := range segments {
-		if keep[i] {
-			kept = append(kept, s.text)
-		}
-	}
-	return kept
-}
-
-func spaceEvenly(parts []string, width int) string {
-	filled := 0
-	for _, p := range parts {
-		filled += lipgloss.Width(p)
-	}
-
-	gaps := len(parts) - 1
-	if gaps < 1 || filled >= width {
-		return truncate(strings.Join(parts, strings.Repeat(" ", minHostBarGap)), width)
-	}
-
-	var spaced strings.Builder
-	for i, gap := range shares(width-filled, gaps) {
-		spaced.WriteString(parts[i] + strings.Repeat(" ", gap))
-	}
-	spaced.WriteString(parts[gaps])
-	return spaced.String()
 }
 
 func rule(title string, width int) string {

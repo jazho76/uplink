@@ -119,7 +119,7 @@ func newTestModel() (model, *fakeBackend) {
 		down: map[string]bool{},
 	}
 	m := newModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
-	m.self, m.hostName = "/tmp/uplink", "testhost"
+	m.self = "/tmp/uplink"
 	return m, backend
 }
 
@@ -145,11 +145,6 @@ func itemNamed(m model, name string) item {
 	return item{}
 }
 
-func load(m model) model {
-	next, _ := m.Update(hostStatsMsg{stats: probe.Stats{Cores: 8, Load: 0.42}})
-	return next.(model)
-}
-
 func sized(m model) model {
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
 	return next.(model)
@@ -157,7 +152,6 @@ func sized(m model) model {
 
 func TestRebuildOrdersHostFirst(t *testing.T) {
 	m, _ := newTestModel()
-	m = load(m)
 	if len(m.panes) != 2 {
 		t.Fatalf("want a local and a vms pane, got %d", len(m.panes))
 	}
@@ -174,7 +168,7 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
 	quiet.Logs, quiet.Stats = "", nil
-	m = load(withTargets(m, vm("forge"), quiet))
+	m = withTargets(m, vm("forge"), quiet)
 
 	m = sized(focus(m, "forge"))
 	if !strings.Contains(m.renderFooter(), "logs") || !strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
@@ -193,7 +187,7 @@ func TestFooterTracksCapabilities(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
 	quiet.Logs = ""
-	m = sized(load(withTargets(m, vm("forge"), quiet)))
+	m = sized(withTargets(m, vm("forge"), quiet))
 
 	m = focus(m, "forge")
 	vmFooter := m.renderFooter()
@@ -216,7 +210,7 @@ func TestFooterTracksCapabilities(t *testing.T) {
 
 func TestProbeResultSetsStatus(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	if got := m.statusOf(itemNamed(m, "forge").t); got != statusUnknown {
 		t.Fatalf("an unprobed target is unknown, got %q", got)
@@ -232,15 +226,10 @@ func TestProbeResultSetsStatus(t *testing.T) {
 
 	m = focus(m, "forge")
 	view := m.View()
-	for _, want := range []string{"forge", "tokyo", "host", "up", "lima-forge", "vms"} {
+	for _, want := range []string{"forge", "tokyo", "local", "up", "lima-forge", "vms"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}
-	}
-
-	m = focus(m, "host")
-	if !strings.Contains(m.View(), "testhost") {
-		t.Errorf("host bar missing hostname")
 	}
 }
 
@@ -248,7 +237,7 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	m, backend := newTestModel()
 	quiet := remote("dojo")
 	quiet.Stats = nil
-	m = sized(load(withTargets(m, quiet)))
+	m = sized(withTargets(m, quiet))
 	m = focus(m, "dojo")
 
 	m = m.withSelectionRefreshed()
@@ -273,7 +262,7 @@ func (errBoom) Error() string { return "boom" }
 
 func TestModeCycling(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	if got := m.mode().Name; got != "tmux" {
@@ -301,7 +290,7 @@ func TestModeCycling(t *testing.T) {
 
 func TestModeResetsWhenCursorMoves(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
@@ -323,7 +312,7 @@ func TestModeResetsWhenCursorMoves(t *testing.T) {
 
 func TestModeSurfacedInListAndPreview(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	if strings.Contains(m.renderPanes(30, 12), "[tmux]") {
@@ -441,7 +430,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 	m, backend := newTestModel()
 	box := vm("nakama")
 	box.Up, box.Down = "limactl start nakama", "limactl stop nakama"
-	m = sized(load(withTargets(m, box, vm("plain"))))
+	m = sized(withTargets(m, box, vm("plain")))
 	m = focus(m, "nakama").withSelectionRefreshed()
 
 	if footer := m.renderFooter(); strings.Contains(footer, "start") || !strings.Contains(footer, "stop") {
@@ -502,7 +491,7 @@ func TestStatsStandInForTheDefaultStatus(t *testing.T) {
 	m, backend := newTestModel()
 	hooked := remote("hooked")
 	hooked.Status = "check hooked"
-	m = sized(load(withTargets(m, remote("dojo"), hooked)))
+	m = sized(withTargets(m, remote("dojo"), hooked))
 
 	m = focus(m, "dojo").withSelectionRefreshed()
 	if backend.statuses != 0 || m.statusOf(itemNamed(m, "dojo").t) != statusUp {
@@ -519,7 +508,7 @@ func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 	m, backend := newTestModel()
 	box := vm("nakama")
 	box.Down = "limactl stop nakama"
-	m = sized(load(withTargets(m, box)))
+	m = sized(withTargets(m, box))
 	m = focus(m, "nakama").withSelectionRefreshed()
 
 	stale := m.check(box, false)
@@ -536,7 +525,7 @@ func TestFailedHookReportsAndRechecks(t *testing.T) {
 	m, _ := newTestModel()
 	stuck := vm("stuck")
 	stuck.Down = "false"
-	m = sized(load(withTargets(m, stuck)))
+	m = sized(withTargets(m, stuck))
 	m = focus(m, "stuck").withSelectionRefreshed()
 
 	m = pressHook(m, tea.KeyCtrlX)
@@ -550,7 +539,7 @@ func TestFailedHookReportsAndRechecks(t *testing.T) {
 
 func TestEveryStatusIsProbed(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(m, "tokyo", false)
 
 	m = focus(m, "forge")
@@ -567,7 +556,7 @@ func TestEveryStatusIsProbed(t *testing.T) {
 
 func TestSlowProbesNeverStack(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	if m.liveFetch() == nil {
@@ -588,7 +577,7 @@ func TestSlowProbesNeverStack(t *testing.T) {
 
 func TestPendingProbeShowsNoReadings(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 	m.liveFetch()
 
@@ -604,7 +593,7 @@ func TestPendingProbeShowsNoReadings(t *testing.T) {
 func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
 	m, backend := newTestModel()
 	backend.logs["forge"] = "fresh"
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	m = key(m, "ctrl+l")
@@ -623,7 +612,7 @@ func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
 
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m.status = errors.Join(errBoom{}, errBoom{}).Error()
 
 	if lines := strings.Count(m.renderFooter(), "\n"); lines != 1 {
@@ -636,7 +625,7 @@ func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 
 func TestCursorWrapsThroughPanes(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	for _, want := range []string{"shell", "top", "forge", "tokyo"} {
 		m = key(m, "down")
@@ -664,7 +653,7 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 
 func TestSpillResetsTheMode(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
@@ -683,7 +672,7 @@ func TestSpillResetsTheMode(t *testing.T) {
 
 func TestPaneKeysDerivedFromSection(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	if len(m.panes) != 2 {
 		t.Fatalf("want one pane per section, got %d", len(m.panes))
@@ -701,7 +690,7 @@ func TestPaneKeysDerivedFromSection(t *testing.T) {
 
 func TestPaneFocusRemembersItsCursor(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	m = key(m, "v")
 	m = key(m, "down")
@@ -885,7 +874,7 @@ func TestLiveGaugesAlignTheirPercentColumn(t *testing.T) {
 
 func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
 	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
@@ -906,7 +895,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 
 func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
 	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
 
@@ -953,7 +942,7 @@ func TestClipMeasuresDisplayWidth(t *testing.T) {
 
 func TestPaneLetterThenItemLetterSelects(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	if got := m.selected().name(); got != "host" {
 		t.Fatalf("focus should start on the first pane, got %q", got)
@@ -980,7 +969,7 @@ func TestPaneLetterThenItemLetterSelects(t *testing.T) {
 
 func TestFocusedPaneLetterFallsThroughToItsItems(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(withTargets(m, vm("forge"), vm("vault"))))
+	m = sized(withTargets(m, vm("forge"), vm("vault")))
 
 	m = key(m, "v")
 	if got := m.selected().name(); got != "forge" {
@@ -997,7 +986,7 @@ func TestItemLettersOnlyRenderInFocusedPane(t *testing.T) {
 	stylingEnabled(t)
 
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	forge := m.panes[1].items[0]
 	if forge.key == 0 {
@@ -1052,7 +1041,7 @@ func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 func TestLogsScreenToggle(t *testing.T) {
 	m, backend := newTestModel()
 	backend.logs["forge"] = "boot line"
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	m = keyThenApply(m, "ctrl+l")
@@ -1093,7 +1082,7 @@ func TestViewWithinBounds(t *testing.T) {
 		m, backend := newTestModel()
 		backend.logs["forge"] = strings.Repeat("a log line that is quite long indeed\n", 20)
 		next, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
-		m = load(next.(model))
+		m = next.(model)
 		m = focus(m, "forge")
 		m = m.withSelectionRefreshed()
 
@@ -1190,7 +1179,6 @@ var specialKeys = map[string]tea.KeyType{
 
 func TestLocalExpandsToOneRowPerMode(t *testing.T) {
 	m, _ := newTestModel()
-	m = load(m)
 
 	local := m.panes[0]
 	if len(local.items) != 3 {
@@ -1212,7 +1200,7 @@ func TestLocalExpandsToOneRowPerMode(t *testing.T) {
 
 func TestLaunchRowFixesItsMode(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "shell")
 
 	if got := m.mode().Name; got != "shell" {
@@ -1243,7 +1231,6 @@ func TestLaunchRowsWithoutModesSurvive(t *testing.T) {
 
 func TestItemKeysComeFromRowLabels(t *testing.T) {
 	m, _ := newTestModel()
-	m = load(m)
 
 	for i, want := range []rune{'t', 's', 'o'} {
 		if got := m.panes[0].items[i].key; got != want {
@@ -1275,7 +1262,7 @@ func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
 
 func TestPreviewShowsWhatEnterWillRun(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	tmux := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(tmux, "run") || !strings.Contains(tmux, "tmux") {
@@ -1293,7 +1280,7 @@ func TestPreviewShowsWhatEnterWillRun(t *testing.T) {
 
 func TestLogPeekBelongsToItsTarget(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = focus(m, "forge")
 
 	next, _ := m.Update(logPeekMsg{name: "tokyo", text: "tokyo boot"})
@@ -1309,7 +1296,7 @@ func TestLogPeekBelongsToItsTarget(t *testing.T) {
 
 func TestLogPeekIsThrottled(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 
 	if cmd := m.peekLogs(); cmd == nil {
 		t.Fatalf("the first peek should fetch")
@@ -1322,7 +1309,7 @@ func TestLogPeekIsThrottled(t *testing.T) {
 
 func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(withTargets(m)))
+	m = sized(withTargets(m))
 
 	if len(m.panes) != 1 {
 		t.Fatalf("a kind with no targets gets no pane, got %d panes", len(m.panes))
@@ -1344,7 +1331,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	m, _ := newTestModel()
 	box := vm("box")
 	box.Stats = probe.Metrics{gpu, cache, agents, broken}
-	m = sized(load(withTargets(m, box)))
+	m = sized(withTargets(m, box))
 	m = focus(m, "box")
 	m.live["box"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true,
 		readings: []probe.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
@@ -1366,7 +1353,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 
 func TestTickRefreshesLogsInPlace(t *testing.T) {
 	m, backend := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = applyCmd(m, m.peekLogs())
 	if got := m.logsFor(m.selected()); got != "journal line" {
 		t.Fatalf("the first peek should land, got %q", got)
@@ -1389,7 +1376,7 @@ func TestTickRefreshesLogsInPlace(t *testing.T) {
 
 func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
 
 	if m.liveFetch() != nil {
@@ -1418,7 +1405,7 @@ func TestSessionEndReportsWithoutBlame(t *testing.T) {
 
 func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
 	m.status = "stale message"
 
@@ -1456,7 +1443,7 @@ func TestConfigStatusSummarizesProblems(t *testing.T) {
 
 func TestEditedConfigReloadsInPlace(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(focus(m, "tokyo"), "tokyo", true)
 
 	moved := vm("tokyo")
@@ -1497,7 +1484,7 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 
 func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
 	m.load = func() ([]target.Target, error) { return m.targets, nil }
 
@@ -1510,7 +1497,7 @@ func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
 
 func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 	m, _ := newTestModel()
-	m = sized(load(m))
+	m = sized(m)
 	m = probed(probed(m, "forge", true), "tokyo", true)
 
 	changed := vm("forge")

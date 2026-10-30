@@ -12,7 +12,6 @@ import (
 )
 
 const (
-	pollInterval   = 2 * time.Second
 	liveInterval   = 5 * time.Second
 	watchInterval  = 30 * time.Second
 	maxWatchChecks = 4
@@ -66,15 +65,8 @@ type model struct {
 	logRound  int
 	logView   string
 	logPeek   peek
-	hostName  string
-	host      hostReading
 	live      map[string]liveEntry
 	load      func() ([]target.Target, error)
-}
-
-type hostReading struct {
-	stats   probe.Stats
-	history []float64
 }
 
 type peek struct {
@@ -100,11 +92,9 @@ func Run(load func() ([]target.Target, error), backend target.Backend) error {
 		return err
 	}
 
-	host, _ := os.Hostname()
-
 	targets, problems := load()
 	m := newModel(targets, backend)
-	m.self, m.hostName, m.load = exe, host, load
+	m.self, m.load = exe, load
 	m.status = configStatus(problems)
 
 	_, err = tea.NewProgram(m, tea.WithAltScreen()).Run()
@@ -122,7 +112,7 @@ func newModel(targets []target.Target, backend target.Backend) model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(hostCmd(), m.onSelectionChange(), m.watchFetch(), tickCmd(), liveTickCmd())
+	return tea.Batch(m.onSelectionChange(), m.watchFetch(), liveTickCmd())
 }
 
 func (m *model) rebuild() {
@@ -257,7 +247,6 @@ func wrap(i, n int) int {
 	return ((i % n) + n) % n
 }
 
-type tickMsg struct{}
 type liveTickMsg struct{}
 type logTickMsg struct{ round int }
 
@@ -270,8 +259,6 @@ type logViewMsg struct {
 	round int
 	text  string
 }
-
-type hostStatsMsg struct{ stats probe.Stats }
 
 type liveMsg struct {
 	name     string
@@ -294,20 +281,12 @@ type execDoneMsg struct {
 	status string
 }
 
-func tickCmd() tea.Cmd {
-	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return tickMsg{} })
-}
-
 func liveTickCmd() tea.Cmd {
 	return tea.Tick(liveInterval, func(time.Time) tea.Msg { return liveTickMsg{} })
 }
 
 func logTickCmd(round int) tea.Cmd {
 	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{round: round} })
-}
-
-func hostCmd() tea.Cmd {
-	return func() tea.Msg { return hostStatsMsg{stats: probe.Local()} }
 }
 
 func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea.Cmd {

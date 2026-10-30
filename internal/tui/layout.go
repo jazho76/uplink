@@ -5,8 +5,7 @@ const (
 	paddingCells = 2
 	chromeCells  = borderCells + paddingCells
 
-	hostBarRows = 1 + borderCells
-	footerRows  = 2
+	footerRows = 2
 
 	paneColumnPercent = 38
 	minPaneColumnW    = 22
@@ -14,7 +13,7 @@ const (
 	minBodyH          = 9
 
 	minWidth  = minPaneColumnW + minPreviewW
-	minHeight = minBodyH + hostBarRows + footerRows
+	minHeight = minBodyH + footerRows
 )
 
 type layout struct {
@@ -24,7 +23,7 @@ type layout struct {
 }
 
 func computeLayout(width, height int) layout {
-	l := layout{bodyOuterH: max(height-hostBarRows-footerRows, minBodyH)}
+	l := layout{bodyOuterH: max(height-footerRows, minBodyH)}
 
 	l.paneColumnOuterW = max(width*paneColumnPercent/100, minPaneColumnW)
 	l.previewOuterW = width - l.paneColumnOuterW

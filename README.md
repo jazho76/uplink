@@ -113,8 +113,8 @@ uplink box:shell
 The left side lists targets in the groups your config gives them, in the order
 they first appear. The right
 side shows the selected target's status, its declared stats, the exact command
-each mode runs, and recent logs. The bottom bar keeps the host's
-resource usage visible while you browse other machines.
+each mode runs, and recent logs. To see this machine's resources, give the host
+target `stats`, as in the example below.
 
 A target's status is checked while it is selected, and in the background for
 targets with `watch: true`; others show as unknown until you visit them. When a
@@ -203,8 +203,6 @@ without `via` runs here.
 | `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
 | `modes` | Ways to enter the target; the first is the default |
 | `profile` | Profile to take every unset field from |
-
-The bottom bar always shows the machine Uplink runs on, whatever the config.
 
 ### How `via` works
 

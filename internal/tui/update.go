@@ -41,16 +41,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logView = msg.text
 		return m, logTickCmd(m.logRound)
 
-	case tickMsg:
-		return m, tea.Batch(hostCmd(), tickCmd())
-
 	case liveTickMsg:
 		return m, tea.Batch(m.probeSelected(), m.peekSelected(), m.watchFetch(), liveTickCmd())
-
-	case hostStatsMsg:
-		m.host.stats = msg.stats
-		m.host.history = appendSample(m.host.history, loadFraction(msg.stats.Load, msg.stats.Cores))
-		return m, nil
 
 	case liveMsg:
 		m.live[msg.name] = m.settle(msg)
