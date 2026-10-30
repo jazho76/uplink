@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -135,17 +134,14 @@ func editor() string {
 }
 
 func checkConfig() error {
-	cfg, loadErr := config.Load()
+	path := config.Path()
 	state := "not found, only the default host"
-	if cfg.Exists() {
-		state = "loaded"
+	if _, err := os.Stat(path); err == nil {
+		state = "found"
 	}
-	if loadErr != nil {
-		state = "unreadable"
-	}
-	ui.Info("config %s (%s)", cfg.Path, state)
+	ui.Info("config %s (%s)", path, state)
 
-	resolved, problems := target.Load(cfg)
+	resolved, problems := target.Load(path)
 	for _, t := range resolved {
 		fmt.Println()
 		header := t.Name + "  " + t.Group
@@ -175,7 +171,6 @@ func checkConfig() error {
 		}
 	}
 
-	problems = errors.Join(loadErr, problems)
 	if problems != nil {
 		fmt.Println()
 	}

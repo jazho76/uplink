@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/probe"
 )
 
@@ -23,11 +22,7 @@ func load(t *testing.T, body string) ([]Target, error) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.LoadFrom(path)
-	if err != nil {
-		t.Fatalf("load config: %v", err)
-	}
-	return Load(cfg)
+	return Load(path)
 }
 
 func mustLoad(t *testing.T, body string) []Target {
@@ -124,7 +119,7 @@ targets:`+host+`
     logs: echo own
     stats: []
     modes:
-      - { name: top, run: htop, back: true }
+      - { name: top, run: htop }
 `)
 	home, _ := os.UserHomeDir()
 
@@ -157,7 +152,7 @@ targets:`+host+`
 		t.Errorf("target modes replace the profile's wholesale, got %v", got)
 	}
 	if top := modeNamed(t, tokyo, "top"); top.Argv[len(top.Argv)-1] != "htop" {
-		t.Errorf("a mode still carrying the retired back key should load, got %q", top.Argv)
+		t.Errorf("a target mode runs its own command, got %q", top.Argv)
 	}
 }
 
@@ -318,71 +313,6 @@ targets:`+host+`
 	}
 }
 
-func TestExpandIsReportedButHarmless(t *testing.T) {
-	targets, err := load(t, `
-profiles:
-  old:
-    expand: true
-targets:
-  - name: host
-    expand: true
-    modes: [{ name: shell }]
-  - { name: box, profile: old, modes: [{ name: shell }] }
-`)
-	if err == nil {
-		t.Fatal("expand must be reported")
-	}
-	for _, want := range []string{`profile "old"`, `target "host"`, "modes are picked with tab"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %s:\n%v", want, err)
-		}
-	}
-	if len(targets) != 2 {
-		t.Errorf("expand is ignored, so every target survives, got %d", len(targets))
-	}
-}
-
-func TestKindPointsAtGroup(t *testing.T) {
-	targets, err := load(t, `
-profiles:
-  old:
-    kind: vm
-targets:`+host+`
-  - name: box
-    kind: remote
-    via: ssh box
-    modes: [{ name: shell }]
-`)
-	if err == nil {
-		t.Fatal("kind must be reported")
-	}
-	for _, want := range []string{`profile "old"`, `target "box"`, "use group"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %s:\n%v", want, err)
-		}
-	}
-	if len(targets) != 1 {
-		t.Errorf("only the host should survive, got %d targets", len(targets))
-	}
-}
-
-func TestLegacySectionsPointAtTheMigration(t *testing.T) {
-	_, err := load(t, `
-lima:
-  modes: [{ name: shell }]
-remotes:
-  - name: box
-`)
-	if err == nil {
-		t.Fatal("legacy sections must be reported")
-	}
-	for _, want := range []string{`"lima"`, `"remotes"`, "README"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %s:\n%v", want, err)
-		}
-	}
-}
-
 func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
 	out := System{}.Logs(Target{Logs: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}, 2)
 	if out != "two\tx\nthree" {
@@ -444,16 +374,13 @@ func TestStatsAreValidated(t *testing.T) {
 	targets, err := load(t, `
 targets:`+host+`
   - name: broken
-    stats: [{ type: load }, { type: gauge, label: gpu }]
-    modes: [{ name: shell }]
-  - name: legacy
-    stats: false
+    stats: [{ type: gauge, label: gpu, value: nvidia-smi }]
     modes: [{ name: shell }]
 `)
 	if err == nil {
 		t.Fatal("broken stats must be reported")
 	}
-	for _, want := range []string{`"broken": stats #1: load is no longer built in`, "use [] for none"} {
+	for _, want := range []string{`"broken": stats #1: gauge needs a max`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q:\n%v", want, err)
 		}
@@ -473,4 +400,72 @@ targets:
 	if len(find(t, targets, "one").Stats) != 2 || len(find(t, targets, "two").Stats) != 2 {
 		t.Errorf("an anchored list should reach every target, got %+v", targets)
 	}
+}
+
+func onlyDefaultHost(t *testing.T, targets []Target) {
+	t.Helper()
+	if len(targets) != 1 || targets[0].Name != defaultHost.Name {
+		t.Errorf("a refused config should leave only the default host, got %v", targets)
+	}
+}
+
+func TestUnknownFieldsRefuseTheConfig(t *testing.T) {
+	for where, body := range map[string]string{
+		"target":  "targets:\n  - { name: prod, vai: ssh prod, modes: [{ name: shell }] }\n",
+		"mode":    "targets:\n  - { name: prod, modes: [{ name: shell, rnu: bash }] }\n",
+		"stat":    "targets:\n  - { name: prod, stats: [{ type: text, label: a, value: b, lable: c }], modes: [{ name: shell }] }\n",
+		"profile": "profiles:\n  vm: { vai: ssh vm }\ntargets:\n  - { name: prod, modes: [{ name: shell }] }\n",
+	} {
+		targets, err := load(t, body)
+		if err == nil || !strings.Contains(err.Error(), "line ") || !strings.Contains(err.Error(), "not found") {
+			t.Errorf("%s: an unknown field should be reported with its line, got %v", where, err)
+		}
+		onlyDefaultHost(t, targets)
+	}
+}
+
+func TestUnknownSectionsRefuseTheConfig(t *testing.T) {
+	targets, err := load(t, "lima:\n  modes: [{ name: shell }]\ntargets:"+host)
+	if err == nil || !strings.Contains(err.Error(), `unknown section "lima"`) {
+		t.Errorf("an unknown top-level key should be reported, got %v", err)
+	}
+	onlyDefaultHost(t, targets)
+
+	if _, err := load(t, "x-anything: [1, 2]\ntargets:"+host); err != nil {
+		t.Errorf("x- keys hold anchors and are allowed, got %v", err)
+	}
+}
+
+func TestStatsMustBeAList(t *testing.T) {
+	targets, err := load(t, "targets:\n  - { name: prod, stats: false, modes: [{ name: shell }] }\n")
+	if err == nil {
+		t.Error("stats: false should be refused")
+	}
+	onlyDefaultHost(t, targets)
+}
+
+func TestEmptyOrMissingConfigGivesTheDefaultHost(t *testing.T) {
+	targets, err := load(t, "")
+	if err != nil {
+		t.Errorf("an empty file is not an error, got %v", err)
+	}
+	onlyDefaultHost(t, targets)
+
+	targets, err = Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Errorf("a missing file is not an error, got %v", err)
+	}
+	onlyDefaultHost(t, targets)
+}
+
+func TestMalformedYAMLNamesTheFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("targets: [ { name: host\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targets, err := Load(path)
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Errorf("malformed yaml should name the file, got %v", err)
+	}
+	onlyDefaultHost(t, targets)
 }

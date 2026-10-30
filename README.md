@@ -262,7 +262,7 @@ profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
 that contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
 
 To share values between targets that do not share a profile, define a YAML
-anchor under a top-level key Uplink does not use, such as the `x-linux` list
+anchor under a top-level key starting with `x-`, such as the `x-linux` list
 above, and refer to it with `stats: *linux`.
 
 ### Stats
@@ -336,6 +336,10 @@ uplink config check
 
 Target names must be unique and may only hold letters, digits, `.`, `_`, and
 `-`. An invalid target is skipped and reported, and the rest still load.
+
+Unknown fields are not ignored: a typo such as `vai:` or an unknown top-level
+section rejects the whole file, so a misspelled `via` never opens a local shell
+by mistake. The dashboard then offers only the default host and shows why.
 
 ## Upgrade
 

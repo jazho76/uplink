@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/run"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -50,35 +49,16 @@ var rules = map[string]rule{
 }
 
 var (
-	types        = []string{TypeGauge, TypeText}
-	units        = []string{UnitBytes, UnitSeconds}
-	fieldNames   = []string{"label", "value", "max", "unit"}
-	removedTypes = []string{"load", "mem", "disk", "uptime"}
+	types      = []string{TypeGauge, TypeText}
+	units      = []string{UnitBytes, UnitSeconds}
+	fieldNames = []string{"label", "value", "max", "unit"}
 )
-
-func (m *Metrics) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.AliasNode {
-		node = node.Alias
-	}
-	if node.Kind != yaml.SequenceNode {
-		return errors.New("stats takes a list of metrics; use [] for none")
-	}
-	var list []Metric
-	if err := node.Decode(&list); err != nil {
-		return err
-	}
-	*m = append(Metrics{}, list...)
-	return nil
-}
 
 func (m Metric) fields() map[string]string {
 	return map[string]string{"label": m.Label, "value": m.Value, "max": m.Max, "unit": m.Unit}
 }
 
 func (m Metric) Validate() error {
-	if slices.Contains(removedTypes, m.Type) {
-		return fmt.Errorf("%s is no longer built in; see the README for ready-made stats", m.Type)
-	}
 	r, ok := rules[m.Type]
 	if !ok {
 		return fmt.Errorf("type must be one of %s, got %q", strings.Join(types, ", "), m.Type)

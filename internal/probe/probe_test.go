@@ -121,8 +121,6 @@ func TestValidate(t *testing.T) {
 
 	for want, m := range map[string]Metric{
 		"type must be one of":                {Type: "cpu"},
-		"load is no longer built in":         {Type: "load"},
-		"uptime is no longer built in":       {Type: "uptime"},
 		"gauge needs a max":                  {Type: TypeGauge, Label: "gpu", Value: "x"},
 		"gauge needs a label":                {Type: TypeGauge, Value: "x", Max: "1"},
 		"text needs a value":                 {Type: TypeText, Label: "x"},
@@ -141,9 +139,6 @@ func TestMetricsDecoding(t *testing.T) {
 	}
 	if err := yaml.Unmarshal([]byte("stats: []"), &spec); err != nil || spec.Stats == nil || len(spec.Stats) != 0 {
 		t.Errorf("an empty list means none, distinct from absent: %v %#v", err, spec.Stats)
-	}
-	if err := yaml.Unmarshal([]byte("stats: false"), &spec); err == nil || !strings.Contains(err.Error(), "use [] for none") {
-		t.Errorf("the old boolean should point at the new form, got %v", err)
 	}
 	if err := yaml.Unmarshal([]byte("x: &l [{ type: text, label: a, value: b }]\nstats: *l"), &spec); err != nil || len(spec.Stats) != 1 {
 		t.Errorf("an alias should decode: %v %#v", err, spec.Stats)

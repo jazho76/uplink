@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/tui"
 	"github.com/spf13/cobra"
@@ -20,5 +21,5 @@ func init() {
 }
 
 func dashboard() error {
-	return tui.Run(targets, target.System{})
+	return tui.Run(func() ([]target.Target, error) { return target.Load(config.Path()) }, target.System{})
 }

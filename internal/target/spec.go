@@ -1,9 +1,12 @@
 package target
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,20 +14,16 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/probe"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	profilesSection = "profiles"
-	targetsSection  = "targets"
 	namePlaceholder = "{name}"
+	anchorPrefix    = "x-"
 )
 
-var (
-	legacySections = []string{"local", "lima", "remotes"}
-	namePattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-)
+var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type ModeSpec struct {
 	Name string `yaml:"name"`
@@ -34,7 +33,6 @@ type ModeSpec struct {
 type Spec struct {
 	Name    string        `yaml:"name"`
 	Profile string        `yaml:"profile"`
-	Kind    string        `yaml:"kind"`
 	Group   string        `yaml:"group"`
 	Via     string        `yaml:"via"`
 	Exec    string        `yaml:"exec"`
@@ -43,9 +41,14 @@ type Spec struct {
 	Down    string        `yaml:"down"`
 	Logs    string        `yaml:"logs"`
 	Watch   *bool         `yaml:"watch"`
-	Expand  *bool         `yaml:"expand"`
 	Stats   probe.Metrics `yaml:"stats"`
 	Modes   []ModeSpec    `yaml:"modes"`
+}
+
+type document struct {
+	Profiles map[string]Spec `yaml:"profiles"`
+	Targets  *[]Spec         `yaml:"targets"`
+	Extra    map[string]any  `yaml:",inline"`
 }
 
 var defaultHost = Spec{
@@ -57,50 +60,58 @@ var defaultHost = Spec{
 	},
 }
 
-func Load(cfg *config.File) ([]Target, error) {
-	var errs []error
-	for _, name := range legacySections {
-		var ignored any
-		if present, _ := cfg.Section(name, &ignored); present {
-			errs = append(errs, fmt.Errorf("section %q is no longer supported; migrate to %s: and %s:, see the README",
-				name, profilesSection, targetsSection))
-		}
-	}
-
-	profiles := map[string]Spec{}
-	if _, err := cfg.Section(profilesSection, &profiles); err != nil {
-		errs = append(errs, err)
-	}
-	for _, name := range slices.Sorted(maps.Keys(profiles)) {
-		if profiles[name].Kind != "" {
-			errs = append(errs, fmt.Errorf("profile %q: %w", name, errKind))
-		}
-		if profiles[name].Expand != nil {
-			errs = append(errs, fmt.Errorf("profile %q: %w", name, errExpand))
-		}
-	}
-	var specs []Spec
-	present, err := cfg.Section(targetsSection, &specs)
+func Load(path string) ([]Target, error) {
+	doc, err := read(path)
 	if err != nil {
-		errs = append(errs, err)
+		targets, _ := resolveAll([]Spec{defaultHost}, nil)
+		return targets, err
 	}
-	if !present {
-		specs = []Spec{defaultHost}
+	specs := []Spec{defaultHost}
+	if doc.Targets != nil {
+		specs = *doc.Targets
 	}
-	for i, spec := range specs {
-		if spec.Expand != nil {
-			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), errExpand))
-		}
-	}
-
-	targets, resolveErr := resolveAll(specs, profiles)
-	return targets, errors.Join(append(errs, resolveErr)...)
+	return resolveAll(specs, doc.Profiles)
 }
 
-var (
-	errKind   = errors.New("kind is no longer supported; use group, see the README")
-	errExpand = errors.New("expand is no longer supported; modes are picked with tab, see the README")
-)
+func read(path string) (document, error) {
+	var doc document
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return doc, nil
+	case err != nil:
+		return doc, err
+	}
+
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
+		return document{}, decodeError(path, err)
+	}
+
+	var errs []error
+	for _, key := range slices.Sorted(maps.Keys(doc.Extra)) {
+		if !strings.HasPrefix(key, anchorPrefix) {
+			errs = append(errs, fmt.Errorf("%s: unknown section %q; use profiles, targets, or an %s key for anchors", path, key, anchorPrefix))
+		}
+	}
+	if len(errs) > 0 {
+		return document{}, errors.Join(errs...)
+	}
+	return doc, nil
+}
+
+func decodeError(path string, err error) error {
+	var typeErr *yaml.TypeError
+	if !errors.As(err, &typeErr) {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	errs := make([]error, len(typeErr.Errors))
+	for i, message := range typeErr.Errors {
+		errs[i] = fmt.Errorf("%s: %s", path, message)
+	}
+	return errors.Join(errs...)
+}
 
 func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 	var (
@@ -137,9 +148,6 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	}
 	if !namePattern.MatchString(spec.Name) {
 		return Target{}, errors.New("name may only hold letters, digits, '.', '_' and '-'")
-	}
-	if spec.Kind != "" {
-		return Target{}, errKind
 	}
 	if spec.Profile != "" {
 		profile, ok := profiles[spec.Profile]
