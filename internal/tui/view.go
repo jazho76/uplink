@@ -104,15 +104,12 @@ func (m model) previewBody(width, height int) string {
 
 	var b strings.Builder
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
-	b.WriteString(header + "\n")
+	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
 
 	if len(it.t.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.name(), width))
 	}
-
-	b.WriteString("\n" + rule("spec", width))
-	b.WriteString(renderFields(m.specFields(it), width))
 
 	if logs := m.logsFor(it); logs != "" {
 		used := strings.Count(b.String(), "\n")
@@ -270,19 +267,12 @@ func unitOf(size string) string {
 	return strings.TrimLeft(size, "0123456789.")
 }
 
-func (m model) specFields(it item) []field {
-	var fields []field
-	if n := len(it.t.Modes); n > 1 {
-		fields = append(fields, field{"mode", fmt.Sprintf("%s   %s", modeMarker.Render(m.mode().Name),
-			labelStyle.Render(fmt.Sprintf("%d of %d", m.modeIdx+1, n)))})
+func (m model) modeTag(it item) string {
+	n := len(it.t.Modes)
+	if n < 2 {
+		return ""
 	}
-	if command := m.mode().Command(); command != "" {
-		fields = append(fields, field{"run", command})
-	}
-	if it.t.Logs != "" {
-		fields = append(fields, field{"logs", it.t.Logs})
-	}
-	return fields
+	return modeMarker.Render(m.mode().Name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIdx+1, n))
 }
 
 type field struct{ key, value string }

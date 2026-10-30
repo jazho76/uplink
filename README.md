@@ -111,10 +111,10 @@ uplink box:shell
 ## The dashboard
 
 The left side lists targets in the groups your config gives them, in the order
-they first appear. The right
-side shows the selected target's status, its declared stats, the exact command
-each mode runs, and recent logs. To see this machine's resources, give the host
-target `stats`, as in the example below.
+they first appear. The right side shows the selected target's status and launch
+mode, its declared stats, and recent logs; `uplink config check` shows the exact
+command behind each mode. To see this machine's resources, give the host target
+`stats`, as in the example below.
 
 A target's status is checked while it is selected, and in the background for
 targets with `watch: true`; others show as unknown until you visit them. When a

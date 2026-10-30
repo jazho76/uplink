@@ -231,7 +231,7 @@ func TestProbeResultSetsStatus(t *testing.T) {
 
 	m = focus(m, "forge")
 	view := m.View()
-	for _, want := range []string{"forge", "tokyo", "local", "up", "lima-forge", "vms"} {
+	for _, want := range []string{"forge", "tokyo", "local", "up", "vms"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q", want)
 		}
@@ -332,7 +332,7 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 		t.Errorf("an off-default mode should be marked on the row: %s", m.renderPanes(30, 12))
 	}
 	preview := m.previewBody(50, 20)
-	for _, want := range []string{"mode", "shell", "2 of 3"} {
+	for _, want := range []string{"shell", "2/3"} {
 		if !strings.Contains(preview, want) {
 			t.Errorf("preview missing %q: %s", want, preview)
 		}
@@ -884,12 +884,8 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
-	live, spec := strings.Index(preview, "live"), strings.Index(preview, "spec")
-	if live < 0 || spec < 0 {
-		t.Fatalf("preview should carry both sections:\n%s", preview)
-	}
-	if live > spec {
-		t.Errorf("changing data should lead the static detail:\n%s", preview)
+	if !strings.Contains(preview, "live") {
+		t.Fatalf("preview should carry the live block:\n%s", preview)
 	}
 	for _, want := range []string{"load", "memory", "disk"} {
 		if !strings.Contains(preview, want) {
@@ -1265,21 +1261,21 @@ func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
 	}
 }
 
-func TestPreviewShowsWhatEnterWillRun(t *testing.T) {
+func TestPreviewHeaderNamesTheMode(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
+	header := func(m model) string { return strings.SplitN(ansi.Strip(m.previewBody(60, 30)), "\n", 2)[0] }
 
-	tmux := ansi.Strip(m.previewBody(60, 30))
-	if !strings.Contains(tmux, "run") || !strings.Contains(tmux, "tmux") {
-		t.Fatalf("the preview should state the command:\n%s", tmux)
+	if got := header(m); strings.Contains(got, "/") {
+		t.Errorf("a launch row is its mode, so the header repeats nothing: %q", got)
 	}
 
-	top := ansi.Strip(focus(m, "top").previewBody(60, 30))
-	if !strings.Contains(top, "htop") {
-		t.Errorf("the run line should follow the cursor:\n%s", top)
+	m = focus(m, "forge")
+	if got := header(m); !strings.Contains(got, "tmux") || !strings.Contains(got, "1/") {
+		t.Fatalf("the header should name the selected mode: %q", got)
 	}
-	if tmux == top {
-		t.Errorf("moving between launch rows must change something:\n%s", top)
+	if got := header(key(m, "tab")); !strings.Contains(got, "2/") {
+		t.Errorf("the header mode should follow tab: %q", got)
 	}
 }
 
