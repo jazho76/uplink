@@ -19,9 +19,11 @@ type fakeBackend struct {
 	down     map[string]bool
 	hooks    []string
 	statuses int
+	stats    int
 }
 
 func (f *fakeBackend) Stats(t target.Target) ([]probe.Reading, error) {
+	f.stats++
 	if f.down[t.Name] {
 		return nil, errBoom{}
 	}
@@ -489,20 +491,19 @@ func finishHook(m model, cmd tea.Cmd) model {
 	return applyCmd(next.(model), recheck)
 }
 
-func TestStatsStandInForTheDefaultStatus(t *testing.T) {
+func TestStatusAndStatsAreSeparateChecks(t *testing.T) {
 	m, backend := newTestModel()
-	hooked := remote("hooked")
-	hooked.Status = "check hooked"
-	m = sized(withTargets(m, remote("dojo"), hooked))
+	m = sized(withTargets(m, remote("dojo"), remote("gone")))
+	backend.down["gone"] = true
 
 	m = focus(m, "dojo").withSelectionRefreshed()
-	if backend.statuses != 0 || m.statusOf(itemNamed(m, "dojo").t) != statusUp {
-		t.Errorf("a successful probe proves the target up without a second round trip, ran %d checks", backend.statuses)
+	if backend.statuses != 1 || backend.stats != 1 || m.statusOf(itemNamed(m, "dojo").t) != statusUp {
+		t.Errorf("an up target runs one status check, then its stats; ran %d checks and %d probes", backend.statuses, backend.stats)
 	}
 
-	m = focus(m, "hooked").withSelectionRefreshed()
-	if backend.statuses != 1 {
-		t.Errorf("a status hook is always consulted, ran %d checks", backend.statuses)
+	m = focus(m, "gone").withSelectionRefreshed()
+	if backend.statuses != 2 || backend.stats != 1 || m.statusOf(itemNamed(m, "gone").t) != statusDown {
+		t.Errorf("a down target runs its status check and no stats; ran %d checks and %d probes", backend.statuses, backend.stats)
 	}
 }
 

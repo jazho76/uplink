@@ -269,14 +269,8 @@ func logTickCmd(round int) tea.Cmd {
 func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea.Cmd {
 	return func() tea.Msg {
 		msg := liveMsg{name: t.Name, epoch: epoch, full: full}
-		probeStats := full && len(t.Stats) > 0
-		if probeStats && t.Status == "" {
-			readings, err := backend.Stats(t)
-			msg.up, msg.readings, msg.statsOK = err == nil, readings, err == nil
-			return msg
-		}
 		msg.up = backend.Status(t) == nil
-		if msg.up && probeStats {
+		if msg.up && full && len(t.Stats) > 0 {
 			readings, err := backend.Stats(t)
 			msg.readings, msg.statsOK = readings, err == nil
 		}
