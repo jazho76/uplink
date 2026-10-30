@@ -30,7 +30,6 @@ type Target struct {
 	Down   string
 	Logs   string
 	Watch  bool
-	Expand bool
 	Stats  probe.Metrics
 	Modes  []Mode
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/humanize"
 	"github.com/jazho76/uplink/internal/probe"
-	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/ui"
 )
 
@@ -52,19 +51,17 @@ var (
 )
 
 func (m model) glyph(it item, base lipgloss.Style) string {
-	mark, color := glyphOf(it.t, m.statusOf(it.t))
+	mark, color := glyphOf(m.statusOf(it.t))
 	return base.Foreground(color).Render(mark)
 }
 
-func glyphOf(t target.Target, s status) (string, lipgloss.TerminalColor) {
-	switch {
-	case t.Expand:
-		return "⬢", ui.Cyan
-	case s == statusUp:
+func glyphOf(s status) (string, lipgloss.TerminalColor) {
+	switch s {
+	case statusUp:
 		return "●", ui.Green
-	case s == statusDown:
+	case statusDown:
 		return "○", ui.Comment
-	case s == statusStarting || s == statusStopping:
+	case statusStarting, statusStopping:
 		return "◐", ui.Yellow
 	default:
 		return "◌", ui.Comment

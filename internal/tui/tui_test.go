@@ -83,11 +83,10 @@ func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name
 
 func hostTarget() target.Target {
 	return target.Target{
-		Name:   "host",
-		Group:  "local",
-		Expand: true,
-		Logs:   "journalctl",
-		Stats:  linuxMetrics,
+		Name:  "host",
+		Group: "local",
+		Logs:  "journalctl",
+		Stats: linuxMetrics,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
@@ -340,19 +339,17 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 }
 
 func TestGlyphDistinguishesState(t *testing.T) {
-	shape := func(expand bool, s status) string {
-		mark, _ := glyphOf(target.Target{Expand: expand}, s)
+	shape := func(s status) string {
+		mark, _ := glyphOf(s)
 		return mark
 	}
 
-	host := shape(true, statusUp)
-	up := shape(false, statusUp)
-	down := shape(false, statusDown)
-	unknown := shape(false, statusUnknown)
-	starting := shape(false, statusStarting)
+	up := shape(statusUp)
+	down := shape(statusDown)
+	unknown := shape(statusUnknown)
+	starting := shape(statusStarting)
 
 	distinct := map[string]string{
-		"host vs up":          host + up,
 		"up vs down":          up + down,
 		"down vs unknown":     down + unknown,
 		"starting vs down":    starting + down,
@@ -365,7 +362,7 @@ func TestGlyphDistinguishesState(t *testing.T) {
 		}
 	}
 
-	for name, g := range map[string]string{"host": host, "up": up, "down": down, "unknown": unknown, "starting": starting} {
+	for name, g := range map[string]string{"up": up, "down": down, "unknown": unknown, "starting": starting} {
 		if w := lipgloss.Width(g); w != 1 {
 			t.Errorf("%s glyph occupies %d columns, want 1", name, w)
 		}
@@ -632,9 +629,9 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 
-	for _, want := range []string{"shell", "top", "forge", "tokyo"} {
+	for _, want := range []string{"forge", "tokyo"} {
 		m = key(m, "down")
-		if got := m.selected().label(); got != want {
+		if got := m.selected().name(); got != want {
 			t.Fatalf("down should reach %q, got %q", want, got)
 		}
 	}
@@ -643,7 +640,7 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 	}
 
 	m = key(m, "down")
-	if got := m.selected().label(); got != "tmux" {
+	if got := m.selected().name(); got != "host" {
 		t.Fatalf("down from the last item wraps to the first, got %q", got)
 	}
 	if got := m.focusedSection(); got != "local" {
@@ -651,7 +648,7 @@ func TestCursorWrapsThroughPanes(t *testing.T) {
 	}
 
 	m = key(m, "up")
-	if got := m.selected().label(); got != "tokyo" {
+	if got := m.selected().name(); got != "tokyo" {
 		t.Fatalf("up from the first item lands on the last, got %q", got)
 	}
 }
@@ -1122,7 +1119,7 @@ func panesOf(items ...item) []pane {
 func focus(m model, name string) model {
 	for i, p := range m.panes {
 		for j, it := range p.items {
-			if it.name() == name || it.label() == name {
+			if it.name() == name {
 				m.focus, m.panes[i].cursor = i, j
 				return m
 			}
@@ -1178,86 +1175,13 @@ var specialKeys = map[string]tea.KeyType{
 	"ctrl+x":    tea.KeyCtrlX,
 }
 
-func TestLocalExpandsToOneRowPerMode(t *testing.T) {
+func TestItemKeysComeFromTargetNames(t *testing.T) {
 	m, _ := newTestModel()
 
-	local := m.panes[0]
-	if len(local.items) != 3 {
-		t.Fatalf("each local mode should get a row, got %d", len(local.items))
-	}
-	for i, want := range []string{"tmux", "shell", "top"} {
-		row := local.items[i]
-		if row.label() != want {
-			t.Errorf("row %d should be labelled %q, got %q", i, want, row.label())
+	for name, want := range map[string]rune{"host": 'h', "forge": 'f', "tokyo": 't'} {
+		if got := itemNamed(m, name).key; got != want {
+			t.Errorf("%s should claim %q, got %q", name, want, got)
 		}
-		if row.name() != "host" {
-			t.Errorf("every row is the same machine, got %q", row.name())
-		}
-		if len(row.t.Modes) != 1 || row.t.Modes[0].Name != want {
-			t.Errorf("row %d should carry only its own mode, got %v", i, row.t.Modes)
-		}
-	}
-}
-
-func TestLaunchRowFixesItsMode(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-	m = focus(m, "shell")
-
-	if got := m.mode().Name; got != "shell" {
-		t.Fatalf("a launch row selects its own mode, got %q", got)
-	}
-	m = key(m, "tab")
-	if got := m.mode().Name; got != "shell" {
-		t.Errorf("tab has nothing to cycle on a launch row, got %q", got)
-	}
-	if footer := m.renderFooter(); strings.Contains(footer, "tab") {
-		t.Errorf("a launch row should not advertise tab: %s", footer)
-	}
-	if badge := ansi.Strip(m.renderPanes(30, 20)); strings.Contains(badge, "[shell]") {
-		t.Errorf("the row is the mode, so it needs no badge:\n%s", badge)
-	}
-
-	if m = focus(m, "top"); m.mode().Name != "top" {
-		t.Errorf("each launch row selects its own mode, got %q", m.mode().Name)
-	}
-}
-
-func TestLaunchRowsWithoutModesSurvive(t *testing.T) {
-	bare := item{t: target.Target{Expand: true, Name: "host"}}
-	if rows := launcherRows(bare); len(rows) != 1 || rows[0].launcher {
-		t.Errorf("a modeless host stays one plain row, got %+v", rows)
-	}
-}
-
-func TestItemKeysComeFromRowLabels(t *testing.T) {
-	m, _ := newTestModel()
-
-	for i, want := range []rune{'t', 's', 'o'} {
-		if got := m.panes[0].items[i].key; got != want {
-			t.Errorf("row %d should claim %q, got %q", i, want, got)
-		}
-	}
-}
-
-func TestLauncherPaneKeepsOnlyWhatItNeeds(t *testing.T) {
-	launcher := pane{section: "local", items: []item{{launcher: true}, {launcher: true}, {launcher: true}}}
-	vms := pane{section: "vms", items: []item{{}, {}}}
-
-	rows := distributeRows([]pane{launcher, vms}, 20)
-	if rows[0] != len(launcher.items)+borderCells {
-		t.Errorf("a launcher pane cannot use extra rows, got %d", rows[0])
-	}
-	if rows[0]+rows[1] != 20 {
-		t.Errorf("the slack should still be spent, got %d of 20", rows[0]+rows[1])
-	}
-}
-
-func TestPaneSummarySkipsLauncherPanes(t *testing.T) {
-	m, _ := newTestModel()
-	up := item{t: hostTarget(), launcher: true}
-	if got := m.paneSummary(pane{items: []item{up, up, up}}); got != "" {
-		t.Errorf("launch rows are one machine, not three, got %q", got)
 	}
 }
 
@@ -1265,10 +1189,6 @@ func TestPreviewHeaderNamesTheMode(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	header := func(m model) string { return strings.SplitN(ansi.Strip(m.previewBody(60, 30)), "\n", 2)[0] }
-
-	if got := header(m); strings.Contains(got, "/") {
-		t.Errorf("a launch row is its mode, so the header repeats nothing: %q", got)
-	}
 
 	m = focus(m, "forge")
 	if got := header(m); !strings.Contains(got, "tmux") || !strings.Contains(got, "1/") {
@@ -1315,11 +1235,9 @@ func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 	if len(m.panes) != 1 {
 		t.Fatalf("a kind with no targets gets no pane, got %d panes", len(m.panes))
 	}
-	for _, want := range []string{"shell", "top", "tmux"} {
-		m = key(m, "down")
-		if got := m.selected().label(); got != want {
-			t.Fatalf("down should reach %q, got %q", want, got)
-		}
+	m = key(m, "down")
+	if got := m.selected().name(); got != "host" {
+		t.Fatalf("down in a one-row pane stays on its only row, got %q", got)
 	}
 }
 

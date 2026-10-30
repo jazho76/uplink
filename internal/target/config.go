@@ -49,9 +49,8 @@ type Spec struct {
 }
 
 var defaultHost = Spec{
-	Name:   "host",
-	Group:  "local",
-	Expand: new(true),
+	Name:  "host",
+	Group: "local",
 	Modes: []ModeSpec{
 		{Name: "tmux", Run: "tmux new-session -A -s host"},
 		{Name: "shell"},
@@ -76,6 +75,9 @@ func Load(cfg *config.File) ([]Target, error) {
 		if profiles[name].Kind != "" {
 			errs = append(errs, fmt.Errorf("profile %q: %w", name, errKind))
 		}
+		if profiles[name].Expand != nil {
+			errs = append(errs, fmt.Errorf("profile %q: %w", name, errExpand))
+		}
 	}
 	var specs []Spec
 	present, err := cfg.Section(targetsSection, &specs)
@@ -85,12 +87,20 @@ func Load(cfg *config.File) ([]Target, error) {
 	if !present {
 		specs = []Spec{defaultHost}
 	}
+	for i, spec := range specs {
+		if spec.Expand != nil {
+			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), errExpand))
+		}
+	}
 
 	targets, resolveErr := resolveAll(specs, profiles)
 	return targets, errors.Join(append(errs, resolveErr)...)
 }
 
-var errKind = errors.New("kind is no longer supported; use group, see the README")
+var (
+	errKind   = errors.New("kind is no longer supported; use group, see the README")
+	errExpand = errors.New("expand is no longer supported; modes are picked with tab, see the README")
+)
 
 func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 	var (
@@ -164,7 +174,6 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 		Down:   spec.Down,
 		Logs:   spec.Logs,
 		Watch:  valueOr(spec.Watch, false),
-		Expand: valueOr(spec.Expand, false),
 		Stats:  spec.Stats,
 	}
 
@@ -206,7 +215,6 @@ func (s Spec) over(base Spec) Spec {
 	s.Down = cmp.Or(s.Down, base.Down)
 	s.Logs = cmp.Or(s.Logs, base.Logs)
 	s.Watch = cmp.Or(s.Watch, base.Watch)
-	s.Expand = cmp.Or(s.Expand, base.Expand)
 	if s.Stats == nil {
 		s.Stats = base.Stats
 	}

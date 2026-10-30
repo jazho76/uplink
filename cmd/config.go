@@ -31,7 +31,6 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 # down    host-side stop, run by ctrl+x.
 # logs    host-side command whose output fills the log view (ctrl+l).
 # watch   true polls status in the background, not only while selected.
-# expand  true lists each mode as its own row.
 # stats   metrics shown while selected, measured in one probe through exec:
 #         gauge (label, value, max, unit) and text (label, value, unit).
 #         unit is bytes or seconds. Left out means none. The README has a
@@ -72,7 +71,6 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 # targets:
 #   - name: host
 #     group: local
-#     expand: true
 #     stats: *linux
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s host }
@@ -185,7 +183,7 @@ func flags(t target.Target) string {
 	for _, f := range []struct {
 		name string
 		on   bool
-	}{{"watch", t.Watch}, {"expand", t.Expand}} {
+	}{{"watch", t.Watch}} {
 		if f.on {
 			set += "  " + f.name
 		}

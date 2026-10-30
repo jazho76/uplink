@@ -29,19 +29,11 @@ const (
 )
 
 type item struct {
-	t        target.Target
-	launcher bool
-	key      rune
+	t   target.Target
+	key rune
 }
 
 func (i item) name() string { return i.t.Name }
-
-func (i item) label() string {
-	if i.launcher {
-		return i.t.DefaultMode().Name
-	}
-	return i.t.Name
-}
 
 type screen int
 
@@ -123,7 +115,7 @@ func (m *model) rebuild() {
 			panes = append(panes, pane{section: t.Group})
 			i = len(panes) - 1
 		}
-		panes[i].items = append(panes[i].items, launcherRows(item{t: t})...)
+		panes[i].items = append(panes[i].items, item{t: t})
 	}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
@@ -143,21 +135,6 @@ func (m model) statusOf(t target.Target) status {
 	default:
 		return statusUnknown
 	}
-}
-
-func launcherRows(it item) []item {
-	if !it.t.Expand || len(it.t.Modes) == 0 {
-		return []item{it}
-	}
-
-	rows := make([]item, 0, len(it.t.Modes))
-	for _, mode := range it.t.Modes {
-		row := it
-		row.t.Modes = []target.Mode{mode}
-		row.launcher = true
-		rows = append(rows, row)
-	}
-	return rows
 }
 
 func carryOverCursors(fresh, previous []pane) []pane {

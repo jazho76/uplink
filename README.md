@@ -175,7 +175,6 @@ profiles:
 targets:
   - name: host
     group: local
-    expand: true
     logs: journalctl --system -n 500 --no-pager -o short
     stats: *linux
     modes:
@@ -211,7 +210,6 @@ without `via` runs here.
 | `down` | Host-side stop, run by `Ctrl+X` |
 | `logs` | Host-side command whose output fills the log view |
 | `watch` | `true` checks status in the background, not only while selected |
-| `expand` | `true` gives each mode its own row in the dashboard |
 | `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
 | `modes` | Ways to enter the target; the first is the default |
 | `profile` | Profile to take every unset field from |

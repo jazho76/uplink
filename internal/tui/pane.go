@@ -35,7 +35,7 @@ func assignItemKeys(panes []pane) {
 	for i := range panes {
 		taken := reservedPaneKeys + otherPaneKeys(panes, i)
 		for j := range panes[i].items {
-			panes[i].items[j].key, taken = claimLetter(panes[i].items[j].label(), taken)
+			panes[i].items[j].key, taken = claimLetter(panes[i].items[j].name(), taken)
 		}
 	}
 }
@@ -94,9 +94,8 @@ func distributeRows(panes []pane, total int) []int {
 	}
 
 	if slack := total - sum; slack > 0 {
-		growable := growablePanes(panes)
-		for i, extra := range shares(slack, len(growable)) {
-			rows[growable[i]] += extra
+		for i, extra := range shares(slack, len(panes)) {
+			rows[i] += extra
 		}
 		return rows
 	}
@@ -105,24 +104,6 @@ func distributeRows(panes []pane, total int) []int {
 		sum--
 	}
 	return rows
-}
-
-func growablePanes(panes []pane) []int {
-	var scrollable, all []int
-	for i, p := range panes {
-		all = append(all, i)
-		if !launcherPane(p) {
-			scrollable = append(scrollable, i)
-		}
-	}
-	if len(scrollable) > 0 {
-		return scrollable
-	}
-	return all
-}
-
-func launcherPane(p pane) bool {
-	return len(p.items) > 0 && p.items[0].launcher
 }
 
 func shrinkTallest(rows []int) bool {
@@ -154,7 +135,7 @@ func scrollHint(start, count, rows int) string {
 }
 
 func (m model) paneSummary(p pane) string {
-	if launcherPane(p) || len(p.items) == 0 {
+	if len(p.items) == 0 {
 		return ""
 	}
 	running := 0
@@ -249,7 +230,7 @@ func (m model) paneRow(it item, selected, focused bool, width int) string {
 		key = it.key
 	}
 	name := layer(base, valueStyle).Bold(selected)
-	left := m.glyph(it, base) + space + accentLetter(it.label(), key, name)
+	left := m.glyph(it, base) + space + accentLetter(it.name(), key, name)
 
 	badge := ""
 	if selected && focused && m.modeIdx != 0 {

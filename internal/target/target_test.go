@@ -80,7 +80,7 @@ func TestShellWords(t *testing.T) {
 
 func TestMissingTargetsFallBackToTheHost(t *testing.T) {
 	targets := mustLoad(t, "")
-	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand || targets[0].Stats != nil {
+	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || targets[0].Stats != nil {
 		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
 	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
@@ -159,7 +159,7 @@ targets:
 	if shell, _ := local.Mode("shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
 		t.Errorf("shell argv = %q", shell.Argv)
 	}
-	if local.Group != DefaultGroup || local.Watch || local.Expand || local.Stats != nil {
+	if local.Group != DefaultGroup || local.Watch || local.Stats != nil {
 		t.Errorf("unset fields should take their defaults, got %+v", local)
 	}
 }
@@ -298,6 +298,30 @@ targets:`+host+`
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %s:\n%v", want, err)
 		}
+	}
+}
+
+func TestExpandIsReportedButHarmless(t *testing.T) {
+	targets, err := load(t, `
+profiles:
+  old:
+    expand: true
+targets:
+  - name: host
+    expand: true
+    modes: [{ name: shell }]
+  - { name: box, profile: old, modes: [{ name: shell }] }
+`)
+	if err == nil {
+		t.Fatal("expand must be reported")
+	}
+	for _, want := range []string{`profile "old"`, `target "host"`, "modes are picked with tab"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %s:\n%v", want, err)
+		}
+	}
+	if len(targets) != 2 {
+		t.Errorf("expand is ignored, so every target survives, got %d", len(targets))
 	}
 }
 
