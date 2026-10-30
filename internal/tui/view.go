@@ -315,7 +315,10 @@ func (m model) renderLogs() string {
 
 func (m model) renderFooter() string {
 	it := m.selected()
-	pairs := [][2]string{{"↵", "connect"}}
+	var pairs [][2]string
+	if it.name() != "" {
+		pairs = append(pairs, [2]string{"↵", "connect"})
+	}
 	if len(it.t.Modes) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}

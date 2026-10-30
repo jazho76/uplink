@@ -1548,3 +1548,30 @@ func TestConfigEditedReportsOnlyFailuresToStart(t *testing.T) {
 		}
 	}
 }
+
+func TestNoTargetsPointsAtTheConfig(t *testing.T) {
+	m, backend := newTestModel()
+	m.targets = nil
+	m.rebuild()
+	m = sized(m)
+
+	for _, k := range []string{"j", "k", "tab", "enter", "ctrl+s", "ctrl+x", "ctrl+l"} {
+		m = key(m, k)
+	}
+	if len(backend.sessions) != 0 || len(backend.hooks) != 0 || m.screen != screenList {
+		t.Errorf("keys with no target do nothing, ran %v and hooks %v", backend.sessions, backend.hooks)
+	}
+
+	view := ansi.Strip(m.View())
+	for _, want := range []string{"no targets", "^e to edit the config", "^e config"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the empty dashboard should show %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "connect") {
+		t.Errorf("with nothing selected, connect is not offered:\n%s", view)
+	}
+	if lines := strings.Split(m.View(), "\n"); len(lines) != 24 {
+		t.Errorf("the empty dashboard should fill the terminal, got %d lines", len(lines))
+	}
+}

@@ -47,30 +47,16 @@ type Spec struct {
 
 type document struct {
 	Profiles map[string]Spec `yaml:"profiles"`
-	Targets  *[]Spec         `yaml:"targets"`
+	Targets  []Spec          `yaml:"targets"`
 	Extra    map[string]any  `yaml:",inline"`
-}
-
-var defaultHost = Spec{
-	Name:  "host",
-	Group: "local",
-	Modes: []ModeSpec{
-		{Name: "tmux", Run: "tmux new-session -A -s host"},
-		{Name: "shell"},
-	},
 }
 
 func Load(path string) ([]Target, error) {
 	doc, err := read(path)
 	if err != nil {
-		targets, _ := resolveAll([]Spec{defaultHost}, nil)
-		return targets, err
+		return nil, err
 	}
-	specs := []Spec{defaultHost}
-	if doc.Targets != nil {
-		specs = *doc.Targets
-	}
-	return resolveAll(specs, doc.Profiles)
+	return resolveAll(doc.Targets, doc.Profiles)
 }
 
 func read(path string) (document, error) {

@@ -67,21 +67,20 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
 
-# targets:
-#   - name: host
-#     group: local
-#     stats: *linux
-#     modes:
-#       - { name: tmux, run: tmux new-session -A -s host }
-#       - { name: shell }
-#       - { name: top, run: htop }
-#   - { name: devbox, profile: lima }
-#   - name: box
-#     group: remotes
-#     via: ssh -t me@box.example
-#     modes:
-#       - { name: tmux, run: tmux new-session -A -s 0 }
-#       - { name: shell }
+targets:
+  - name: localhost
+    group: machines
+    # stats: *linux
+    modes:
+      - { name: tmux, run: "tmux new-session -A -s {name}" }
+      - { name: shell }
+  # - { name: devbox, profile: lima }
+  # - name: box
+  #   group: machines
+  #   via: ssh -t me@box.example
+  #   modes:
+  #     - { name: tmux, run: tmux new-session -A -s 0 }
+  #     - { name: shell }
 `
 
 var configCmd = &cobra.Command{
@@ -135,7 +134,7 @@ func editor() string {
 
 func checkConfig() error {
 	path := config.Path()
-	state := "not found, only the default host"
+	state := "not found, no targets"
 	if _, err := os.Stat(path); err == nil {
 		state = "found"
 	}

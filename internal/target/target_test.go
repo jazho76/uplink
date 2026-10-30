@@ -90,13 +90,17 @@ func TestShellWords(t *testing.T) {
 	}
 }
 
-func TestMissingTargetsFallBackToTheHost(t *testing.T) {
-	targets := mustLoad(t, "")
-	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || targets[0].Stats != nil {
-		t.Fatalf("an empty config should still offer the host, got %+v", targets)
+func TestEmptyConfigHasNoTargets(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty file":    "",
+		"only profiles": "profiles:\n  vm: { via: ssh vm }\n",
+	} {
+		if targets, err := load(t, body); err != nil || len(targets) != 0 {
+			t.Errorf("%s: want no targets and no error, got %v and %v", name, targets, err)
+		}
 	}
-	if got := modeNames(targets[0]); !slices.Equal(got, []string{"tmux", "shell"}) {
-		t.Errorf("default host modes = %v", got)
+	if targets, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err != nil || len(targets) != 0 {
+		t.Errorf("a missing file gives no targets and no error, got %v and %v", targets, err)
 	}
 }
 
@@ -402,10 +406,10 @@ targets:
 	}
 }
 
-func onlyDefaultHost(t *testing.T, targets []Target) {
+func noTargets(t *testing.T, targets []Target) {
 	t.Helper()
-	if len(targets) != 1 || targets[0].Name != defaultHost.Name {
-		t.Errorf("a refused config should leave only the default host, got %v", targets)
+	if len(targets) != 0 {
+		t.Errorf("a refused config should give no targets, got %v", targets)
 	}
 }
 
@@ -420,7 +424,7 @@ func TestUnknownFieldsRefuseTheConfig(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "line ") || !strings.Contains(err.Error(), "not found") {
 			t.Errorf("%s: an unknown field should be reported with its line, got %v", where, err)
 		}
-		onlyDefaultHost(t, targets)
+		noTargets(t, targets)
 	}
 }
 
@@ -429,7 +433,7 @@ func TestUnknownSectionsRefuseTheConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `unknown section "lima"`) {
 		t.Errorf("an unknown top-level key should be reported, got %v", err)
 	}
-	onlyDefaultHost(t, targets)
+	noTargets(t, targets)
 
 	if _, err := load(t, "x-anything: [1, 2]\ntargets:"+host); err != nil {
 		t.Errorf("x- keys hold anchors and are allowed, got %v", err)
@@ -441,21 +445,7 @@ func TestStatsMustBeAList(t *testing.T) {
 	if err == nil {
 		t.Error("stats: false should be refused")
 	}
-	onlyDefaultHost(t, targets)
-}
-
-func TestEmptyOrMissingConfigGivesTheDefaultHost(t *testing.T) {
-	targets, err := load(t, "")
-	if err != nil {
-		t.Errorf("an empty file is not an error, got %v", err)
-	}
-	onlyDefaultHost(t, targets)
-
-	targets, err = Load(filepath.Join(t.TempDir(), "missing.yaml"))
-	if err != nil {
-		t.Errorf("a missing file is not an error, got %v", err)
-	}
-	onlyDefaultHost(t, targets)
+	noTargets(t, targets)
 }
 
 func TestMalformedYAMLNamesTheFile(t *testing.T) {
@@ -467,5 +457,5 @@ func TestMalformedYAMLNamesTheFile(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), path) {
 		t.Errorf("malformed yaml should name the file, got %v", err)
 	}
-	onlyDefaultHost(t, targets)
+	noTargets(t, targets)
 }

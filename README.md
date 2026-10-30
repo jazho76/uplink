@@ -106,7 +106,7 @@ terminal emulator, bind your preferred shortcut to:
 The left side lists targets in the groups your config gives them, in the order
 they first appear. The right side shows the selected target's status and launch
 mode, its declared stats, and recent logs; `uplink config check` shows the exact
-command behind each mode. To see this machine's resources, give the host target
+command behind each mode. To see this machine's resources, give the `localhost` target
 `stats`, as in the example below.
 
 A target's status is checked while it is selected, and in the background for
@@ -133,8 +133,9 @@ Open the config in `$VISUAL`, `$EDITOR`, or `vi`:
 uplink config edit
 ```
 
-The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`.
-Without a `targets` section, Uplink offers only the host.
+The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`. The
+first `uplink config edit` creates it with a `localhost` target to start from.
+Uplink shows only the targets the config declares.
 
 ```yaml
 x-linux: &linux
@@ -166,19 +167,19 @@ profiles:
       - { name: shell }
 
 targets:
-  - name: host
-    group: local
+  - name: localhost
+    group: machines
     logs: journalctl --system -n 500 --no-pager -o short
     stats: *linux
     modes:
-      - { name: tmux, run: tmux new-session -A -s host }
+      - { name: tmux, run: "tmux new-session -A -s {name}" }
       - { name: shell }
       - { name: top, run: htop }
 
   - { name: devbox, profile: lima }
 
   - name: prod
-    group: remotes
+    group: machines
     via: ssh -t -i ~/.ssh/prod_ed25519 deploy@example.com
     modes:
       - { name: tmux, run: "bash -lc 'cd /srv/app && tmux new-session -A -s prod'" }
@@ -339,7 +340,8 @@ Target names must be unique and may only hold letters, digits, `.`, `_`, and
 
 Unknown fields are not ignored: a typo such as `vai:` or an unknown top-level
 section rejects the whole file, so a misspelled `via` never opens a local shell
-by mistake. The dashboard then offers only the default host and shows why.
+by mistake. The dashboard then lists no targets and shows why on the status
+line; `Ctrl+E` opens the config to fix it.
 
 ## Upgrade
 
