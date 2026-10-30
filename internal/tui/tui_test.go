@@ -32,7 +32,12 @@ func (f *fakeBackend) Stats(t target.Target) ([]probe.Reading, error) {
 	return readings, nil
 }
 
-var linuxMetrics = probe.Metrics{{Type: probe.TypeLoad}, {Type: probe.TypeMem}, {Type: probe.TypeDisk}, {Type: probe.TypeUptime}}
+var linuxMetrics = probe.Metrics{
+	{Type: probe.TypeGauge, Label: "load", Value: "x", Max: "x"},
+	{Type: probe.TypeGauge, Label: "memory", Value: "x", Max: "x", Unit: probe.UnitBytes},
+	{Type: probe.TypeGauge, Label: "disk", Value: "x", Max: "x", Unit: probe.UnitBytes},
+	{Type: probe.TypeText, Label: "up", Value: "x", Unit: probe.UnitSeconds},
+}
 
 func reading(m probe.Metric, value, max float64) probe.Reading {
 	return probe.Reading{Metric: m, Value: value, Max: max, OK: true}
@@ -899,13 +904,13 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m = focus(probed(m, "forge", true), "forge")
 	m.live["forge"] = liveEntry{at: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
 
-	if got := m.uptimeOf(m.selected()); got == "" {
-		t.Fatalf("a reachable target should report uptime")
+	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
+		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
 	}
 
 	m = focus(probed(m, "forge", false), "forge")
-	if got := m.uptimeOf(m.selected()); got != "" {
-		t.Errorf("a down target must not show the uptime from its last probe, got %q", got)
+	if preview := ansi.Strip(m.previewBody(60, 30)); strings.Contains(preview, "3d 4h") {
+		t.Errorf("a down target must not show the uptime from its last probe:\n%s", preview)
 	}
 	if preview := ansi.Strip(m.previewBody(60, 20)); !strings.Contains(preview, "unavailable") || strings.Contains(preview, "load") {
 		t.Errorf("a failed probe should say its readings are unavailable, naming no metric:\n%s", preview)
@@ -1501,7 +1506,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 	m = probed(probed(m, "forge", true), "tokyo", true)
 
 	changed := vm("forge")
-	changed.Stats = probe.Metrics{{Type: probe.TypeMem}}
+	changed.Stats = linuxMetrics[1:2]
 	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
 
 	next, _ := m.Update(configEditedMsg{})

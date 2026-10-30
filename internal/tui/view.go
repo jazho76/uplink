@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"fmt"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -104,7 +104,7 @@ func (m model) previewBody(width, height int) string {
 
 	var b strings.Builder
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.t))
-	b.WriteString(spread(header, labelStyle.Render(m.uptimeOf(it)), width, plainStyle) + "\n")
+	b.WriteString(header + "\n")
 
 	if len(it.t.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
@@ -153,9 +153,7 @@ func (m model) renderLive(name string, width int) string {
 		if r.Gauge() {
 			gauges = append(gauges, gaugeOf(r))
 		}
-		if r.Type != probe.TypeUptime {
-			labels = append(labels, r.Name())
-		}
+		labels = append(labels, r.Name())
 	}
 
 	indent := labelIndent(labels)
@@ -166,7 +164,7 @@ func (m model) renderLive(name string, width int) string {
 		case r.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
 		case r.Type == probe.TypeText:
-			fields = append(fields, field{r.Name(), valueStyle.Render(cmp.Or(r.Text, "?"))})
+			fields = append(fields, field{r.Name(), valueStyle.Render(cmp.Or(textOf(r), "?"))})
 		}
 	}
 
@@ -184,19 +182,30 @@ func gaugeOf(r probe.Reading) gaugeRow {
 	switch {
 	case !r.OK:
 		return gaugeRow{label: r.Name(), reading: "?", missing: true}
-	case r.Bytes():
+	case r.Unit == probe.UnitBytes:
 		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
 	default:
-		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: gaugeValue(r, r.Value) + " / " + number(r.Max)}
+		return gaugeRow{label: r.Name(), fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
 	}
 }
 
-func gaugeValue(r probe.Reading, v float64) string {
+func textOf(r probe.Reading) string {
 	switch {
-	case r.Bytes():
+	case r.Unit == "":
+		return r.Text
+	case !r.OK:
+		return ""
+	default:
+		return inUnit(r, r.Value)
+	}
+}
+
+func inUnit(r probe.Reading, v float64) string {
+	switch r.Unit {
+	case probe.UnitBytes:
 		return humanize.Bytes(uint64(v))
-	case r.Type == probe.TypeLoad:
-		return fmt.Sprintf("%.2f", v)
+	case probe.UnitSeconds:
+		return humanize.Duration(time.Duration(v * float64(time.Second)))
 	default:
 		return number(v)
 	}
@@ -259,21 +268,6 @@ func amount(used, total uint64) string {
 
 func unitOf(size string) string {
 	return strings.TrimLeft(size, "0123456789.")
-}
-
-func (m model) uptimeOf(it item) string {
-	e := m.live[it.name()]
-	if !e.statsOK || m.statusOf(it.t) != statusUp {
-		return ""
-	}
-	i := slices.IndexFunc(e.readings, func(r probe.Reading) bool { return r.Type == probe.TypeUptime && r.OK })
-	if i < 0 {
-		return ""
-	}
-	if up := humanize.Duration(e.readings[i].Uptime()); up != "" {
-		return "up " + up
-	}
-	return ""
 }
 
 func (m model) specFields(it item) []field {

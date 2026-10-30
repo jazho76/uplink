@@ -15,20 +15,16 @@ import (
 )
 
 const (
-	TypeLoad   = "load"
-	TypeMem    = "mem"
-	TypeDisk   = "disk"
-	TypeUptime = "uptime"
-	TypeGauge  = "gauge"
-	TypeText   = "text"
+	TypeGauge = "gauge"
+	TypeText  = "text"
 
-	UnitBytes = "bytes"
+	UnitBytes   = "bytes"
+	UnitSeconds = "seconds"
 )
 
 type Metric struct {
 	Type  string `yaml:"type"`
 	Label string `yaml:"label"`
-	Path  string `yaml:"path"`
 	Value string `yaml:"value"`
 	Max   string `yaml:"max"`
 	Unit  string `yaml:"unit"`
@@ -50,17 +46,15 @@ type rule struct {
 }
 
 var rules = map[string]rule{
-	TypeLoad:   {allowed: []string{"label"}},
-	TypeMem:    {allowed: []string{"label"}},
-	TypeDisk:   {allowed: []string{"label", "path"}},
-	TypeUptime: {},
-	TypeGauge:  {allowed: []string{"label", "value", "max", "unit"}, required: []string{"label", "value", "max"}},
-	TypeText:   {allowed: []string{"label", "value"}, required: []string{"label", "value"}},
+	TypeGauge: {allowed: []string{"label", "value", "max", "unit"}, required: []string{"label", "value", "max"}},
+	TypeText:  {allowed: []string{"label", "value", "unit"}, required: []string{"label", "value"}},
 }
 
 var (
-	types      = []string{TypeLoad, TypeMem, TypeDisk, TypeUptime, TypeGauge, TypeText}
-	fieldNames = []string{"label", "path", "value", "max", "unit"}
+	types        = []string{TypeGauge, TypeText}
+	units        = []string{UnitBytes, UnitSeconds}
+	fieldNames   = []string{"label", "value", "max", "unit"}
+	removedTypes = []string{"load", "mem", "disk", "uptime"}
 )
 
 func (m *Metrics) UnmarshalYAML(node *yaml.Node) error {
@@ -79,10 +73,13 @@ func (m *Metrics) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (m Metric) fields() map[string]string {
-	return map[string]string{"label": m.Label, "path": m.Path, "value": m.Value, "max": m.Max, "unit": m.Unit}
+	return map[string]string{"label": m.Label, "value": m.Value, "max": m.Max, "unit": m.Unit}
 }
 
 func (m Metric) Validate() error {
+	if slices.Contains(removedTypes, m.Type) {
+		return fmt.Errorf("%s is no longer built in; see the README for ready-made stats", m.Type)
+	}
 	r, ok := rules[m.Type]
 	if !ok {
 		return fmt.Errorf("type must be one of %s, got %q", strings.Join(types, ", "), m.Type)
@@ -98,30 +95,15 @@ func (m Metric) Validate() error {
 			return fmt.Errorf("%s needs a %s", m.Type, field)
 		}
 	}
-	if m.Unit != "" && m.Unit != UnitBytes {
-		return fmt.Errorf("unit must be %s", UnitBytes)
+	if m.Unit != "" && !slices.Contains(units, m.Unit) {
+		return fmt.Errorf("unit must be one of %s, got %q", strings.Join(units, ", "), m.Unit)
 	}
 	return nil
 }
 
-func (m Metric) Name() string {
-	switch {
-	case m.Label != "":
-		return m.Label
-	case m.Type == TypeMem:
-		return "memory"
-	case m.Type == TypeDisk && m.Path != "" && m.Path != "/":
-		return m.Path
-	default:
-		return m.Type
-	}
-}
+func (m Metric) Name() string { return cmp.Or(m.Label, m.Type) }
 
-func (m Metric) Gauge() bool { return m.Type != TypeUptime && m.Type != TypeText }
-
-func (m Metric) Bytes() bool {
-	return m.Type == TypeMem || m.Type == TypeDisk || m.Unit == UnitBytes
-}
+func (m Metric) Gauge() bool { return m.Type == TypeGauge }
 
 func (m Metric) constantMax() (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(m.Max), 64)
@@ -129,19 +111,7 @@ func (m Metric) constantMax() (float64, bool) {
 }
 
 func (m Metric) commands() (value, ceiling string) {
-	switch m.Type {
-	case TypeLoad:
-		return "cut -d ' ' -f 1 /proc/loadavg", "nproc"
-	case TypeMem:
-		return `awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo`,
-			`awk '/^MemTotal:/{print $2*1024}' /proc/meminfo`
-	case TypeDisk:
-		df := "df -P -k " + quote(cmp.Or(m.Path, "/"))
-		return df + " | awk 'NR==2{print $3*1024}'", df + " | awk 'NR==2{print $2*1024}'"
-	case TypeUptime:
-		return "cut -d ' ' -f 1 /proc/uptime", ""
-	}
-	if _, constant := m.constantMax(); constant {
+	if _, constant := m.constantMax(); m.Max == "" || constant {
 		return m.Value, ""
 	}
 	return m.Value, m.Max
@@ -192,9 +162,9 @@ func Parse(out string, metrics Metrics) []Reading {
 		r := Reading{Metric: m, Text: values[i]}
 		value, valueErr := strconv.ParseFloat(values[i], 64)
 		switch {
-		case m.Type == TypeText:
+		case m.Type == TypeText && m.Unit == "":
 			r.OK = r.Text != ""
-		case m.Type == TypeUptime:
+		case m.Type == TypeText:
 			r.Value, r.OK = value, valueErr == nil
 		default:
 			ceiling, constant := m.constantMax()
@@ -214,10 +184,6 @@ func (r Reading) Fraction() float64 {
 		return 0
 	}
 	return r.Value / r.Max
-}
-
-func (r Reading) Uptime() time.Duration {
-	return time.Duration(r.Value) * time.Second
 }
 
 func Run(limit time.Duration, metrics Metrics, transport ...string) ([]Reading, error) {

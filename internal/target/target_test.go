@@ -80,7 +80,7 @@ func TestShellWords(t *testing.T) {
 
 func TestMissingTargetsFallBackToTheHost(t *testing.T) {
 	targets := mustLoad(t, "")
-	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand || len(targets[0].Stats) != 4 {
+	if len(targets) != 1 || targets[0].Name != "host" || targets[0].Group != "local" || !targets[0].Expand || targets[0].Stats != nil {
 		t.Fatalf("an empty config should still offer the host, got %+v", targets)
 	}
 	if got := targets[0].ModeNames(); !slices.Equal(got, []string{"tmux", "shell"}) {
@@ -96,7 +96,7 @@ profiles:
     watch: true
     via: ssh -F ~/.lima/{name}/ssh.config lima-{name}
     logs: tail ~/.lima/{name}/serial.log
-    stats: [{ type: load }, { type: gauge, label: jobs, value: "jobs {name}", max: 8 }]
+    stats: [{ type: text, label: up, unit: seconds, value: "uptime {name}" }, { type: gauge, label: jobs, value: "jobs {name}", max: 8 }]
     modes:
       - { name: tmux, run: "tmux new-session -A -s {name}" }
       - { name: shell }
@@ -115,7 +115,7 @@ targets:`+host+`
 	if forge.Group != "vms" || !forge.Watch || len(forge.Stats) != 2 {
 		t.Errorf("forge should inherit group, watch and stats, got %+v", forge)
 	}
-	if got := forge.Stats[1].Value; got != "jobs forge" {
+	if got := forge.Stats[0].Value + ", " + forge.Stats[1].Value; got != "uptime forge, jobs forge" {
 		t.Errorf("metric commands should interpolate the name, got %q", got)
 	}
 	wantVia := []string{"ssh", "-F", filepath.Join(home, ".lima/forge/ssh.config"), "lima-forge"}
@@ -419,7 +419,7 @@ targets:`+host+`
 	if err == nil {
 		t.Fatal("broken stats must be reported")
 	}
-	for _, want := range []string{`"broken": stats #2: gauge needs a value`, "use [] for none"} {
+	for _, want := range []string{`"broken": stats #1: load is no longer built in`, "use [] for none"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q:\n%v", want, err)
 		}
@@ -431,7 +431,7 @@ targets:`+host+`
 
 func TestAnchoredStatsAreShared(t *testing.T) {
 	targets := mustLoad(t, `
-x-linux: &linux [{ type: load }, { type: mem }]
+x-linux: &linux [{ type: text, label: a, value: x }, { type: text, label: b, value: y }]
 targets:
   - { name: one, stats: *linux, modes: [{ name: shell }] }
   - { name: two, stats: *linux, modes: [{ name: shell }] }

@@ -33,14 +33,27 @@ const configTemplate = `# uplink config. Each target is a machine you can open a
 # watch   true polls status in the background, not only while selected.
 # expand  true lists each mode as its own row.
 # stats   metrics shown while selected, measured in one probe through exec:
-#         load, mem, disk (path), uptime, gauge (label, value, max, unit)
-#         and text (label, value). Left out means none.
+#         gauge (label, value, max, unit) and text (label, value, unit).
+#         unit is bytes or seconds. Left out means none. The README has a
+#         macOS list.
 # modes   ways to enter; the first is the default. A mode without run opens
 #         the user's shell. Every session returns to the dashboard.
 #
 # A profile holds shared fields; {name} becomes the target's name.
 
-# x-linux: &linux [{ type: load }, { type: mem }, { type: disk }, { type: uptime }]
+# x-linux: &linux
+#   - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
+#   - { type: gauge, label: load, value: cut -d ' ' -f 1 /proc/loadavg, max: nproc }
+#   - type: gauge
+#     label: memory
+#     unit: bytes
+#     value: awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo
+#     max: awk '/^MemTotal:/{print $2*1024}' /proc/meminfo
+#   - type: gauge
+#     label: disk
+#     unit: bytes
+#     value: df -P -k / | awk 'NR==2{print $3*1024}'
+#     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
 # profiles:
 #   lima:

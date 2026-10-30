@@ -52,7 +52,6 @@ var defaultHost = Spec{
 	Name:   "host",
 	Group:  "local",
 	Expand: new(true),
-	Stats:  probe.Metrics{{Type: probe.TypeLoad}, {Type: probe.TypeMem}, {Type: probe.TypeDisk}, {Type: probe.TypeUptime}},
 	Modes: []ModeSpec{
 		{Name: "tmux", Run: "tmux new-session -A -s host"},
 		{Name: "shell"},
@@ -230,7 +229,7 @@ func (s Spec) interpolate() Spec {
 	if s.Stats != nil {
 		stats := make(probe.Metrics, len(s.Stats))
 		for i, m := range s.Stats {
-			m.Path, m.Value, m.Max = fill(m.Path), fill(m.Value), fill(m.Max)
+			m.Value, m.Max = fill(m.Value), fill(m.Max)
 			stats[i] = m
 		}
 		s.Stats = stats

@@ -20,21 +20,16 @@ func runLocally(t *testing.T, metrics Metrics) []Reading {
 	return readings
 }
 
-func TestBuiltinsReportThisMachine(t *testing.T) {
-	readings := runLocally(t, Metrics{{Type: TypeLoad}, {Type: TypeMem}, {Type: TypeDisk}, {Type: TypeDisk, Path: "/tmp"}, {Type: TypeUptime}})
-	load, mem, root, tmp, uptime := readings[0], readings[1], readings[2], readings[3], readings[4]
-
-	if !load.OK || load.Max < 1 {
-		t.Errorf("load should carry the core count as its max, got %+v", load)
+func TestUnitTextReadsANumber(t *testing.T) {
+	readings := runLocally(t, Metrics{
+		{Type: TypeText, Label: "up", Value: "echo 3600", Unit: UnitSeconds},
+		{Type: TypeText, Label: "up", Value: "echo soon", Unit: UnitSeconds},
+	})
+	if r := readings[0]; !r.OK || r.Value != 3600 {
+		t.Errorf("text with a unit should read its output as a number, got %+v", r)
 	}
-	if !mem.OK || mem.Max == 0 || mem.Value > mem.Max {
-		t.Errorf("memory should be used out of total, got %+v", mem)
-	}
-	if !root.OK || root.Max == 0 || !tmp.OK || tmp.Max == 0 {
-		t.Errorf("disk should measure its path, got %+v and %+v", root, tmp)
-	}
-	if !uptime.OK || uptime.Uptime() <= 0 {
-		t.Errorf("uptime should be positive, got %+v", uptime)
+	if r := readings[1]; r.OK {
+		t.Errorf("text with a unit and no number is missing, got %+v", r)
 	}
 }
 
@@ -60,7 +55,7 @@ func TestBrokenMetricsDoNotSpoilTheRest(t *testing.T) {
 		{Type: TypeGauge, Label: "fails", Value: "exit 1", Max: "10"},
 		{Type: TypeText, Label: "greedy", Value: "cat"},
 		{Type: TypeGauge, Label: "words", Value: "echo many", Max: "10"},
-		{Type: TypeDisk, Path: "/no/such/path"},
+		{Type: TypeText, Label: "up", Value: "exit 1", Unit: UnitSeconds},
 		{Type: TypeText, Label: "after", Value: "echo still here"},
 	})
 	for i, r := range readings[:4] {
@@ -103,7 +98,7 @@ func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
 }
 
 func TestParseIgnoresNoise(t *testing.T) {
-	metrics := Metrics{{Type: TypeLoad}, {Type: TypeUptime}}
+	metrics := Metrics{{Type: TypeGauge, Label: "load", Value: "x", Max: "x"}, {Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds}}
 	readings := Parse("motd banner\n0 value 0.5\n7 value 1\nx max 2\n0 max 4\n1 value nope\n", metrics)
 	if r := readings[0]; !r.OK || r.Value != 0.5 || r.Max != 4 {
 		t.Errorf("load = %+v", r)
@@ -115,7 +110,7 @@ func TestParseIgnoresNoise(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	for _, m := range []Metric{
-		{Type: TypeLoad}, {Type: TypeMem, Label: "ram"}, {Type: TypeDisk, Path: "/srv"}, {Type: TypeUptime},
+		{Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds},
 		{Type: TypeGauge, Label: "gpu", Value: "x", Max: "100", Unit: UnitBytes},
 		{Type: TypeText, Label: "agents", Value: "x"},
 	} {
@@ -125,14 +120,14 @@ func TestValidate(t *testing.T) {
 	}
 
 	for want, m := range map[string]Metric{
-		"type must be one of":   {Type: "cpu"},
-		"load takes no path":    {Type: TypeLoad, Path: "/"},
-		"uptime takes no label": {Type: TypeUptime, Label: "up"},
-		"gauge needs a max":     {Type: TypeGauge, Label: "gpu", Value: "x"},
-		"gauge needs a label":   {Type: TypeGauge, Value: "x", Max: "1"},
-		"text needs a value":    {Type: TypeText, Label: "x"},
-		"text takes no max":     {Type: TypeText, Label: "x", Value: "y", Max: "1"},
-		"unit must be bytes":    {Type: TypeGauge, Label: "x", Value: "y", Max: "1", Unit: "percent"},
+		"type must be one of":                {Type: "cpu"},
+		"load is no longer built in":         {Type: "load"},
+		"uptime is no longer built in":       {Type: "uptime"},
+		"gauge needs a max":                  {Type: TypeGauge, Label: "gpu", Value: "x"},
+		"gauge needs a label":                {Type: TypeGauge, Value: "x", Max: "1"},
+		"text needs a value":                 {Type: TypeText, Label: "x"},
+		"text takes no max":                  {Type: TypeText, Label: "x", Value: "y", Max: "1"},
+		"unit must be one of bytes, seconds": {Type: TypeGauge, Label: "x", Value: "y", Max: "1", Unit: "percent"},
 	} {
 		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%+v: want %q, got %v", m, want, err)
@@ -142,8 +137,7 @@ func TestValidate(t *testing.T) {
 
 func TestNames(t *testing.T) {
 	for want, m := range map[string]Metric{
-		"load": {Type: TypeLoad}, "memory": {Type: TypeMem}, "disk": {Type: TypeDisk, Path: "/"},
-		"/srv": {Type: TypeDisk, Path: "/srv"}, "ram": {Type: TypeMem, Label: "ram"},
+		"text": {Type: TypeText}, "gpu": {Type: TypeGauge, Label: "gpu"},
 	} {
 		if got := m.Name(); got != want {
 			t.Errorf("%+v: name %q, want %q", m, got, want)
@@ -161,7 +155,7 @@ func TestMetricsDecoding(t *testing.T) {
 	if err := yaml.Unmarshal([]byte("stats: false"), &spec); err == nil || !strings.Contains(err.Error(), "use [] for none") {
 		t.Errorf("the old boolean should point at the new form, got %v", err)
 	}
-	if err := yaml.Unmarshal([]byte("x: &l [{ type: load }]\nstats: *l"), &spec); err != nil || len(spec.Stats) != 1 {
+	if err := yaml.Unmarshal([]byte("x: &l [{ type: text, label: a, value: b }]\nstats: *l"), &spec); err != nil || len(spec.Stats) != 1 {
 		t.Errorf("an alias should decode: %v %#v", err, spec.Stats)
 	}
 }

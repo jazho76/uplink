@@ -144,7 +144,19 @@ The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`.
 Without a `targets` section, Uplink offers only the host.
 
 ```yaml
-x-linux: &linux [{ type: load }, { type: mem }, { type: disk }, { type: uptime }]
+x-linux: &linux
+  - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
+  - { type: gauge, label: load, value: cut -d ' ' -f 1 /proc/loadavg, max: nproc }
+  - type: gauge
+    label: memory
+    unit: bytes
+    value: awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo
+    max: awk '/^MemTotal:/{print $2*1024}' /proc/meminfo
+  - type: gauge
+    label: disk
+    unit: bytes
+    value: df -P -k / | awk 'NR==2{print $3*1024}'
+    max: df -P -k / | awk 'NR==2{print $2*1024}'
 
 profiles:
   lima:
@@ -269,8 +281,7 @@ whole; `stats: []` turns an inherited list off.
 
 ```yaml
 stats:
-  - { type: load }
-  - { type: disk, path: /srv }
+  - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
   - { type: gauge, label: gpu, value: "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", max: 100 }
   - { type: gauge, label: cache, value: du -sb ~/.cache | cut -f1, max: df -B1 --output=size ~ | tail -1, unit: bytes }
   - { type: text, label: agents, value: pgrep -c claude }
@@ -278,18 +289,40 @@ stats:
 
 | Type | Fields | Shows |
 | --- | --- | --- |
-| `load` | `label` | Load average out of the core count |
-| `mem` | `label` | Used memory out of total |
-| `disk` | `path` (default `/`), `label` | Used space out of the filesystem's size |
-| `uptime` | none | Uptime, next to the target's name |
 | `gauge` | `label`, `value`, `max`, `unit` | `value` out of `max` as a bar |
-| `text` | `label`, `value` | `value`'s output as is |
+| `text` | `label`, `value`, `unit` | `value`'s output as is, or formatted by `unit` |
 
 `value` and `max` are shell commands run on the target; the first line of
 their output is used. A `max` that is a plain number is used as is. `unit:
-bytes` formats both as sizes. `{name}` works in `value`, `max`, and `path`.
+bytes` formats numbers as sizes and `unit: seconds` as durations; a value that
+is not a number then shows `?`. `{name}` works in `value` and `max`.
 
-The built-ins read `/proc`, so they need a Linux target. All metrics travel in
+Uplink has no built-in metrics, because what to run depends on the target's OS.
+The `x-linux` list in the example above covers Linux targets. For macOS
+targets:
+
+```yaml
+x-macos: &macos
+  - type: text
+    label: up
+    unit: seconds
+    value: echo $(( $(date +%s) - $(sysctl -n kern.boottime | awk '{print $4}' | tr -d ,) ))
+  - { type: gauge, label: load, value: "sysctl -n vm.loadavg | awk '{print $2}'", max: sysctl -n hw.ncpu }
+  - type: gauge
+    label: memory
+    unit: bytes
+    value: >-
+      vm_stat | awk '/page size of/{p=$8} /Pages active/{a=$3} /Pages wired down/{w=$4}
+      /occupied by compressor/{c=$5} END{print (a+w+c)*p}'
+    max: sysctl -n hw.memsize
+  - type: gauge
+    label: disk
+    unit: bytes
+    value: df -P -k /System/Volumes/Data | awk 'NR==2{print $3*1024}'
+    max: df -P -k /System/Volumes/Data | awk 'NR==2{print $2*1024}'
+```
+
+All metrics travel in
 one script piped through `exec` into `sh`, one round trip per refresh, but each
 command runs in its own `sh -c` with no stdin and, where the target has
 `timeout`, a 5 second limit. A metric that fails, hangs, or prints no number
