@@ -78,10 +78,15 @@ values. Its output goes through the same `resolve()` as config targets.
 
 ```go
 type Provider interface {
-    Name() string
-    Discover(ctx context.Context, entry Entry) ([]target.Spec, error)
+    target.Source   // Name() string, Specs() ([]target.Spec, error)
+    Default() bool  // runs when the config has no discover section
 }
 ```
+
+- Each provider is its own package under `internal/provider/`. It imports
+  core packages; core never imports a provider.
+- `cmd` holds the one list of available providers. `inventory` matches
+  `discover:` entries to it by name, and applies an entry's `profile`.
 
 - Providers shell out to the tool's CLI and parse its machine-readable output
   (`limactl list --json`, `docker ps --format json`). No SDKs, no reading the
@@ -94,7 +99,8 @@ type Provider interface {
 ### 7.2 Facts and preferences
 
 A provider fills only what it knows as facts about an instance, plus
-reasonable defaults. Config owns preferences.
+reasonable defaults. Config owns preferences: facts beat the entry's
+profile, which beats the provider's defaults.
 
 ## 8. Portability
 

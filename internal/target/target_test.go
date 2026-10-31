@@ -23,7 +23,15 @@ func load(t *testing.T, body string) ([]Target, error) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return Load(path)
+	return loadConfig(path)
+}
+
+func loadConfig(path string) ([]Target, error) {
+	doc, err := Read(path)
+	if err != nil {
+		return nil, err
+	}
+	return Merge(doc.Profiles, doc.Config())
 }
 
 func mustLoad(t *testing.T, body string) []Target {
@@ -100,7 +108,7 @@ func TestEmptyConfigHasNoTargets(t *testing.T) {
 			t.Errorf("%s: want no targets and no error, got %v and %v", name, targets, err)
 		}
 	}
-	if targets, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err != nil || len(targets) != 0 {
+	if targets, err := loadConfig(filepath.Join(t.TempDir(), "missing.yaml")); err != nil || len(targets) != 0 {
 		t.Errorf("a missing file gives no targets and no error, got %v and %v", targets, err)
 	}
 }
@@ -109,6 +117,41 @@ func TestConfigTargetsAreIdentifiedByName(t *testing.T) {
 	got := find(t, mustLoad(t, "targets:"+host), "host").ID
 	if want := (ID{Source: ConfigSource, Key: "host"}); got != want {
 		t.Errorf("want %+v, got %+v", want, got)
+	}
+}
+
+func TestDiscoverAbsentDiffersFromEmpty(t *testing.T) {
+	for body, wantNil := range map[string]bool{"targets: []\n": true, "discover: []\n": false} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		doc, err := Read(path)
+		if err != nil || (doc.Discover == nil) != wantNil {
+			t.Errorf("%q: want nil discover %v, got %#v and %v", body, wantNil, doc.Discover, err)
+		}
+	}
+}
+
+func TestDefaultsSitBelowTheProfile(t *testing.T) {
+	profiles := map[string]Spec{"mine": {Group: "work"}}
+	discovered := fakeSource{name: "lima", specs: []Spec{{
+		Name:     "dev",
+		Display:  "Dev box",
+		Profile:  "mine",
+		Defaults: &Spec{Group: "vms", Logs: "tail {name}.log", Modes: shell},
+	}}}
+
+	targets, err := Merge(profiles, discovered)
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("want one target, got %v and %v", targets, err)
+	}
+	got := targets[0]
+	if got.Group != "work" || got.Logs != "tail dev.log" {
+		t.Errorf("the profile beats defaults, which still fill the rest, got %q and %q", got.Group, got.Logs)
+	}
+	if got.Name != "Dev box" || got.ID.Key != "dev" {
+		t.Errorf("display changes the name only, got %q keyed %q", got.Name, got.ID.Key)
 	}
 }
 
@@ -507,6 +550,8 @@ func TestUnknownFieldsRefuseTheConfig(t *testing.T) {
 		"mode":    "targets:\n  - { name: prod, modes: [{ name: shell, rnu: bash }] }\n",
 		"stat":    "targets:\n  - { name: prod, stats: [{ type: text, label: a, value: b, lable: c }], modes: [{ name: shell }] }\n",
 		"profile": "profiles:\n  vm: { vai: ssh vm }\ntargets:\n  - { name: prod, modes: [{ name: shell }] }\n",
+		"display": "targets:\n  - { name: prod, display: db, modes: [{ name: shell }] }\n",
+		"entry":   "discover:\n  - { provider: local, filter: x }\n",
 	} {
 		targets, err := load(t, body)
 		if err == nil || !strings.Contains(err.Error(), "line ") || !strings.Contains(err.Error(), "not found") {
@@ -541,7 +586,7 @@ func TestMalformedYAMLNamesTheFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("targets: [ { name: host\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	targets, err := Load(path)
+	targets, err := loadConfig(path)
 	if err == nil || !strings.Contains(err.Error(), path) {
 		t.Errorf("malformed yaml should name the file, got %v", err)
 	}

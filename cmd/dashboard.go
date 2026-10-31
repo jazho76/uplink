@@ -4,12 +4,13 @@ import (
 	"os/exec"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/tui"
 )
 
 func dashboard() error {
-	load := func() ([]target.Target, error) { return target.Load(config.Path()) }
+	load := func() ([]target.Target, error) { return inventory.Load(config.Path(), providers) }
 	edit := func() (*exec.Cmd, error) {
 		path, err := config.Ensure()
 		if err != nil {

@@ -1,27 +1,18 @@
 package target
 
 import (
-	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/jazho76/uplink/internal/stats"
-	"gopkg.in/yaml.v3"
 )
 
-const (
-	namePlaceholder = "{name}"
-	anchorPrefix    = "x-"
-)
+const namePlaceholder = "{name}"
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -43,60 +34,9 @@ type Spec struct {
 	Watch   *bool          `yaml:"watch"`
 	Stats   []stats.Metric `yaml:"stats"`
 	Modes   []ModeSpec     `yaml:"modes"`
-}
 
-type document struct {
-	Profiles map[string]Spec `yaml:"profiles"`
-	Targets  []Spec          `yaml:"targets"`
-	Extra    map[string]any  `yaml:",inline"`
-}
-
-func Load(path string) ([]Target, error) {
-	doc, err := read(path)
-	if err != nil {
-		return nil, err
-	}
-	return Merge(doc.Profiles, configSource(doc.Targets))
-}
-
-func read(path string) (document, error) {
-	var doc document
-	data, err := os.ReadFile(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return doc, nil
-	case err != nil:
-		return doc, err
-	}
-
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&doc); err != nil && !errors.Is(err, io.EOF) {
-		return document{}, decodeError(path, err)
-	}
-
-	var errs []error
-	for _, key := range slices.Sorted(maps.Keys(doc.Extra)) {
-		if !strings.HasPrefix(key, anchorPrefix) {
-			errs = append(errs, fmt.Errorf("%s: unknown section %q; use profiles, targets, or an %s key for anchors", path, key, anchorPrefix))
-		}
-	}
-	if len(errs) > 0 {
-		return document{}, errors.Join(errs...)
-	}
-	return doc, nil
-}
-
-func decodeError(path string, err error) error {
-	var typeErr *yaml.TypeError
-	if !errors.As(err, &typeErr) {
-		return fmt.Errorf("%s: %w", path, err)
-	}
-	errs := make([]error, len(typeErr.Errors))
-	for i, message := range typeErr.Errors {
-		errs[i] = fmt.Errorf("%s: %s", path, message)
-	}
-	return errors.Join(errs...)
+	Display  string `yaml:"-"`
+	Defaults *Spec  `yaml:"-"`
 }
 
 func resolve(source string, spec Spec, profiles map[string]Spec) (Target, error) {
@@ -112,6 +52,9 @@ func resolve(source string, spec Spec, profiles map[string]Spec) (Target, error)
 			return Target{}, fmt.Errorf("unknown profile %q", spec.Profile)
 		}
 		spec = spec.over(profile)
+	}
+	if spec.Defaults != nil {
+		spec = spec.over(*spec.Defaults)
 	}
 	spec = spec.interpolate()
 
@@ -131,7 +74,7 @@ func resolve(source string, spec Spec, profiles map[string]Spec) (Target, error)
 
 	t := Target{
 		ID:     ID{Source: source, Key: spec.Name},
-		Name:   spec.Name,
+		Name:   cmp.Or(spec.Display, spec.Name),
 		Group:  cmp.Or(spec.Group, DefaultGroup),
 		Via:    via,
 		Exec:   exec,

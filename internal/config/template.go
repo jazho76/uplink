@@ -53,13 +53,12 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
 
-targets:
-  - name: localhost
-    group: machines
-    # stats: *linux
-    modes:
-      - { name: tmux, run: "tmux new-session -A -s {name}" }
-      - { name: shell }
+# Providers list machines that other tools already know about. Without a
+# discover section, local (this machine) runs; "discover: []" turns discovery
+# off. An entry's profile overrides the provider's group, stats, logs and modes.
+# discover: []
+
+# targets:
   # - { name: devbox, profile: lima }
   # - name: box
   #   group: machines

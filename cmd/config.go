@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/run"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
@@ -49,16 +50,20 @@ func init() {
 
 func checkConfig() error {
 	path := config.Path()
-	state := "not found, no targets"
+	state := "not found"
 	if _, err := os.Stat(path); err == nil {
 		state = "found"
 	}
 	fmt.Printf("config %s (%s)\n", path, state)
 
-	resolved, problems := target.Load(path)
+	resolved, problems := inventory.Load(path, providers)
 	for _, t := range resolved {
 		fmt.Println()
-		header := t.ID.String() + "  " + t.Group
+		header := t.ID.String()
+		if t.Name != t.ID.Key {
+			header += " (" + t.Name + ")"
+		}
+		header += "  " + t.Group
 		if t.Watch {
 			header += "  watch"
 		}

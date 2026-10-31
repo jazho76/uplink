@@ -102,11 +102,11 @@ terminal emulator, bind your preferred shortcut to:
 
 ## The dashboard
 
-The left side lists targets in the groups your config gives them, in the order
+The left side lists targets in their groups, in the order
 they first appear. The right side shows the selected target's status and launch
 mode, its declared stats, and recent logs; `uplink config check` shows the exact
-command behind each mode. To see this machine's resources, give the `localhost` target
-`stats`, as in the example below.
+command behind each mode. This machine is listed by default, with stats for its
+OS; see [Discovery](#discovery).
 
 A target's status is checked while it is selected, and in the background for
 targets with `watch: true`; others show as unknown until you visit them. When a
@@ -133,8 +133,9 @@ uplink config edit
 ```
 
 The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`. The
-first `uplink config edit` creates it with a `localhost` target to start from.
-Uplink shows only the targets the config declares.
+first `uplink config edit` creates it from a commented template. Uplink shows
+the machines its providers discover, this one by default, and the targets the
+config declares.
 
 ```yaml
 x-linux: &linux
@@ -166,15 +167,6 @@ profiles:
       - { name: shell }
 
 targets:
-  - name: localhost
-    group: machines
-    logs: journalctl --system -n 500 --no-pager -o short
-    stats: *linux
-    modes:
-      - { name: tmux, run: "tmux new-session -A -s {name}" }
-      - { name: shell }
-      - { name: top, run: htop }
-
   - { name: devbox, profile: lima }
 
   - name: prod
@@ -258,8 +250,25 @@ profile, such as a function or `PATH` entry, ask for one:
 A profile holds any target field except `name`. A target with `profile: lima`
 takes every field it leaves unset from the profile; `modes` replace the
 profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
-`logs`, and `run` becomes the target's name. Inside a flow mapping, quote values
+`logs`, and `run` becomes the target's name (for a discovered target, its key,
+such as `localhost`). Inside a flow mapping, quote values
 that contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
+
+### Discovery
+
+Providers list machines that other tools already know about. Each discovered
+target is named `<provider>/<key>` in `uplink config check`.
+
+| Provider | Lists | On by default |
+| --- | --- | --- |
+| `local` | This machine, shown by its hostname, in `machines`, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
+
+Without a `discover` section, the providers that are on by default run. A
+`discover` list runs exactly the providers it names; `discover: []` turns
+discovery off. Discovered targets are listed before the config's. An entry's
+`profile` overrides what the provider picks as
+defaults (group, stats, modes, logs), never what it knows as facts (the name,
+how to reach the machine).
 
 To share values between targets that do not share a profile, define a YAML
 anchor under a top-level key starting with `x-`, such as the `x-linux` list
@@ -288,9 +297,9 @@ their output is used. A `max` that is a plain number is used as is. `unit:
 bytes` formats numbers as sizes and `unit: seconds` as durations; a value that
 is not a number then shows `?`. `{name}` works in `value` and `max`.
 
-Uplink has no built-in metrics, because what to run depends on the target's OS.
-The `x-linux` list in the example above covers Linux targets. For macOS
-targets:
+Discovered targets come with metrics for their OS. For config targets, what to
+run depends on the target's OS: the `x-linux` list in the example above covers
+Linux targets. For macOS targets:
 
 ```yaml
 x-macos: &macos
