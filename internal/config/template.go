@@ -48,9 +48,10 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #       - { name: shell }
 
 # Providers list machines that other tools already know about. Without a
-# discover section, local (this machine) runs, and lima (its VMs) when limactl
-# is installed; "discover: []" turns discovery off. An entry's profile
-# overrides the provider's group, stats, logs and modes.
+# discover section, local (this machine) runs, lima (its VMs) when limactl is
+# installed, and docker (its containers) when the daemon is running;
+# "discover: []" turns discovery off. An entry's profile overrides the
+# provider's group, stats, logs and modes.
 # discover: []
 
 # targets:
