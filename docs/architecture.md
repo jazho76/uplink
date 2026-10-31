@@ -34,7 +34,7 @@ The dashboard renders by capability: no `stats` means no live block, no `logs`
 means no log tail, the footer offers only the keys the target supports.
 
 Runtime state (up, down, starting, readings, timestamps) is not part of the
-target. It lives in the dashboard, keyed by target name.
+target. It lives in the dashboard, keyed by target ID.
 
 ## 3. From config to Target
 

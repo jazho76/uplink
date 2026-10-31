@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 const (
@@ -93,7 +94,7 @@ func (m model) renderPreview(width, height int) string {
 
 func (m model) previewBody(width, height int) string {
 	it := m.selected()
-	if it.name() == "" {
+	if it.empty() {
 		return ""
 	}
 
@@ -103,7 +104,7 @@ func (m model) previewBody(width, height int) string {
 
 	if len(it.target.Stats) > 0 {
 		b.WriteString("\n" + rule("live", width))
-		b.WriteString(m.renderLive(it.name(), width))
+		b.WriteString(m.renderLive(it.id(), width))
 	}
 
 	if logs := m.logsFor(it); logs != "" {
@@ -124,14 +125,14 @@ func (m model) previewBody(width, height int) string {
 }
 
 func (m model) logsFor(it item) string {
-	if m.logPeek.name != it.name() {
+	if m.logPeek.id != it.id() {
 		return ""
 	}
 	return m.logPeek.text
 }
 
-func (m model) renderLive(name string, width int) string {
-	e := m.live[name]
+func (m model) renderLive(id target.ID, width int) string {
+	e := m.live[id]
 	if e.statsAt.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
@@ -314,7 +315,7 @@ func (m model) renderLogs() string {
 func (m model) renderFooter() string {
 	it := m.selected()
 	var pairs [][2]string
-	if it.name() != "" {
+	if !it.empty() {
 		pairs = append(pairs, [2]string{"↵", "connect"})
 	}
 	if len(it.target.Modes) > 1 {

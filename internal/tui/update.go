@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 const (
@@ -29,8 +30,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.viewLogsCmd()
 
 	case logPeekMsg:
-		if msg.name == m.selected().name() {
-			m.logPeek = peek{name: msg.name, text: msg.text, at: time.Now()}
+		if msg.id == m.selected().id() {
+			m.logPeek = peek{id: msg.id, text: msg.text, at: time.Now()}
 		}
 		return m, nil
 
@@ -45,27 +46,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.checkSelected(), m.peekSelectedLogs(), m.checkWatched(), liveTickCmd())
 
 	case liveMsg:
-		m.live[msg.name] = m.settle(msg)
+		m.live[msg.id] = m.settle(msg)
 		return m, nil
 
 	case hookDoneMsg:
 		connect := msg.action == statusStarting && msg.err == nil &&
-			m.connectAfterStart == msg.name && m.selected().name() == msg.name
-		if m.connectAfterStart == msg.name {
-			m.connectAfterStart = ""
+			m.connectAfterStart == msg.id && m.selected().id() == msg.id
+		if m.connectAfterStart == msg.id {
+			m.connectAfterStart = target.ID{}
 		}
-		e := m.live[msg.name]
+		e := m.live[msg.id]
 		e.action, e.statsAt = "", time.Time{}
 		e.epoch++
-		m.live[msg.name] = e
-		t, ok := m.targetNamed(msg.name)
+		m.live[msg.id] = e
+		t, ok := m.targetByID(msg.id)
 		if msg.err != nil {
-			m.notice = fmt.Sprintf("%s %s failed: %v", m.hookFor(t, msg.action).verb, msg.name, msg.err)
+			m.notice = fmt.Sprintf("%s %s failed: %v", m.hookFor(t, msg.action).verb, msg.id, msg.err)
 		}
 		if !ok {
 			return m, nil
 		}
-		recheck := m.check(t, t.Name == m.selected().name())
+		recheck := m.check(t, t.ID == m.selected().id())
 		if connect {
 			return m, tea.Batch(recheck, m.session())
 		}
@@ -76,7 +77,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case execDoneMsg:
 		m.notice = msg.notice
-		m.markStale(m.selected().name())
+		m.markStale(m.selected().id())
 		return m, m.refreshSelected()
 
 	case tea.KeyMsg:
@@ -157,15 +158,15 @@ func (m model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) connect() (tea.Model, tea.Cmd) {
 	it := m.selected()
-	if it.name() == "" {
+	if it.empty() {
 		return m, nil
 	}
 
-	switch e := m.live[it.name()]; {
+	switch e := m.live[it.id()]; {
 	case e.action != "":
 		return m, nil
 	case e.state == statusDown && it.target.Up != "":
-		m.connectAfterStart = it.name()
+		m.connectAfterStart = it.id()
 		return m.runHook(statusStarting)
 	}
 	return m, m.session()
@@ -205,22 +206,22 @@ func configEdited(err error) tea.Msg {
 func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	targets, problems := m.load()
 	for _, t := range targets {
-		if previous, ok := m.targetNamed(t.Name); ok && !slices.Equal(previous.Stats, t.Stats) {
-			e := m.live[t.Name]
+		if previous, ok := m.targetByID(t.ID); ok && !slices.Equal(previous.Stats, t.Stats) {
+			e := m.live[t.ID]
 			e.readings, e.statsOK = nil, false
-			m.live[t.Name] = e
+			m.live[t.ID] = e
 		}
 	}
 	m.targets, m.modeIdx = targets, 0
 	m.rebuild()
-	m.markStale(m.selected().name())
+	m.markStale(m.selected().id())
 	m.notice = cmp.Or(editStatus, configNotice(problems))
 	return m, tea.Batch(m.refreshSelected(), m.checkWatched())
 }
 
-func (m model) markStale(name string) {
-	if e, ok := m.live[name]; ok {
+func (m model) markStale(id target.ID) {
+	if e, ok := m.live[id]; ok {
 		e.statsAt = time.Time{}
-		m.live[name] = e
+		m.live[id] = e
 	}
 }

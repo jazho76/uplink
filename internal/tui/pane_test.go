@@ -12,8 +12,9 @@ import (
 func TestSelectedRowFillsEveryCell(t *testing.T) {
 	stylingEnabled(t)
 
-	m := model{live: map[string]liveEntry{"kyoto": {statsAt: time.Now()}}}
-	it := item{target: target.Target{Name: "kyoto"}, key: 'k'}
+	m := model{live: map[target.ID]liveEntry{configID("kyoto"): {statsAt: time.Now()}}}
+	it := named("kyoto")
+	it.key = 'k'
 
 	const width = 30
 	filled := m.paneRow(it, true, true, width)

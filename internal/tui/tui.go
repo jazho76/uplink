@@ -33,7 +33,11 @@ type item struct {
 	key    rune
 }
 
+func (i item) id() target.ID { return i.target.ID }
+
 func (i item) name() string { return i.target.Name }
+
+func (i item) empty() bool { return i.id() == target.ID{} }
 
 type screen int
 
@@ -56,16 +60,16 @@ type model struct {
 	logRound  int
 	logView   string
 	logPeek   peek
-	live      map[string]liveEntry
+	live      map[target.ID]liveEntry
 	load      func() ([]target.Target, error)
 	edit      func() (*exec.Cmd, error)
 	exec      func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 
-	connectAfterStart string
+	connectAfterStart target.ID
 }
 
 type peek struct {
-	name string
+	id   target.ID
 	text string
 	at   time.Time
 }
@@ -95,7 +99,7 @@ func newModel(targets []target.Target, backend target.Backend) model {
 	m := model{
 		targets: targets,
 		backend: backend,
-		live:    map[string]liveEntry{},
+		live:    map[target.ID]liveEntry{},
 		exec:    tea.ExecProcess,
 	}
 	m.rebuild()
@@ -125,7 +129,7 @@ func (m *model) rebuild() {
 }
 
 func (m model) statusOf(t target.Target) status {
-	e := m.live[t.Name]
+	e := m.live[t.ID]
 	switch {
 	case e.action != "":
 		return e.action
@@ -138,11 +142,19 @@ func (m model) statusOf(t target.Target) status {
 
 func carryOverCursors(fresh, previous []pane) []pane {
 	cursors := map[string]int{}
+	selected := map[string]target.ID{}
 	for _, p := range previous {
 		cursors[p.group] = p.cursor
+		if p.cursor >= 0 && p.cursor < len(p.items) {
+			selected[p.group] = p.items[p.cursor].id()
+		}
 	}
 	for i := range fresh {
-		fresh[i].cursor = max(min(cursors[fresh[i].group], len(fresh[i].items)-1), 0)
+		p := &fresh[i]
+		p.cursor = slices.IndexFunc(p.items, func(it item) bool { return it.id() == selected[p.group] })
+		if p.cursor < 0 {
+			p.cursor = max(min(cursors[p.group], len(p.items)-1), 0)
+		}
 	}
 	return fresh
 }
@@ -227,7 +239,7 @@ type liveTickMsg struct{}
 type logTickMsg struct{ round int }
 
 type logPeekMsg struct {
-	name string
+	id   target.ID
 	text string
 }
 
@@ -237,7 +249,7 @@ type logViewMsg struct {
 }
 
 type liveMsg struct {
-	name     string
+	id       target.ID
 	epoch    int
 	up       bool
 	full     bool
@@ -246,7 +258,7 @@ type liveMsg struct {
 }
 
 type hookDoneMsg struct {
-	name   string
+	id     target.ID
 	action status
 	err    error
 }
@@ -267,7 +279,7 @@ func logTickCmd(round int) tea.Cmd {
 
 func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea.Cmd {
 	return func() tea.Msg {
-		msg := liveMsg{name: t.Name, epoch: epoch, full: full}
+		msg := liveMsg{id: t.ID, epoch: epoch, full: full}
 		msg.up = backend.Status(t) == nil
 		if msg.up && full && len(t.Stats) > 0 {
 			readings, err := backend.Stats(t)
@@ -278,14 +290,14 @@ func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea
 }
 
 func (m model) check(t target.Target, full bool) tea.Cmd {
-	e := m.live[t.Name]
+	e := m.live[t.ID]
 	e.pending = true
-	m.live[t.Name] = e
+	m.live[t.ID] = e
 	return checkCmd(m.backend, t, full, e.epoch)
 }
 
 func (m model) checkSelectedIfStale() tea.Cmd {
-	if time.Since(m.live[m.selected().name()].statsAt) < liveInterval {
+	if time.Since(m.live[m.selected().id()].statsAt) < liveInterval {
 		return nil
 	}
 	return m.checkSelected()
@@ -293,7 +305,7 @@ func (m model) checkSelectedIfStale() tea.Cmd {
 
 func (m model) checkSelected() tea.Cmd {
 	it := m.selected()
-	if it.name() == "" || m.live[it.name()].pending {
+	if it.empty() || m.live[it.id()].pending {
 		return nil
 	}
 	return m.check(it.target, true)
@@ -312,8 +324,8 @@ func (m model) checkWatched() tea.Cmd {
 		if inFlight >= maxWatchChecks {
 			break
 		}
-		e := m.live[t.Name]
-		if !t.Watch || t.Name == m.selected().name() || e.pending || time.Since(e.checkedAt) < watchInterval {
+		e := m.live[t.ID]
+		if !t.Watch || t.ID == m.selected().id() || e.pending || time.Since(e.checkedAt) < watchInterval {
 			continue
 		}
 		cmds = append(cmds, m.check(t, false))
@@ -323,7 +335,7 @@ func (m model) checkWatched() tea.Cmd {
 }
 
 func (m model) settle(msg liveMsg) liveEntry {
-	e := m.live[msg.name]
+	e := m.live[msg.id]
 	if msg.epoch != e.epoch {
 		return e
 	}
@@ -360,7 +372,7 @@ func (m model) hookFor(t target.Target, action status) hook {
 }
 
 func (m model) canHook(t target.Target, action status) bool {
-	h, e := m.hookFor(t, action), m.live[t.Name]
+	h, e := m.hookFor(t, action), m.live[t.ID]
 	return h.command != "" && e.action == "" && e.state != h.settled
 }
 
@@ -369,16 +381,16 @@ func (m model) runHook(action status) (tea.Model, tea.Cmd) {
 	if !m.canHook(t, action) {
 		return m, nil
 	}
-	e := m.live[t.Name]
+	e := m.live[t.ID]
 	e.action = action
-	m.live[t.Name] = e
+	m.live[t.ID] = e
 	m.notice = ""
 	run := m.hookFor(t, action).run
-	return m, func() tea.Msg { return hookDoneMsg{name: t.Name, action: action, err: run(t)} }
+	return m, func() tea.Msg { return hookDoneMsg{id: t.ID, action: action, err: run(t)} }
 }
 
-func (m model) targetNamed(name string) (target.Target, bool) {
-	i := slices.IndexFunc(m.targets, func(t target.Target) bool { return t.Name == name })
+func (m model) targetByID(id target.ID) (target.Target, bool) {
+	i := slices.IndexFunc(m.targets, func(t target.Target) bool { return t.ID == id })
 	if i < 0 {
 		return target.Target{}, false
 	}
@@ -390,7 +402,7 @@ func (m model) refreshSelected() tea.Cmd {
 }
 
 func (m model) peekSelectedLogsIfStale() tea.Cmd {
-	if m.logPeek.name == m.selected().name() && time.Since(m.logPeek.at) < liveInterval {
+	if m.logPeek.id == m.selected().id() && time.Since(m.logPeek.at) < liveInterval {
 		return nil
 	}
 	return m.peekSelectedLogs()
@@ -406,7 +418,7 @@ func (m model) peekSelectedLogs() tea.Cmd {
 
 func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		return logPeekMsg{name: t.Name, text: backend.Logs(t, maxLogPeek)}
+		return logPeekMsg{id: t.ID, text: backend.Logs(t, maxLogPeek)}
 	}
 }
 

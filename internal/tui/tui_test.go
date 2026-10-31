@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,7 @@ func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name
 
 func hostTarget() target.Target {
 	return target.Target{
+		ID:    configID("host"),
 		Name:  "host",
 		Group: "local",
 		Logs:  "journalctl",
@@ -104,6 +106,7 @@ func hostTarget() target.Target {
 func vm(name string) target.Target {
 	via := []string{"ssh", "lima-" + name}
 	return target.Target{
+		ID:    configID(name),
 		Name:  name,
 		Group: "vms",
 		Via:   via,
@@ -144,8 +147,12 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{name: name, up: up, full: true, readings: linuxReadings(0, 4, 0, 0, 0), statsOK: up})
+	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, readings: linuxReadings(0, 4, 0, 0, 0), statsOK: up})
 	return next.(model)
+}
+
+func configID(name string) target.ID {
+	return target.ID{Source: target.ConfigSource, Key: name}
 }
 
 func itemNamed(m model, name string) item {
@@ -263,7 +270,7 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	}
 
 	backend.down["dojo"] = true
-	m.live = map[string]liveEntry{}
+	m.live = map[target.ID]liveEntry{}
 	m = m.withSelectionRefreshed()
 	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusDown {
 		t.Errorf("an unreachable target is down, got %q", got)
@@ -457,7 +464,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusStopping {
 		t.Errorf("a running hook shows its transition, got %q", got)
 	}
-	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).live["nakama"].action != statusStopping {
+	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).live[configID("nakama")].action != statusStopping {
 		t.Errorf("a second press must not stack hooks")
 	}
 	if footer := m.renderFooter(); strings.Contains(footer, "start") || strings.Contains(footer, "stop") {
@@ -538,7 +545,7 @@ func TestEnterStartsADownTargetThenConnects(t *testing.T) {
 	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-nakama tmux" {
 		t.Errorf("once started, the selected mode runs once, ran %q", got)
 	}
-	if m.connectAfterStart != "" {
+	if m.connectAfterStart != (target.ID{}) {
 		t.Errorf("a finished start forgets the pending connect, got %q", m.connectAfterStart)
 	}
 }
@@ -564,7 +571,7 @@ func TestFailedStartConnectsNothing(t *testing.T) {
 
 	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = finishHook(next.(model), start)
-	if len(backend.sessions) != 0 || m.connectAfterStart != "" {
+	if len(backend.sessions) != 0 || m.connectAfterStart != (target.ID{}) {
 		t.Errorf("a failed start connects nothing and forgets the intent, ran %v, pending %q", backend.sessions, m.connectAfterStart)
 	}
 	if !strings.Contains(m.notice, "start jammed failed") {
@@ -653,7 +660,7 @@ func TestEveryStatusIsProbed(t *testing.T) {
 	}
 
 	m = focus(m, "tokyo")
-	m.live = map[string]liveEntry{}
+	m.live = map[target.ID]liveEntry{}
 	if m.checkSelectedIfStale() == nil {
 		t.Error("a down target must be probed again, or it can never come back up")
 	}
@@ -672,9 +679,9 @@ func TestSlowProbesNeverStack(t *testing.T) {
 	}
 
 	m = probed(m, "forge", true)
-	landed := m.live["forge"]
+	landed := m.live[configID("forge")]
 	landed.statsAt = time.Now().Add(-liveInterval)
-	m.live["forge"] = landed
+	m.live[configID("forge")] = landed
 	if m.checkSelectedIfStale() == nil {
 		t.Error("once the result lands and goes stale, the next probe may go out")
 	}
@@ -981,7 +988,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
+	m.live[configID("forge")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -998,7 +1005,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live["forge"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
+	m.live[configID("forge")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1209,7 +1216,7 @@ func stylingEnabled(t *testing.T) {
 }
 
 func named(name string) item {
-	return item{target: target.Target{Name: name}}
+	return item{target: target.Target{ID: configID(name), Name: name}}
 }
 
 func panesOf(items ...item) []pane {
@@ -1308,12 +1315,12 @@ func TestLogPeekBelongsToItsTarget(t *testing.T) {
 	m = sized(m)
 	m = focus(m, "forge")
 
-	next, _ := m.Update(logPeekMsg{name: "tokyo", text: "tokyo boot"})
+	next, _ := m.Update(logPeekMsg{id: configID("tokyo"), text: "tokyo boot"})
 	if m = next.(model); m.logPeek.text != "" {
 		t.Errorf("a tail for another target must be dropped, got %q", m.logPeek.text)
 	}
 
-	next, _ = m.Update(logPeekMsg{name: "forge", text: "forge boot"})
+	next, _ = m.Update(logPeekMsg{id: configID("forge"), text: "forge boot"})
 	if m = next.(model); m.logPeek.text != "forge boot" {
 		t.Errorf("the selected target's tail should land, got %q", m.logPeek.text)
 	}
@@ -1326,7 +1333,7 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	if cmd := m.peekSelectedLogsIfStale(); cmd == nil {
 		t.Fatalf("the first peek should fetch")
 	}
-	m.logPeek = peek{name: m.selected().name(), text: "journal line", at: time.Now()}
+	m.logPeek = peek{id: m.selected().id(), text: "journal line", at: time.Now()}
 	if cmd := m.peekSelectedLogsIfStale(); cmd != nil {
 		t.Errorf("a fresh peek should not refetch on every poll")
 	}
@@ -1356,7 +1363,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	box.Stats = []stats.Metric{gpu, cache, agents, broken}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
-	m.live["box"] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true,
+	m.live[configID("box")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true,
 		readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
@@ -1443,7 +1450,7 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 		if m.notice != ended.notice {
 			t.Errorf("status = %q, want %q", m.notice, ended.notice)
 		}
-		if !m.live["forge"].pending {
+		if !m.live[configID("forge")].pending {
 			t.Errorf("the target should be checked again right away")
 		}
 		m = probed(m, "forge", true)
@@ -1513,7 +1520,7 @@ func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
 
 	next, _ := m.Update(configEditedMsg{})
 	m = next.(model)
-	if !m.live["forge"].pending {
+	if !m.live[configID("forge")].pending {
 		t.Errorf("a reload must not leave the selection on readings from the old config")
 	}
 }
@@ -1529,11 +1536,45 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 
 	next, _ := m.Update(configEditedMsg{})
 	m = next.(model)
-	if forge := m.live["forge"]; forge.readings != nil || forge.state != statusUp {
+	if forge := m.live[configID("forge")]; forge.readings != nil || forge.state != statusUp {
 		t.Errorf("changed stats drop their readings but keep the status, got %+v", forge)
 	}
-	if m.live["tokyo"].readings == nil {
+	if m.live[configID("tokyo")].readings == nil {
 		t.Errorf("unchanged stats keep their readings")
+	}
+}
+
+func TestReloadKeepsTheSelectionOnTheSameTarget(t *testing.T) {
+	m, _ := newTestModel()
+	m = sized(focus(m, "tokyo"))
+	m.load = func() ([]target.Target, error) {
+		return []target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil
+	}
+
+	next, _ := m.Update(configEditedMsg{})
+	if got := next.(model).selected().name(); got != "tokyo" {
+		t.Errorf("a target added above the selection must not move it, got %q", got)
+	}
+}
+
+func TestSameNameFromAnotherSourceKeepsItsOwnState(t *testing.T) {
+	m, _ := newTestModel()
+	theirs := vm("box")
+	theirs.ID = target.ID{Source: "lima", Key: "box"}
+	theirs.Group = "lima"
+	theirs.Down = "limactl stop box"
+	m = sized(withTargets(m, vm("box"), theirs))
+	m = probed(m, "box", true)
+
+	m.focus = slices.IndexFunc(m.panes, func(p pane) bool { return p.group == "lima" })
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	m = next.(model)
+
+	if got := m.live[theirs.ID]; got.action != statusStopping || got.state != "" {
+		t.Errorf("the lima box should be stopping with no borrowed status, got %+v", got)
+	}
+	if got := m.live[configID("box")]; got.action != "" || got.state != statusUp {
+		t.Errorf("the config box should be untouched, got %+v", got)
 	}
 }
 

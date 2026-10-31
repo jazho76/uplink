@@ -103,7 +103,7 @@ func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 	var (
 		targets []Target
 		errs    []error
-		seen    = map[string]bool{}
+		seen    = map[ID]bool{}
 	)
 	for i, spec := range specs {
 		t, err := resolve(spec, profiles)
@@ -111,11 +111,11 @@ func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
 			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), err))
 			continue
 		}
-		if seen[t.Name] {
-			errs = append(errs, fmt.Errorf("duplicate target %q", t.Name))
+		if seen[t.ID] {
+			errs = append(errs, fmt.Errorf("duplicate target %q", t.ID))
 			continue
 		}
-		seen[t.Name] = true
+		seen[t.ID] = true
 		targets = append(targets, t)
 	}
 	return targets, errors.Join(errs...)
@@ -159,6 +159,7 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	}
 
 	t := Target{
+		ID:     ID{Source: ConfigSource, Key: spec.Name},
 		Name:   spec.Name,
 		Group:  cmp.Or(spec.Group, DefaultGroup),
 		Via:    via,

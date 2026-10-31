@@ -58,7 +58,7 @@ func checkConfig() error {
 	resolved, problems := target.Load(path)
 	for _, t := range resolved {
 		fmt.Println()
-		header := t.Name + "  " + t.Group
+		header := t.ID.String() + "  " + t.Group
 		if t.Watch {
 			header += "  watch"
 		}

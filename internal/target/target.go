@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	ConfigSource = "config"
 	DefaultGroup = "ungrouped"
 	loginShell   = `exec "${SHELL:-/bin/sh}"`
 )
@@ -19,7 +20,20 @@ type Mode struct {
 	Argv []string
 }
 
+type ID struct {
+	Source string
+	Key    string
+}
+
+func (id ID) String() string {
+	if id.Source == ConfigSource {
+		return id.Key
+	}
+	return id.Source + "/" + id.Key
+}
+
 type Target struct {
+	ID     ID
 	Name   string
 	Group  string
 	Via    []string

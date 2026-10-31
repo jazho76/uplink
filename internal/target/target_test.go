@@ -104,6 +104,27 @@ func TestEmptyConfigHasNoTargets(t *testing.T) {
 	}
 }
 
+func TestConfigTargetsAreIdentifiedByName(t *testing.T) {
+	got := find(t, mustLoad(t, "targets:"+host), "host").ID
+	if want := (ID{Source: ConfigSource, Key: "host"}); got != want {
+		t.Errorf("want %+v, got %+v", want, got)
+	}
+}
+
+func TestIDsPrintQualifiedOutsideConfig(t *testing.T) {
+	for _, c := range []struct {
+		id   ID
+		want string
+	}{
+		{ID{Source: ConfigSource, Key: "prod"}, "prod"},
+		{ID{Source: "lima", Key: "default"}, "lima/default"},
+	} {
+		if got := c.id.String(); got != c.want {
+			t.Errorf("%+v printed %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
 func TestProfileFillsWhatTheTargetLeavesOut(t *testing.T) {
 	targets := mustLoad(t, `
 profiles:
