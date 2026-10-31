@@ -1,8 +1,8 @@
 package cmd
 
 import (
+	"fmt"
 	"github.com/jazho76/uplink/internal/shortcuts"
-	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -14,7 +14,7 @@ var installShortcutCmd = &cobra.Command{
 		if err := shortcuts.Install(); err != nil {
 			return err
 		}
-		ui.Info("installed: Ctrl+Alt+T (dashboard)")
+		fmt.Printf("installed: Ctrl+Alt+T (dashboard)\n")
 		return nil
 	},
 }
@@ -27,7 +27,7 @@ var uninstallShortcutCmd = &cobra.Command{
 		if err := shortcuts.Uninstall(); err != nil {
 			return err
 		}
-		ui.Info("removed the uplink keybinding")
+		fmt.Printf("removed the uplink keybinding\n")
 		return nil
 	},
 }

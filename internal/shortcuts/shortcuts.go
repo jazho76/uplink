@@ -22,12 +22,8 @@ type shortcut struct {
 	command string
 }
 
-var legacyIDs = []string{"vmm-launcher", "vmm-clipboard", "uplink-clipboard"}
-
-func defaults(exe string) []shortcut {
-	return []shortcut{
-		{"uplink-launcher", "<Control><Alt>t", "uplink launcher", "alacritty -e " + exe + " dashboard"},
-	}
+func launcher(exe string) shortcut {
+	return shortcut{"uplink-launcher", "<Control><Alt>t", "uplink launcher", "alacritty -e " + exe}
 }
 
 func Install() error {
@@ -38,41 +34,14 @@ func Install() error {
 	if err != nil {
 		return err
 	}
-
-	if err := purgeLegacy(); err != nil {
-		return err
-	}
-
-	for _, s := range defaults(exe) {
-		if err := set(s); err != nil {
-			return err
-		}
-	}
-	return nil
+	return set(launcher(exe))
 }
 
 func Uninstall() error {
 	if _, err := exec.LookPath("gsettings"); err != nil {
 		return fmt.Errorf("gsettings not found; need a GNOME session")
 	}
-	if err := purgeLegacy(); err != nil {
-		return err
-	}
-	for _, s := range defaults("") {
-		if err := remove(s.id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func purgeLegacy() error {
-	for _, id := range legacyIDs {
-		if err := remove(id); err != nil {
-			return err
-		}
-	}
-	return nil
+	return remove(launcher("").id)
 }
 
 func remove(id string) error {

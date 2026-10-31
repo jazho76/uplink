@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jazho76/uplink/internal/ui"
 )
 
 const (
@@ -23,11 +22,11 @@ func clampFraction(f float64) float64 {
 func meterStyle(fraction float64) lipgloss.Style {
 	switch shade := clampFraction(fraction); {
 	case shade >= meterCritical:
-		return lipgloss.NewStyle().Foreground(ui.Red)
+		return lipgloss.NewStyle().Foreground(colorRed)
 	case shade >= meterWarn:
-		return lipgloss.NewStyle().Foreground(ui.Yellow)
+		return lipgloss.NewStyle().Foreground(colorYellow)
 	default:
-		return lipgloss.NewStyle().Foreground(ui.Green)
+		return lipgloss.NewStyle().Foreground(colorGreen)
 	}
 }
 

@@ -9,7 +9,6 @@ import (
 	"github.com/jazho76/uplink/internal/run"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
-	"github.com/jazho76/uplink/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +53,7 @@ func checkConfig() error {
 	if _, err := os.Stat(path); err == nil {
 		state = "found"
 	}
-	ui.Info("config %s (%s)", path, state)
+	fmt.Printf("config %s (%s)\n", path, state)
 
 	resolved, problems := target.Load(path)
 	for _, t := range resolved {
@@ -63,7 +62,7 @@ func checkConfig() error {
 		if t.Watch {
 			header += "  watch"
 		}
-		ui.Info("%s", header)
+		fmt.Printf("%s\n", header)
 		for _, f := range []struct{ key, value string }{
 			{"via", target.Quote(t.Via)},
 			{"exec", target.Quote(t.Exec)},
@@ -74,7 +73,7 @@ func checkConfig() error {
 			{"stats", statNames(t.Stats)},
 		} {
 			if f.value != "" {
-				ui.Info("  %-7s %s", f.key, f.value)
+				fmt.Printf("  %-7s %s\n", f.key, f.value)
 			}
 		}
 		for i, mode := range t.Modes {
@@ -82,7 +81,7 @@ func checkConfig() error {
 			if i == 0 {
 				marker = "*"
 			}
-			ui.Info("  %s %-10s %s", marker, mode.Name, mode.Command())
+			fmt.Printf("  %s %-10s %s\n", marker, mode.Name, mode.Command())
 		}
 	}
 

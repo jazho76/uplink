@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
-	"github.com/jazho76/uplink/internal/ui"
 	"github.com/jazho76/uplink/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +27,7 @@ func init() {
 
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
-		ui.Error("%s", err)
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		os.Exit(1)
 	}
 }

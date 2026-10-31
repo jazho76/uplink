@@ -1,11 +1,11 @@
-package humanize
+package tui
 
 import (
 	"testing"
 	"time"
 )
 
-func TestBytes(t *testing.T) {
+func TestFormatBytes(t *testing.T) {
 	cases := []struct {
 		in   uint64
 		want string
@@ -19,13 +19,13 @@ func TestBytes(t *testing.T) {
 		{1 << 50, "1PiB"},
 	}
 	for _, c := range cases {
-		if got := Bytes(c.in); got != c.want {
-			t.Errorf("Bytes(%d) = %q, want %q", c.in, got, c.want)
+		if got := formatBytes(c.in); got != c.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
-func TestDuration(t *testing.T) {
+func TestFormatDuration(t *testing.T) {
 	cases := []struct {
 		in   time.Duration
 		want string
@@ -39,8 +39,8 @@ func TestDuration(t *testing.T) {
 		{73 * time.Hour, "3d 1h"},
 	}
 	for _, c := range cases {
-		if got := Duration(c.in); got != c.want {
-			t.Errorf("Duration(%s) = %q, want %q", c.in, got, c.want)
+		if got := formatDuration(c.in); got != c.want {
+			t.Errorf("formatDuration(%s) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

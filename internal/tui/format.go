@@ -1,11 +1,11 @@
-package humanize
+package tui
 
 import (
 	"fmt"
 	"time"
 )
 
-func Bytes(n uint64) string {
+func formatBytes(n uint64) string {
 	units := []string{"B", "KiB", "MiB", "GiB", "TiB", "PiB"}
 	v := float64(n)
 	i := 0
@@ -19,7 +19,7 @@ func Bytes(n uint64) string {
 	return fmt.Sprintf("%.1f%s", v, units[i])
 }
 
-func Duration(d time.Duration) string {
+func formatDuration(d time.Duration) string {
 	switch {
 	case d <= 0:
 		return ""

@@ -10,9 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/humanize"
 	"github.com/jazho76/uplink/internal/stats"
-	"github.com/jazho76/uplink/internal/ui"
 )
 
 const (
@@ -25,28 +23,28 @@ const (
 
 var (
 	plainStyle = lipgloss.NewStyle()
-	rowFill    = lipgloss.NewStyle().Background(ui.Selection)
+	rowFill    = lipgloss.NewStyle().Background(colorSelection)
 
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(ui.Cyan)
-	modeMarker = lipgloss.NewStyle().Foreground(ui.Yellow)
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorCyan)
+	modeMarker = lipgloss.NewStyle().Foreground(colorYellow)
 
-	keyStyle       = lipgloss.NewStyle().Foreground(ui.Magenta)
-	footerStyle    = lipgloss.NewStyle().Foreground(ui.Comment)
-	noticeStyle    = lipgloss.NewStyle().Foreground(ui.Yellow)
-	labelStyle     = lipgloss.NewStyle().Foreground(ui.Comment)
-	ruleStyle      = lipgloss.NewStyle().Foreground(ui.Blue)
-	detailLogStyle = lipgloss.NewStyle().Foreground(ui.Comment)
-	valueStyle     = lipgloss.NewStyle().Foreground(ui.Fg)
+	keyStyle       = lipgloss.NewStyle().Foreground(colorMagenta)
+	footerStyle    = lipgloss.NewStyle().Foreground(colorComment)
+	noticeStyle    = lipgloss.NewStyle().Foreground(colorYellow)
+	labelStyle     = lipgloss.NewStyle().Foreground(colorComment)
+	ruleStyle      = lipgloss.NewStyle().Foreground(colorBlue)
+	detailLogStyle = lipgloss.NewStyle().Foreground(colorComment)
+	valueStyle     = lipgloss.NewStyle().Foreground(colorFg)
 
-	paneBorder      = lipgloss.NewStyle().Foreground(ui.Comment)
-	paneBorderFocus = lipgloss.NewStyle().Foreground(ui.Cyan)
-	paneTitle       = lipgloss.NewStyle().Foreground(ui.Comment)
-	paneTitleFocus  = lipgloss.NewStyle().Foreground(ui.Cyan).Bold(true)
+	paneBorder      = lipgloss.NewStyle().Foreground(colorComment)
+	paneBorderFocus = lipgloss.NewStyle().Foreground(colorCyan)
+	paneTitle       = lipgloss.NewStyle().Foreground(colorComment)
+	paneTitleFocus  = lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
 
 	boxBorder = lipgloss.RoundedBorder()
 	boxStyle  = lipgloss.NewStyle().
 			Border(boxBorder).
-			BorderForeground(ui.Comment).
+			BorderForeground(colorComment).
 			Padding(0, 1)
 )
 
@@ -58,13 +56,13 @@ func (m model) glyph(it item, base lipgloss.Style) string {
 func glyphOf(s status) (string, lipgloss.TerminalColor) {
 	switch s {
 	case statusUp:
-		return "●", ui.Green
+		return "●", colorGreen
 	case statusDown:
-		return "○", ui.Comment
+		return "○", colorComment
 	case statusStarting, statusStopping:
-		return "◐", ui.Yellow
+		return "◐", colorYellow
 	default:
-		return "◌", ui.Comment
+		return "◌", colorComment
 	}
 }
 
@@ -197,9 +195,9 @@ func textOf(r stats.Reading) string {
 func inUnit(r stats.Reading, v float64) string {
 	switch r.Metric.Unit {
 	case stats.UnitBytes:
-		return humanize.Bytes(uint64(v))
+		return formatBytes(uint64(v))
 	case stats.UnitSeconds:
-		return humanize.Duration(time.Duration(v * float64(time.Second)))
+		return formatDuration(time.Duration(v * float64(time.Second)))
 	default:
 		return number(v)
 	}
@@ -253,7 +251,7 @@ func gauge(bar, reading string, gap int) string {
 }
 
 func amount(used, total uint64) string {
-	u, t := humanize.Bytes(used), humanize.Bytes(total)
+	u, t := formatBytes(used), formatBytes(total)
 	if unit := unitOf(t); unit != "" && strings.HasSuffix(u, unit) {
 		return strings.TrimSuffix(u, unit) + "/" + t
 	}

@@ -87,8 +87,7 @@ uplink install-shortcut
 | --- | --- |
 | `Ctrl+Alt+T` | Open the Uplink dashboard in Alacritty |
 
-It also removes stale bindings left by older Uplink versions. Remove the
-shortcut with:
+Remove the shortcut with:
 
 ```sh
 uplink uninstall-shortcut
@@ -98,7 +97,7 @@ The dashboard itself is not tied to GNOME or Alacritty. On another desktop or
 terminal emulator, bind your preferred shortcut to:
 
 ```text
-<terminal> -e uplink dashboard
+<terminal> -e uplink
 ```
 
 ## The dashboard

@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/jazho76/uplink/internal/ui"
 	"github.com/jazho76/uplink/internal/version"
 )
 
@@ -34,7 +33,7 @@ func Run() error {
 		return err
 	}
 	if latest == version.Version {
-		ui.Info("Already on the latest version (%s)", version.Version)
+		fmt.Printf("Already on the latest version (%s)\n", version.Version)
 		return nil
 	}
 
@@ -46,11 +45,11 @@ func Run() error {
 		return err
 	}
 
-	ui.Info("Updating uplink %s -> %s", version.Version, latest)
+	fmt.Printf("Updating uplink %s -> %s\n", version.Version, latest)
 	if err := replace(exe); err != nil {
 		return err
 	}
-	ui.Info("Updated uplink to %s", latest)
+	fmt.Printf("Updated uplink to %s\n", latest)
 	return nil
 }
 

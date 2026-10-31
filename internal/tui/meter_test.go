@@ -5,7 +5,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/ui"
 )
 
 func TestMeterSpansItsWidthAtEveryFraction(t *testing.T) {
@@ -41,12 +40,12 @@ func TestMeterThresholdsPickStatusColours(t *testing.T) {
 		fraction float64
 		want     lipgloss.TerminalColor
 	}{
-		{fraction: 0, want: ui.Green},
-		{fraction: meterWarn - 0.01, want: ui.Green},
-		{fraction: meterWarn, want: ui.Yellow},
-		{fraction: meterCritical - 0.01, want: ui.Yellow},
-		{fraction: meterCritical, want: ui.Red},
-		{fraction: 5, want: ui.Red},
+		{fraction: 0, want: colorGreen},
+		{fraction: meterWarn - 0.01, want: colorGreen},
+		{fraction: meterWarn, want: colorYellow},
+		{fraction: meterCritical - 0.01, want: colorYellow},
+		{fraction: meterCritical, want: colorRed},
+		{fraction: 5, want: colorRed},
 	} {
 		if got := meterStyle(c.fraction).GetForeground(); got != c.want {
 			t.Errorf("meterStyle(%v) = %v, want %v", c.fraction, got, c.want)
