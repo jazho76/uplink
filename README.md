@@ -255,7 +255,7 @@ target is named `<provider>/<key>` in `uplink config check`.
 
 | Provider | Lists | On by default |
 | --- | --- | --- |
-| `docker` | Every container, running or stopped, in `containers`: entered with `docker exec`, started and stopped with `docker start`/`stop`, `docker logs` as logs, a memory gauge, a `shell` mode, watched in the background | when `docker` is installed and its daemon is running |
+| `docker` | Every container, running or stopped, in `containers`: entered with `docker exec`, started and stopped with `docker start`/`stop`, `docker logs` as logs, a memory gauge, `tmux` and `shell` modes, watched in the background | when `docker` is installed and its daemon is running |
 | `lima` | Every Lima instance, running or stopped, in `vms`: reached over its `ssh.config`, started and stopped with `limactl`, its serial log as logs, stats for its guest OS, `tmux` and `shell` modes, watched in the background | when `limactl` is installed |
 | `local` | This machine, shown by its hostname, in `machines`, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
 

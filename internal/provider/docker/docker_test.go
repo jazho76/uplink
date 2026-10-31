@@ -75,8 +75,12 @@ func TestContainerDefaults(t *testing.T) {
 	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, []stats.Metric{memory}) {
 		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats)
 	}
-	if len(web.Modes) != 1 || web.Modes[0].Name != "shell" {
-		t.Errorf("want shell only, got %v", web.Modes)
+	var modes []string
+	for _, m := range web.Modes {
+		modes = append(modes, m.Command())
+	}
+	if len(modes) != 2 || !strings.Contains(modes[0], "tmux new-session -A -s web") {
+		t.Errorf("want tmux on the container name then shell, got %q", modes)
 	}
 	if err := memory.Validate(); err != nil {
 		t.Errorf("memory gauge: %v", err)

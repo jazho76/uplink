@@ -107,7 +107,10 @@ func spec(container string) target.Spec {
 			Group: group,
 			Watch: &watch,
 			Stats: []stats.Metric{memory},
-			Modes: []target.ModeSpec{{Name: "shell"}},
+			Modes: []target.ModeSpec{
+				{Name: "tmux", Run: "tmux new-session -A -s {name}"},
+				{Name: "shell"},
+			},
 		},
 	}
 }
