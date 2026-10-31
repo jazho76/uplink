@@ -1,6 +1,7 @@
 package target
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -121,6 +122,72 @@ func TestIDsPrintQualifiedOutsideConfig(t *testing.T) {
 	} {
 		if got := c.id.String(); got != c.want {
 			t.Errorf("%+v printed %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+type fakeSource struct {
+	name  string
+	specs []Spec
+	err   error
+}
+
+func (f fakeSource) Name() string           { return f.name }
+func (f fakeSource) Specs() ([]Spec, error) { return f.specs, f.err }
+
+var shell = []ModeSpec{{Name: "shell"}}
+
+func TestSourcesMergeInOrderWithDistinctIDs(t *testing.T) {
+	config := configSource{{Name: "box", Modes: shell}}
+	lima := fakeSource{name: "lima", specs: []Spec{{Name: "box", Modes: shell}, {Name: "dev", Modes: shell}}}
+
+	targets, err := Merge(nil, config, lima)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, target := range targets {
+		ids = append(ids, target.ID.String())
+	}
+	if got := strings.Join(ids, " "); got != "box lima/box lima/dev" {
+		t.Errorf("want config first, then lima in its order, got %q", got)
+	}
+}
+
+func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
+	config := configSource{{Name: "host", Modes: shell}}
+	lima := fakeSource{name: "lima", err: errors.New("limactl not found")}
+
+	targets, err := Merge(nil, config, lima)
+	if len(targets) != 1 || targets[0].Name != "host" {
+		t.Errorf("config targets should survive, got %v", targets)
+	}
+	if err == nil || err.Error() != "lima: limactl not found" {
+		t.Errorf("want the failure prefixed with its source, got %v", err)
+	}
+}
+
+func TestSourcesShareConfigProfiles(t *testing.T) {
+	profiles := map[string]Spec{"vm": {Group: "vms", Modes: shell}}
+	lima := fakeSource{name: "lima", specs: []Spec{{Name: "dev", Profile: "vm"}}}
+
+	targets, err := Merge(profiles, lima)
+	if err != nil || len(targets) != 1 || targets[0].Group != "vms" {
+		t.Errorf("a discovered spec should take its profile, got %v and %v", targets, err)
+	}
+}
+
+func TestDuplicateSourcesAndBrokenSpecsAreReported(t *testing.T) {
+	first := fakeSource{name: "lima", specs: []Spec{{Name: "x"}, {Modes: shell}}}
+	second := fakeSource{name: "lima", specs: []Spec{{Name: "y", Modes: shell}}}
+
+	targets, err := Merge(nil, first, second)
+	if len(targets) != 0 {
+		t.Errorf("want no targets, got %v", targets)
+	}
+	for _, want := range []string{`target "lima/x": no modes`, "target lima #2: no name", `duplicate source "lima"`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("errors should mention %q, got %v", want, err)
 		}
 	}
 }

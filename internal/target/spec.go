@@ -56,7 +56,7 @@ func Load(path string) ([]Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	return resolveAll(doc.Targets, doc.Profiles)
+	return Merge(doc.Profiles, configSource(doc.Targets))
 }
 
 func read(path string) (document, error) {
@@ -99,36 +99,7 @@ func decodeError(path string, err error) error {
 	return errors.Join(errs...)
 }
 
-func resolveAll(specs []Spec, profiles map[string]Spec) ([]Target, error) {
-	var (
-		targets []Target
-		errs    []error
-		seen    = map[ID]bool{}
-	)
-	for i, spec := range specs {
-		t, err := resolve(spec, profiles)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), err))
-			continue
-		}
-		if seen[t.ID] {
-			errs = append(errs, fmt.Errorf("duplicate target %q", t.ID))
-			continue
-		}
-		seen[t.ID] = true
-		targets = append(targets, t)
-	}
-	return targets, errors.Join(errs...)
-}
-
-func label(spec Spec, index int) string {
-	if spec.Name != "" {
-		return fmt.Sprintf("%q", spec.Name)
-	}
-	return fmt.Sprintf("#%d", index+1)
-}
-
-func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
+func resolve(source string, spec Spec, profiles map[string]Spec) (Target, error) {
 	if spec.Name == "" {
 		return Target{}, errors.New("no name")
 	}
@@ -159,7 +130,7 @@ func resolve(spec Spec, profiles map[string]Spec) (Target, error) {
 	}
 
 	t := Target{
-		ID:     ID{Source: ConfigSource, Key: spec.Name},
+		ID:     ID{Source: source, Key: spec.Name},
 		Name:   spec.Name,
 		Group:  cmp.Or(spec.Group, DefaultGroup),
 		Via:    via,
