@@ -1,0 +1,2 @@
+{"name":"dev","hostname":"lima-dev","status":"Running","dir":"/home/me/lima vms/dev","vmType":"qemu","sshConfigFile":"/home/me/lima vms/dev/ssh.config","config":{"os":"Linux","cpus":4}}
+{"name":"bsd","hostname":"lima-bsd","status":"Stopped","dir":"/home/me/.lima/bsd","vmType":"qemu","sshConfigFile":"/home/me/.lima/bsd/ssh.config","config":{"os":"FreeBSD"}}

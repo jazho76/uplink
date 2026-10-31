@@ -1,8 +1,8 @@
-package local
+package presets
 
 import "github.com/jazho76/uplink/internal/stats"
 
-var linux = []stats.Metric{
+var Linux = []stats.Metric{
 	{Type: stats.TypeText, Label: "up", Unit: stats.UnitSeconds, Value: "cut -d ' ' -f 1 /proc/uptime"},
 	{Type: stats.TypeGauge, Label: "load", Value: "cut -d ' ' -f 1 /proc/loadavg", Max: "nproc"},
 	{
@@ -21,7 +21,7 @@ var linux = []stats.Metric{
 	},
 }
 
-var macOS = []stats.Metric{
+var MacOS = []stats.Metric{
 	{
 		Type:  stats.TypeText,
 		Label: "up",
@@ -45,12 +45,12 @@ var macOS = []stats.Metric{
 	},
 }
 
-func preset(goos string) []stats.Metric {
+func For(goos string) []stats.Metric {
 	switch goos {
 	case "linux":
-		return linux
+		return Linux
 	case "darwin":
-		return macOS
+		return MacOS
 	default:
 		return nil
 	}

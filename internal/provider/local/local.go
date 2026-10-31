@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"runtime"
 
+	"github.com/jazho76/uplink/internal/provider/presets"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -34,7 +35,7 @@ func (Provider) Specs() ([]target.Spec, error) {
 		Display: display,
 		Defaults: &target.Spec{
 			Group: group,
-			Stats: preset(goos),
+			Stats: presets.For(goos),
 			Logs:  logs(),
 			Modes: modes(),
 		},

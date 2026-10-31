@@ -40,30 +40,19 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
 # profiles:
-#   lima:
-#     group: vms
-#     via: ssh -t -F ~/.lima/{name}/ssh.config lima-{name}
-#     status: limactl list --format '{{.Status}}' {name} | grep -qx Running
-#     up: limactl start {name}
-#     down: limactl stop {name}
-#     logs: tail -n 500 ~/.lima/{name}/serial.log
-#     watch: true
+#   server:
+#     group: machines
 #     stats: *linux
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
 
 # Providers list machines that other tools already know about. Without a
-# discover section, local (this machine) runs; "discover: []" turns discovery
-# off. An entry's profile overrides the provider's group, stats, logs and modes.
+# discover section, local (this machine) runs, and lima (its VMs) when limactl
+# is installed; "discover: []" turns discovery off. An entry's profile
+# overrides the provider's group, stats, logs and modes.
 # discover: []
 
 # targets:
-  # - { name: devbox, profile: lima }
-  # - name: box
-  #   group: machines
-  #   via: ssh -t me@box.example
-  #   modes:
-  #     - { name: tmux, run: tmux new-session -A -s 0 }
-  #     - { name: shell }
+#   - { name: box, profile: server, via: ssh -t me@box.example }
 `

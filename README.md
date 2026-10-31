@@ -134,8 +134,8 @@ uplink config edit
 
 The file lives at `${XDG_CONFIG_HOME:-$HOME/.config}/uplink/config.yaml`. The
 first `uplink config edit` creates it from a commented template. Uplink shows
-the machines its providers discover, this one by default, and the targets the
-config declares.
+the machines its providers discover (this one, and your Lima VMs when `limactl`
+is installed) and the targets the config declares.
 
 ```yaml
 x-linux: &linux
@@ -153,24 +153,18 @@ x-linux: &linux
     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
 profiles:
-  lima:
-    group: vms
-    via: ssh -t -F ~/.lima/{name}/ssh.config lima-{name}
-    status: limactl list --format '{{.Status}}' {name} | grep -qx Running
-    up: limactl start {name}
-    down: limactl stop {name}
-    logs: tail -n 500 ~/.lima/{name}/serial.log
-    watch: true
+  server:
+    group: machines
     stats: *linux
     modes:
       - { name: tmux, run: tmux new-session -A -s 0 }
       - { name: shell }
 
 targets:
-  - { name: devbox, profile: lima }
+  - { name: box, profile: server, via: ssh -t me@box.example }
 
   - name: prod
-    group: machines
+    profile: server
     via: ssh -t -i ~/.ssh/prod_ed25519 deploy@example.com
     modes:
       - { name: tmux, run: "bash -lc 'cd /srv/app && tmux new-session -A -s prod'" }
@@ -247,7 +241,7 @@ profile, such as a function or `PATH` entry, ask for one:
 
 ### Profiles
 
-A profile holds any target field except `name`. A target with `profile: lima`
+A profile holds any target field except `name`. A target with `profile: server`
 takes every field it leaves unset from the profile; `modes` replace the
 profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
 `logs`, and `run` becomes the target's name (for a discovered target, its key,
@@ -261,6 +255,7 @@ target is named `<provider>/<key>` in `uplink config check`.
 
 | Provider | Lists | On by default |
 | --- | --- | --- |
+| `lima` | Every Lima instance, running or stopped, in `vms`: reached over its `ssh.config`, started and stopped with `limactl`, its serial log as logs, stats for its guest OS, `tmux` and `shell` modes, watched in the background | when `limactl` is installed |
 | `local` | This machine, shown by its hostname, in `machines`, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
 
 Without a `discover` section, the providers that are on by default run. A
