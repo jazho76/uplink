@@ -79,7 +79,7 @@ func TestContainerDefaults(t *testing.T) {
 	for _, m := range web.Modes {
 		modes = append(modes, m.Command())
 	}
-	if len(modes) != 2 || !strings.Contains(modes[0], "tmux new-session -A -s web") {
+	if len(modes) != 2 || !strings.Contains(modes[0], "tmux new-session -A -s 0") {
 		t.Errorf("want tmux on the container name then shell, got %q", modes)
 	}
 	if err := memory.Validate(); err != nil {

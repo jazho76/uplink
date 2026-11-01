@@ -85,7 +85,7 @@ func TestInstanceDefaults(t *testing.T) {
 	for _, m := range dev.Modes {
 		modes = append(modes, m.Command())
 	}
-	if want := "tmux new-session -A -s dev"; !strings.Contains(modes[0], want) || len(modes) != 2 {
+	if want := "tmux new-session -A -s 0"; !strings.Contains(modes[0], want) || len(modes) != 2 {
 		t.Errorf("want tmux on the instance name then shell, got %q", modes)
 	}
 }

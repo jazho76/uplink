@@ -96,7 +96,7 @@ func (vm instance) spec() target.Spec {
 			Watch: &watch,
 			Stats: presets.For(strings.ToLower(vm.Config.OS)),
 			Modes: []target.ModeSpec{
-				{Name: "tmux", Run: "tmux new-session -A -s {name}"},
+				{Name: "tmux", Run: "tmux new-session -A -s 0"},
 				{Name: "shell"},
 			},
 		},

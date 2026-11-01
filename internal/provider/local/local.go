@@ -52,7 +52,7 @@ func logs() string {
 func modes() []target.ModeSpec {
 	var modes []target.ModeSpec
 	if installed("tmux") {
-		modes = append(modes, target.ModeSpec{Name: "tmux", Run: "tmux new-session -A -s {name}"})
+		modes = append(modes, target.ModeSpec{Name: "tmux", Run: "tmux new-session -A -s 0"})
 	}
 	return append(modes, target.ModeSpec{Name: "shell"})
 }
