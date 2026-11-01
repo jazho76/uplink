@@ -5,7 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/provider/presets"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -53,7 +52,7 @@ func TestDescribesThisMachine(t *testing.T) {
 	if s.Name != "localhost" || s.Display != "fedora" {
 		t.Errorf("want key localhost shown as fedora, got %q and %q", s.Name, s.Display)
 	}
-	if s.Defaults.Group != "machines" || !slices.Equal(s.Defaults.Stats, presets.Linux) {
+	if s.Defaults.Group != "machines" || !slices.Equal(s.Defaults.Stats, stats.ForOS("linux")) {
 		t.Errorf("want the machines group with linux stats, got %+v", s.Defaults)
 	}
 	if got := modeNames(s); !slices.Equal(got, []string{"tmux", "shell"}) {
@@ -65,7 +64,7 @@ func TestDescribesThisMachine(t *testing.T) {
 }
 
 func TestStatsFollowTheOS(t *testing.T) {
-	for goos, want := range map[string][]stats.Metric{"darwin": presets.MacOS, "plan9": nil} {
+	for goos, want := range map[string][]stats.Metric{"darwin": stats.ForOS("darwin"), "plan9": nil} {
 		on(t, goos, "box")
 		if got := spec(t).Defaults.Stats; !slices.Equal(got, want) {
 			t.Errorf("%s: got %v", goos, got)

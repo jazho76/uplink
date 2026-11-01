@@ -72,7 +72,7 @@ func TestContainerFacts(t *testing.T) {
 func TestContainerDefaults(t *testing.T) {
 	fixture(t)
 	web := resolved(t)[1]
-	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, []stats.Metric{memory}) {
+	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, containerPreset(t)) {
 		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats)
 	}
 	var modes []string
@@ -80,10 +80,7 @@ func TestContainerDefaults(t *testing.T) {
 		modes = append(modes, m.Command())
 	}
 	if len(modes) != 2 || !strings.Contains(modes[0], "tmux new-session -A -s 0") {
-		t.Errorf("want tmux on the container name then shell, got %q", modes)
-	}
-	if err := memory.Validate(); err != nil {
-		t.Errorf("memory gauge: %v", err)
+		t.Errorf("want tmux then shell, got %q", modes)
 	}
 }
 
@@ -127,4 +124,13 @@ func TestOnByDefaultOnlyWithARunningDaemon(t *testing.T) {
 			t.Errorf("%s: Default() = %v, want %v", c.name, got, c.want)
 		}
 	}
+}
+
+func containerPreset(t *testing.T) []stats.Metric {
+	t.Helper()
+	metrics, ok := stats.Preset(stats.PresetContainer)
+	if !ok || len(metrics) == 0 {
+		t.Fatal("the container preset should exist")
+	}
+	return metrics
 }

@@ -138,23 +138,9 @@ the machines its providers discover (this one, plus your Lima VMs and Docker
 containers when those tools are available) and the targets the config declares.
 
 ```yaml
-x-linux: &linux
-  - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
-  - { type: gauge, label: load, value: cut -d ' ' -f 1 /proc/loadavg, max: nproc }
-  - type: gauge
-    label: memory
-    unit: bytes
-    value: awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo
-    max: awk '/^MemTotal:/{print $2*1024}' /proc/meminfo
-  - type: gauge
-    label: disk
-    unit: bytes
-    value: df -P -k / | awk 'NR==2{print $3*1024}'
-    max: df -P -k / | awk 'NR==2{print $2*1024}'
-
 x-server: &server
   group: machines
-  stats: *linux
+  stats: [linux]
   modes:
     - { name: tmux, run: tmux new-session -A -s 0 }
     - { name: shell }
@@ -244,8 +230,8 @@ commands becomes the target's name. Inside a flow mapping, quote values that
 contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
 
 To share values between targets, define a YAML anchor under a top-level key
-starting with `x-` and refer to it: `stats: *linux` reuses a list, and
-`<<: *server` merges a whole mapping, as in the example above. Fields the
+starting with `x-` and refer to it: `<<: *server` merges a whole mapping, as in
+the example above. Fields the
 target sets itself win over merged ones; lists such as `modes` and `stats` are
 replaced as a whole, and `stats: []` turns a merged list off.
 
@@ -270,11 +256,12 @@ discover: [local, lima]
 
 ### Stats
 
-`stats` lists what the live block shows, in order.
+`stats` lists what the live block shows, in order. An item is a metric or the
+name of a preset, which adds the preset's metrics in its place.
 
 ```yaml
 stats:
-  - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
+  - linux
   - { type: gauge, label: gpu, value: "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits", max: 100 }
   - { type: gauge, label: cache, value: du -sb ~/.cache | cut -f1, max: df -B1 --output=size ~ | tail -1, unit: bytes }
   - { type: text, label: agents, value: pgrep -c claude }
@@ -290,30 +277,13 @@ their output is used. A `max` that is a plain number is used as is. `unit:
 bytes` formats numbers as sizes and `unit: seconds` as durations; a value that
 is not a number then shows `?`. `{name}` works in `value` and `max`.
 
-Discovered targets come with metrics for their OS. For config targets, what to
-run depends on the target's OS: the `x-linux` list in the example above covers
-Linux targets. For macOS targets:
+| Preset | Metrics |
+| --- | --- |
+| `linux` | uptime, load against CPU count, memory, and disk usage of `/` |
+| `macos` | the same, read with `sysctl` and `vm_stat`, disk on the data volume |
+| `container` | memory from cgroup v2, against the container's limit or the host's memory |
 
-```yaml
-x-macos: &macos
-  - type: text
-    label: up
-    unit: seconds
-    value: echo $(( $(date +%s) - $(sysctl -n kern.boottime | awk '{print $4}' | tr -d ,) ))
-  - { type: gauge, label: load, value: "sysctl -n vm.loadavg | awk '{print $2}'", max: sysctl -n hw.ncpu }
-  - type: gauge
-    label: memory
-    unit: bytes
-    value: >-
-      vm_stat | awk '/page size of/{p=$8} /Pages active/{a=$3} /Pages wired down/{w=$4}
-      /occupied by compressor/{c=$5} END{print (a+w+c)*p}'
-    max: sysctl -n hw.memsize
-  - type: gauge
-    label: disk
-    unit: bytes
-    value: df -P -k /System/Volumes/Data | awk 'NR==2{print $3*1024}'
-    max: df -P -k /System/Volumes/Data | awk 'NR==2{print $2*1024}'
-```
+Discovered targets come with the preset for their OS (`container` for Docker).
 
 All metrics travel in one script piped through `exec` into `sh`, one round trip
 per refresh, but each command runs in its own `sh -c` with no stdin and, where

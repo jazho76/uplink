@@ -32,16 +32,6 @@ var (
 	}
 )
 
-var memory = stats.Metric{
-	Type:  stats.TypeGauge,
-	Label: "memory",
-	Unit:  stats.UnitBytes,
-	Value: "cat /sys/fs/cgroup/memory.current",
-	Max: `limit=$(cat /sys/fs/cgroup/memory.max)
-[ "$limit" = max ] && limit=$(awk '/^MemTotal:/{print $2 * 1024}' /proc/meminfo)
-echo "$limit"`,
-}
-
 type container struct {
 	Names string `json:"Names"`
 }
@@ -95,6 +85,7 @@ func parse(out string) ([]string, error) {
 func spec(container string) target.Spec {
 	quote := func(args ...string) string { return target.Quote(args) }
 	watch := true
+	metrics, _ := stats.Preset(stats.PresetContainer)
 	return target.Spec{
 		Name:   container,
 		Via:    quote("docker", "exec", "-it", container, "sh", "-c"),
@@ -106,7 +97,7 @@ func spec(container string) target.Spec {
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
-			Stats: []stats.Metric{memory},
+			Stats: metrics,
 			Modes: []target.ModeSpec{
 				{Name: "tmux", Run: "tmux new-session -A -s 0"},
 				{Name: "shell"},

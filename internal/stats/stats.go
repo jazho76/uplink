@@ -26,6 +26,16 @@ type Metric struct {
 	Value string `yaml:"value"`
 	Max   string `yaml:"max"`
 	Unit  string `yaml:"unit"`
+
+	Preset string `yaml:"-"`
+}
+
+func (m *Metric) UnmarshalYAML(unmarshal func(any) error) error {
+	if unmarshal(&m.Preset) == nil {
+		return nil
+	}
+	type plain Metric
+	return unmarshal((*plain)(m))
 }
 
 type Reading struct {

@@ -559,11 +559,34 @@ func TestUnknownSectionsRefuseTheConfig(t *testing.T) {
 }
 
 func TestStatsMustBeAList(t *testing.T) {
-	targets, err := load(t, "targets:\n  - { name: prod, stats: false, modes: [{ name: shell }] }\n")
-	if err == nil {
-		t.Error("stats: false should be refused")
+	for _, value := range []string{"false", "linux"} {
+		targets, err := load(t, "targets:\n  - { name: prod, stats: "+value+", modes: [{ name: shell }] }\n")
+		if err == nil {
+			t.Errorf("stats: %s should be refused", value)
+		}
+		noTargets(t, targets)
 	}
-	noTargets(t, targets)
+}
+
+func TestStatsNamePresets(t *testing.T) {
+	targets, err := load(t, `
+targets:`+host+`
+  - name: box
+    stats: [linux, { type: gauge, label: gpu, value: gpu, max: 100 }]
+    modes: [{ name: shell }]
+  - { name: typo, stats: [linx], modes: [{ name: shell }] }
+`)
+	if err == nil || !strings.Contains(err.Error(), `"typo": stats: unknown preset "linx"`) {
+		t.Errorf("an unknown preset should be reported on its target, got %v", err)
+	}
+	linux, _ := stats.Preset(stats.PresetLinux)
+	box := find(t, targets, "box").Stats
+	if len(box) != len(linux)+1 || box[0] != linux[0] || box[len(box)-1].Label != "gpu" {
+		t.Errorf("want the linux preset followed by gpu, got %+v", box)
+	}
+	if len(targets) != 2 {
+		t.Errorf("only the typo should be skipped, got %d targets", len(targets))
+	}
 }
 
 func TestMalformedYAMLNamesTheFile(t *testing.T) {

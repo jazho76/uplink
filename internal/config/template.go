@@ -18,27 +18,13 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # watch   true polls status in the background, not only while selected.
 # stats   metrics shown while selected, measured in one probe through exec:
 #         gauge (label, value, max, unit) and text (label, value, unit).
-#         unit is bytes or seconds. Left out means none. The README has a
-#         macOS list.
+#         unit is bytes or seconds. A name instead of a metric adds a
+#         preset: linux, macos, or container. Left out means none.
 # modes   ways to enter; the first is the default. A mode without run opens
 #         the user's shell. Every session returns to the dashboard.
 #
 # {name} in a command becomes the target's name. Top-level keys starting with
 # x- hold YAML anchors for values targets share.
-
-# x-linux: &linux
-#   - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
-#   - { type: gauge, label: load, value: cut -d ' ' -f 1 /proc/loadavg, max: nproc }
-#   - type: gauge
-#     label: memory
-#     unit: bytes
-#     value: awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print (t-a)*1024}' /proc/meminfo
-#     max: awk '/^MemTotal:/{print $2*1024}' /proc/meminfo
-#   - type: gauge
-#     label: disk
-#     unit: bytes
-#     value: df -P -k / | awk 'NR==2{print $3*1024}'
-#     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
 # Providers list machines that other tools already know about. Without a
 # discover section, local (this machine) runs, lima (its VMs) when limactl is
@@ -51,7 +37,7 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #   - name: box
 #     group: machines
 #     via: ssh -t me@box.example
-#     stats: *linux
+#     stats: [linux]
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/provider/presets"
 	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -94,7 +94,7 @@ func (vm instance) spec() target.Spec {
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
-			Stats: presets.For(strings.ToLower(vm.Config.OS)),
+			Stats: stats.ForOS(strings.ToLower(vm.Config.OS)),
 			Modes: []target.ModeSpec{
 				{Name: "tmux", Run: "tmux new-session -A -s 0"},
 				{Name: "shell"},

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/provider/presets"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -75,7 +75,7 @@ func TestInstanceDefaults(t *testing.T) {
 	targets := resolved(t)
 	bsd, dev := targets[0], targets[1]
 
-	if dev.Group != "vms" || !dev.Watch || !slices.Equal(dev.Stats, presets.Linux) {
+	if dev.Group != "vms" || !dev.Watch || !slices.Equal(dev.Stats, stats.ForOS("linux")) {
 		t.Errorf("want a watched vms target with linux stats, got %q %v %d stats", dev.Group, dev.Watch, len(dev.Stats))
 	}
 	if bsd.Stats != nil {
@@ -86,7 +86,7 @@ func TestInstanceDefaults(t *testing.T) {
 		modes = append(modes, m.Command())
 	}
 	if want := "tmux new-session -A -s 0"; !strings.Contains(modes[0], want) || len(modes) != 2 {
-		t.Errorf("want tmux on the instance name then shell, got %q", modes)
+		t.Errorf("want tmux then shell, got %q", modes)
 	}
 }
 

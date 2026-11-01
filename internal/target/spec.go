@@ -48,6 +48,11 @@ func resolve(source string, spec Spec) (Target, error) {
 	if spec.Defaults != nil {
 		spec = spec.over(*spec.Defaults)
 	}
+	expanded, err := stats.Expand(spec.Stats)
+	if err != nil {
+		return Target{}, fmt.Errorf("stats: %w", err)
+	}
+	spec.Stats = expanded
 	spec = spec.interpolate()
 
 	via, err := prefix("via", spec.Via)
