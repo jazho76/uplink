@@ -23,7 +23,8 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # modes   ways to enter; the first is the default. A mode without run opens
 #         the user's shell. Every session returns to the dashboard.
 #
-# A profile holds shared fields; {name} becomes the target's name.
+# {name} in a command becomes the target's name. Top-level keys starting with
+# x- hold YAML anchors for values targets share.
 
 # x-linux: &linux
 #   - { type: text, label: up, unit: seconds, value: cut -d ' ' -f 1 /proc/uptime }
@@ -39,21 +40,19 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #     value: df -P -k / | awk 'NR==2{print $3*1024}'
 #     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
-# profiles:
-#   server:
+# Providers list machines that other tools already know about. Without a
+# discover section, local (this machine) runs, lima (its VMs) when limactl is
+# installed, and docker (its containers) when the daemon is running. A
+# discover list runs exactly the providers it names; "discover: []" turns
+# discovery off.
+# discover: [local, lima]
+
+# targets:
+#   - name: box
 #     group: machines
+#     via: ssh -t me@box.example
 #     stats: *linux
 #     modes:
 #       - { name: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
-
-# Providers list machines that other tools already know about. Without a
-# discover section, local (this machine) runs, lima (its VMs) when limactl is
-# installed, and docker (its containers) when the daemon is running;
-# "discover: []" turns discovery off. An entry's profile overrides the
-# provider's group, stats, logs and modes.
-# discover: []
-
-# targets:
-#   - { name: box, profile: server, via: ssh -t me@box.example }
 `

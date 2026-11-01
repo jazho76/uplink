@@ -31,7 +31,7 @@ func loadConfig(path string) ([]Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	return Merge(doc.Profiles, doc.Config())
+	return Merge(doc.Config())
 }
 
 func mustLoad(t *testing.T, body string) []Target {
@@ -101,8 +101,8 @@ func TestShellWords(t *testing.T) {
 
 func TestEmptyConfigHasNoTargets(t *testing.T) {
 	for name, body := range map[string]string{
-		"empty file":    "",
-		"only profiles": "profiles:\n  vm: { via: ssh vm }\n",
+		"empty file":   "",
+		"only anchors": "x-vm: { via: ssh vm }\n",
 	} {
 		if targets, err := load(t, body); err != nil || len(targets) != 0 {
 			t.Errorf("%s: want no targets and no error, got %v and %v", name, targets, err)
@@ -133,22 +133,21 @@ func TestDiscoverAbsentDiffersFromEmpty(t *testing.T) {
 	}
 }
 
-func TestDefaultsSitBelowTheProfile(t *testing.T) {
-	profiles := map[string]Spec{"mine": {Group: "work"}}
+func TestDefaultsFillWhatFactsLeaveOut(t *testing.T) {
 	discovered := fakeSource{name: "lima", specs: []Spec{{
 		Name:     "dev",
 		Display:  "Dev box",
-		Profile:  "mine",
+		Group:    "work",
 		Defaults: &Spec{Group: "vms", Logs: "tail {name}.log", Modes: shell},
 	}}}
 
-	targets, err := Merge(profiles, discovered)
+	targets, err := Merge(discovered)
 	if err != nil || len(targets) != 1 {
 		t.Fatalf("want one target, got %v and %v", targets, err)
 	}
 	got := targets[0]
 	if got.Group != "work" || got.Logs != "tail dev.log" {
-		t.Errorf("the profile beats defaults, which still fill the rest, got %q and %q", got.Group, got.Logs)
+		t.Errorf("facts beat defaults, which still fill the rest, got %q and %q", got.Group, got.Logs)
 	}
 	if got.Name != "Dev box" || got.ID.Key != "dev" {
 		t.Errorf("display changes the name only, got %q keyed %q", got.Name, got.ID.Key)
@@ -184,7 +183,7 @@ func TestSourcesMergeInOrderWithDistinctIDs(t *testing.T) {
 	config := configSource{{Name: "box", Modes: shell}}
 	lima := fakeSource{name: "lima", specs: []Spec{{Name: "box", Modes: shell}, {Name: "dev", Modes: shell}}}
 
-	targets, err := Merge(nil, config, lima)
+	targets, err := Merge(config, lima)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +200,7 @@ func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
 	config := configSource{{Name: "host", Modes: shell}}
 	lima := fakeSource{name: "lima", err: errors.New("limactl not found")}
 
-	targets, err := Merge(nil, config, lima)
+	targets, err := Merge(config, lima)
 	if len(targets) != 1 || targets[0].Name != "host" {
 		t.Errorf("config targets should survive, got %v", targets)
 	}
@@ -210,21 +209,11 @@ func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
 	}
 }
 
-func TestSourcesShareConfigProfiles(t *testing.T) {
-	profiles := map[string]Spec{"vm": {Group: "vms", Modes: shell}}
-	lima := fakeSource{name: "lima", specs: []Spec{{Name: "dev", Profile: "vm"}}}
-
-	targets, err := Merge(profiles, lima)
-	if err != nil || len(targets) != 1 || targets[0].Group != "vms" {
-		t.Errorf("a discovered spec should take its profile, got %v and %v", targets, err)
-	}
-}
-
 func TestDuplicateSourcesAndBrokenSpecsAreReported(t *testing.T) {
 	first := fakeSource{name: "lima", specs: []Spec{{Name: "x"}, {Modes: shell}}}
 	second := fakeSource{name: "lima", specs: []Spec{{Name: "y", Modes: shell}}}
 
-	targets, err := Merge(nil, first, second)
+	targets, err := Merge(first, second)
 	if len(targets) != 0 {
 		t.Errorf("want no targets, got %v", targets)
 	}
@@ -235,10 +224,9 @@ func TestDuplicateSourcesAndBrokenSpecsAreReported(t *testing.T) {
 	}
 }
 
-func TestProfileFillsWhatTheTargetLeavesOut(t *testing.T) {
+func TestMergedAnchorFillsWhatTheTargetLeavesOut(t *testing.T) {
 	targets := mustLoad(t, `
-profiles:
-  lima:
+x-lima: &lima
     group: vms
     watch: true
     via: ssh -F ~/.lima/{name}/ssh.config lima-{name}
@@ -248,9 +236,9 @@ profiles:
       - { name: tmux, run: "tmux new-session -A -s {name}" }
       - { name: shell }
 targets:`+host+`
-  - { name: forge, profile: lima }
-  - name: tokyo
-    profile: lima
+  - { <<: *lima, name: forge }
+  - <<: *lima
+    name: tokyo
     logs: echo own
     stats: []
     modes:
@@ -281,10 +269,10 @@ targets:`+host+`
 
 	tokyo := find(t, targets, "tokyo")
 	if tokyo.Logs != "echo own" || tokyo.Stats == nil || len(tokyo.Stats) != 0 {
-		t.Errorf("target fields override the profile, got logs %q stats %v", tokyo.Logs, tokyo.Stats)
+		t.Errorf("target fields override the anchor, got logs %q stats %v", tokyo.Logs, tokyo.Stats)
 	}
 	if got := modeNames(tokyo); !slices.Equal(got, []string{"top"}) {
-		t.Errorf("target modes replace the profile's wholesale, got %v", got)
+		t.Errorf("target modes replace the anchor's wholesale, got %v", got)
 	}
 	if top := modeNamed(t, tokyo, "top"); top.Argv[len(top.Argv)-1] != "htop" {
 		t.Errorf("a target mode runs its own command, got %q", top.Argv)
@@ -332,15 +320,13 @@ targets:
 
 func TestHooksInterpolateTheName(t *testing.T) {
 	targets := mustLoad(t, `
-profiles:
-  lima:
+targets:
+  - name: forge
     via: ssh lima-{name}
     status: limactl list {name}
     up: limactl start {name}
     down: limactl stop {name}
     modes: [{ name: shell }]
-targets:
-  - { name: forge, profile: lima }
 `)
 	forge := find(t, targets, "forge")
 	if forge.Status != "limactl list forge" || forge.Up != "limactl start forge" || forge.Down != "limactl stop forge" {
@@ -384,8 +370,6 @@ targets:`+host+`
   - name: good
     via: ssh good
     modes: [{ name: shell }]
-  - name: noprofile
-    profile: missing
   - name: nomodes
     via: ssh x
   - name: dupmodes
@@ -407,8 +391,8 @@ targets:`+host+`
 	if err == nil {
 		t.Fatal("every broken target must be reported")
 	}
-	for _, want := range []string{"unknown profile", "nomodes", `duplicate mode "a"`,
-		"badquote", `"badexec": exec`, `duplicate target "good"`, "#9"} {
+	for _, want := range []string{"nomodes", `duplicate mode "a"`,
+		"badquote", `"badexec": exec`, `duplicate target "good"`, "#8"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q:\n%v", want, err)
 		}
@@ -549,9 +533,8 @@ func TestUnknownFieldsRefuseTheConfig(t *testing.T) {
 		"target":  "targets:\n  - { name: prod, vai: ssh prod, modes: [{ name: shell }] }\n",
 		"mode":    "targets:\n  - { name: prod, modes: [{ name: shell, rnu: bash }] }\n",
 		"stat":    "targets:\n  - { name: prod, stats: [{ type: text, label: a, value: b, lable: c }], modes: [{ name: shell }] }\n",
-		"profile": "profiles:\n  vm: { vai: ssh vm }\ntargets:\n  - { name: prod, modes: [{ name: shell }] }\n",
+		"anchor":  "x-vm: &vm { vai: ssh vm }\ntargets:\n  - { <<: *vm, name: prod, modes: [{ name: shell }] }\n",
 		"display": "targets:\n  - { name: prod, display: db, modes: [{ name: shell }] }\n",
-		"entry":   "discover:\n  - { provider: local, filter: x }\n",
 	} {
 		targets, err := load(t, body)
 		if err == nil || !strings.Contains(err.Error(), "line ") || !strings.Contains(err.Error(), "not found") {
@@ -562,11 +545,13 @@ func TestUnknownFieldsRefuseTheConfig(t *testing.T) {
 }
 
 func TestUnknownSectionsRefuseTheConfig(t *testing.T) {
-	targets, err := load(t, "lima:\n  modes: [{ name: shell }]\ntargets:"+host)
-	if err == nil || !strings.Contains(err.Error(), `unknown section "lima"`) {
-		t.Errorf("an unknown top-level key should be reported, got %v", err)
+	for _, section := range []string{"lima", "profiles"} {
+		targets, err := load(t, section+":\n  vm: { via: ssh vm }\ntargets:"+host)
+		if err == nil || !strings.Contains(err.Error(), `unknown section "`+section+`"`) {
+			t.Errorf("an unknown top-level key should be reported, got %v", err)
+		}
+		noTargets(t, targets)
 	}
-	noTargets(t, targets)
 
 	if _, err := load(t, "x-anything: [1, 2]\ntargets:"+host); err != nil {
 		t.Errorf("x- keys hold anchors and are allowed, got %v", err)

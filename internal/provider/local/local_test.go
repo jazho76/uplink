@@ -86,7 +86,7 @@ func TestMissingToolsDropTheirFeatures(t *testing.T) {
 
 func TestUnknownHostnameShowsTheKey(t *testing.T) {
 	on(t, "linux", "")
-	targets, err := target.Merge(nil, Provider{})
+	targets, err := target.Merge(Provider{})
 	if err != nil || len(targets) != 1 || targets[0].Name != "localhost" {
 		t.Errorf("want a target named localhost, got %v and %v", targets, err)
 	}

@@ -86,7 +86,7 @@ type Provider interface {
 - Each provider is its own package under `internal/provider/`. It imports
   core packages; core never imports a provider.
 - `cmd` holds the one list of available providers. `inventory` matches
-  `discover:` entries to it by name, and applies an entry's `profile`.
+  `discover:` names to it.
 
 - Providers shell out to the tool's CLI and parse its machine-readable output
   (`limactl list --json`, `docker ps --format json`). No SDKs, no reading the
@@ -96,11 +96,11 @@ type Provider interface {
   any other.
 - A provider never creates or deletes instances.
 
-### 7.2 Facts and preferences
+### 7.2 Facts and defaults
 
-A provider fills only what it knows as facts about an instance, plus
-reasonable defaults. Config owns preferences: facts beat the entry's
-profile, which beats the provider's defaults.
+A provider fills what it knows as facts about an instance, plus reasonable
+defaults; facts beat defaults. Config does not adjust discovered targets: a
+wrong inference is fixed in the provider.
 
 ## 8. Portability
 

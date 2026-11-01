@@ -22,36 +22,28 @@ type ModeSpec struct {
 }
 
 type Spec struct {
-	Name    string         `yaml:"name"`
-	Profile string         `yaml:"profile"`
-	Group   string         `yaml:"group"`
-	Via     string         `yaml:"via"`
-	Exec    string         `yaml:"exec"`
-	Status  string         `yaml:"status"`
-	Up      string         `yaml:"up"`
-	Down    string         `yaml:"down"`
-	Logs    string         `yaml:"logs"`
-	Watch   *bool          `yaml:"watch"`
-	Stats   []stats.Metric `yaml:"stats"`
-	Modes   []ModeSpec     `yaml:"modes"`
+	Name   string         `yaml:"name"`
+	Group  string         `yaml:"group"`
+	Via    string         `yaml:"via"`
+	Exec   string         `yaml:"exec"`
+	Status string         `yaml:"status"`
+	Up     string         `yaml:"up"`
+	Down   string         `yaml:"down"`
+	Logs   string         `yaml:"logs"`
+	Watch  *bool          `yaml:"watch"`
+	Stats  []stats.Metric `yaml:"stats"`
+	Modes  []ModeSpec     `yaml:"modes"`
 
 	Display  string `yaml:"-"`
 	Defaults *Spec  `yaml:"-"`
 }
 
-func resolve(source string, spec Spec, profiles map[string]Spec) (Target, error) {
+func resolve(source string, spec Spec) (Target, error) {
 	if spec.Name == "" {
 		return Target{}, errors.New("no name")
 	}
 	if !namePattern.MatchString(spec.Name) {
 		return Target{}, errors.New("name may only hold letters, digits, '.', '_' and '-'")
-	}
-	if spec.Profile != "" {
-		profile, ok := profiles[spec.Profile]
-		if !ok {
-			return Target{}, fmt.Errorf("unknown profile %q", spec.Profile)
-		}
-		spec = spec.over(profile)
 	}
 	if spec.Defaults != nil {
 		spec = spec.over(*spec.Defaults)

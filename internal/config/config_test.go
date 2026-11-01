@@ -33,7 +33,7 @@ func TestTemplateLoadsCleanly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the template should read cleanly: %v", err)
 	}
-	if _, err := target.Merge(doc.Profiles, doc.Config()); err != nil {
+	if _, err := target.Merge(doc.Config()); err != nil {
 		t.Errorf("the template's targets should resolve: %v", err)
 	}
 }

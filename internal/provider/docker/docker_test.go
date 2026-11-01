@@ -29,7 +29,7 @@ func fixture(t *testing.T) {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := target.Merge(nil, Provider{})
+	targets, err := target.Merge(Provider{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"bad json":        {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := target.Merge(nil, Provider{})
+		targets, err := target.Merge(Provider{})
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "docker: ") {
 			t.Errorf("%s: want no targets and a docker error, got %v and %v", name, targets, err)
 		}

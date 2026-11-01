@@ -152,19 +152,18 @@ x-linux: &linux
     value: df -P -k / | awk 'NR==2{print $3*1024}'
     max: df -P -k / | awk 'NR==2{print $2*1024}'
 
-profiles:
-  server:
-    group: machines
-    stats: *linux
-    modes:
-      - { name: tmux, run: tmux new-session -A -s 0 }
-      - { name: shell }
+x-server: &server
+  group: machines
+  stats: *linux
+  modes:
+    - { name: tmux, run: tmux new-session -A -s 0 }
+    - { name: shell }
 
 targets:
-  - { name: box, profile: server, via: ssh -t me@box.example }
+  - { <<: *server, name: box, via: ssh -t me@box.example }
 
-  - name: prod
-    profile: server
+  - <<: *server
+    name: prod
     via: ssh -t -i ~/.ssh/prod_ed25519 deploy@example.com
     modes:
       - { name: tmux, run: "bash -lc 'cd /srv/app && tmux new-session -A -s prod'" }
@@ -191,7 +190,6 @@ without `via` runs here.
 | `watch` | `true` checks status in the background, not only while selected |
 | `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
 | `modes` | Ways to enter the target; the first is the default |
-| `profile` | Profile to take every unset field from |
 
 ### How `via` works
 
@@ -201,8 +199,8 @@ untouched. Without `via`, that is `sh -c <run>` on this machine. That fits
 argument list instead, end `via` with `sh -c`:
 
 ```yaml
-profiles:
-  docker:
+targets:
+  - name: web
     group: containers
     via: docker exec -it {name} sh -c
     exec: docker exec -i {name} sh -c
@@ -213,7 +211,7 @@ profiles:
     modes:
       - { name: shell }
 
-  pod:
+  - name: api
     group: pods
     via: kubectl exec -it {name} -- sh -c
     modes:
@@ -239,14 +237,17 @@ profile, such as a function or `PATH` entry, ask for one:
 | `name` | Name shown in the dashboard |
 | `run` | Shell command to run on the target; omit it to open the user's shell |
 
-### Profiles
+### Sharing values
 
-A profile holds any target field except `name`. A target with `profile: server`
-takes every field it leaves unset from the profile; `modes` replace the
-profile's modes as a whole. `{name}` in `via`, `exec`, `status`, `up`, `down`,
-`logs`, and `run` becomes the target's name (for a discovered target, its key,
-such as `localhost`). Inside a flow mapping, quote values
-that contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
+`{name}` in `via`, `exec`, `status`, `up`, `down`, `logs`, `run`, and stats
+commands becomes the target's name. Inside a flow mapping, quote values that
+contain `{name}`: `{ name: tmux, run: "tmux new-session -A -s {name}" }`.
+
+To share values between targets, define a YAML anchor under a top-level key
+starting with `x-` and refer to it: `stats: *linux` reuses a list, and
+`<<: *server` merges a whole mapping, as in the example above. Fields the
+target sets itself win over merged ones; lists such as `modes` and `stats` are
+replaced as a whole, and `stats: []` turns a merged list off.
 
 ### Discovery
 
@@ -261,19 +262,15 @@ target is named `<provider>/<key>` in `uplink config check`.
 
 Without a `discover` section, the providers that are on by default run. A
 `discover` list runs exactly the providers it names; `discover: []` turns
-discovery off. Discovered targets are listed before the config's. An entry's
-`profile` overrides what the provider picks as
-defaults (group, stats, modes, logs), never what it knows as facts (the name,
-how to reach the machine).
+discovery off. Discovered targets are listed before the config's.
 
-To share values between targets that do not share a profile, define a YAML
-anchor under a top-level key starting with `x-`, such as the `x-linux` list
-above, and refer to it with `stats: *linux`.
+```yaml
+discover: [local, lima]
+```
 
 ### Stats
 
-`stats` lists what the live block shows, in order. A profile's list is taken
-whole; `stats: []` turns an inherited list off.
+`stats` lists what the live block shows, in order.
 
 ```yaml
 stats:

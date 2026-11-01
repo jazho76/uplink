@@ -23,52 +23,28 @@ func Load(path string, providers []Provider) ([]target.Target, error) {
 		sources []target.Source
 		errs    []error
 	)
-	for n, entry := range entries(doc, providers) {
-		if entry.Provider == "" {
-			errs = append(errs, fmt.Errorf("discover entry #%d has no provider", n+1))
-			continue
-		}
-		i := slices.IndexFunc(providers, func(p Provider) bool { return p.Name() == entry.Provider })
+	for _, name := range enabled(doc, providers) {
+		i := slices.IndexFunc(providers, func(p Provider) bool { return p.Name() == name })
 		if i < 0 {
-			errs = append(errs, fmt.Errorf("discover: unknown provider %q", entry.Provider))
+			errs = append(errs, fmt.Errorf("discover: unknown provider %q", name))
 			continue
 		}
-		sources = append(sources, withProfile(providers[i], entry.Profile))
+		sources = append(sources, providers[i])
 	}
 
-	targets, err := target.Merge(doc.Profiles, append(sources, doc.Config())...)
+	targets, err := target.Merge(append(sources, doc.Config())...)
 	return targets, errors.Join(append(errs, err)...)
 }
 
-func entries(doc target.Document, providers []Provider) []target.Entry {
+func enabled(doc target.Document, providers []Provider) []string {
 	if doc.Discover != nil {
 		return doc.Discover
 	}
-	var defaults []target.Entry
+	var defaults []string
 	for _, p := range providers {
 		if p.Default() {
-			defaults = append(defaults, target.Entry{Provider: p.Name()})
+			defaults = append(defaults, p.Name())
 		}
 	}
 	return defaults
-}
-
-type profiled struct {
-	target.Source
-	profile string
-}
-
-func withProfile(source target.Source, profile string) target.Source {
-	if profile == "" {
-		return source
-	}
-	return profiled{source, profile}
-}
-
-func (p profiled) Specs() ([]target.Spec, error) {
-	specs, err := p.Source.Specs()
-	for i := range specs {
-		specs[i].Profile = p.profile
-	}
-	return specs, err
 }

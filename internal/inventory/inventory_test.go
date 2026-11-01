@@ -46,7 +46,7 @@ func ids(targets []target.Target) string {
 }
 
 func TestDefaultProvidersRunWithoutADiscoverSection(t *testing.T) {
-	for name, body := range map[string]string{"missing file": "", "no section": "profiles: {}\n"} {
+	for name, body := range map[string]string{"missing file": "", "no section": "targets: []\n"} {
 		targets, err := load(t, body)
 		if err != nil || ids(targets) != "near/box" {
 			t.Errorf("%s: want only the default provider, got %q and %v", name, ids(targets), err)
@@ -55,7 +55,7 @@ func TestDefaultProvidersRunWithoutADiscoverSection(t *testing.T) {
 }
 
 func TestDiscoverListsExactlyWhatRuns(t *testing.T) {
-	targets, err := load(t, "discover:\n  - provider: far\n")
+	targets, err := load(t, "discover: [far]\n")
 	if err != nil || ids(targets) != "far/box" {
 		t.Errorf("want only far, got %q and %v", ids(targets), err)
 	}
@@ -66,31 +66,12 @@ func TestDiscoverListsExactlyWhatRuns(t *testing.T) {
 }
 
 func TestUnknownProviderIsReported(t *testing.T) {
-	targets, err := load(t, "discover:\n  - provider: nope\n  - provider: near\n")
+	targets, err := load(t, "discover: [nope, near]\n")
 	if ids(targets) != "near/box" {
 		t.Errorf("known providers still run, got %q", ids(targets))
 	}
 	if err == nil || !strings.Contains(err.Error(), `unknown provider "nope"`) {
 		t.Errorf("want the unknown provider reported, got %v", err)
-	}
-}
-
-func TestEntryProfileOverridesDefaultsNotFacts(t *testing.T) {
-	targets, err := load(t, `
-profiles:
-  mine: { group: work, modes: [{ name: tmux }] }
-discover:
-  - { provider: near, profile: mine }
-`)
-	if err != nil || len(targets) != 1 {
-		t.Fatalf("want one target, got %v and %v", targets, err)
-	}
-	got := targets[0]
-	if got.Group != "work" || got.Modes[0].Name != "tmux" {
-		t.Errorf("the profile should beat the provider defaults, got %q and %q", got.Group, got.Modes[0].Name)
-	}
-	if got.ID.String() != "near/box" || got.Name != "near-box" {
-		t.Errorf("the profile must not touch identity, got %s shown as %q", got.ID, got.Name)
 	}
 }
 
@@ -101,9 +82,9 @@ func TestDiscoveredTargetsComeFirst(t *testing.T) {
 	}
 }
 
-func TestEntryWithoutProviderIsReported(t *testing.T) {
-	_, err := load(t, "discover:\n  - provider: near\n  - profile: x\n")
-	if err == nil || !strings.Contains(err.Error(), "discover entry #2 has no provider") {
-		t.Errorf("want the entry without a provider reported, got %v", err)
+func TestDiscoverTakesProviderNamesOnly(t *testing.T) {
+	targets, err := load(t, "discover:\n  - { provider: near }\n")
+	if err == nil || len(targets) != 0 {
+		t.Errorf("a mapping entry should refuse the config, got %q and %v", ids(targets), err)
 	}
 }

@@ -16,7 +16,7 @@ func (configSource) Name() string { return ConfigSource }
 
 func (c configSource) Specs() ([]Spec, error) { return c, nil }
 
-func Merge(profiles map[string]Spec, sources ...Source) ([]Target, error) {
+func Merge(sources ...Source) ([]Target, error) {
 	var (
 		targets []Target
 		errs    []error
@@ -37,7 +37,7 @@ func Merge(profiles map[string]Spec, sources ...Source) ([]Target, error) {
 			continue
 		}
 		for i, spec := range specs {
-			t, err := resolve(name, spec, profiles)
+			t, err := resolve(name, spec)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("target %s: %w", label(name, spec, i), err))
 				continue
