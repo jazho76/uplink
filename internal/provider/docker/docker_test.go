@@ -61,7 +61,7 @@ func TestContainerFacts(t *testing.T) {
 		{"status", web.Status, `docker inspect -f '{{.State.Running}}' web 2>/dev/null | grep -qx true`},
 		{"up", web.Up, "docker start web"},
 		{"down", web.Down, "docker stop web"},
-		{"logs", web.Logs, "docker logs --tail 500 web 2>&1"},
+		{"logs", web.Logs, `docker events --since 24h --until "$(date +%s)" --filter container=web --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}' | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$' | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)

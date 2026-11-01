@@ -93,7 +93,7 @@ func spec(container string) target.Spec {
 		Status: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
 		Up:     quote("docker", "start", container),
 		Down:   quote("docker", "stop", container),
-		Logs:   quote("docker", "logs", "--tail", "500", container) + " 2>&1",
+		Logs:   events(container),
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
@@ -104,4 +104,11 @@ func spec(container string) target.Spec {
 			},
 		},
 	}
+}
+
+func events(container string) string {
+	return `docker events --since 24h --until "$(date +%s)" ` + target.Quote([]string{"--filter", "container=" + container}) +
+		` --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}'` +
+		` | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$'` +
+		` | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`
 }
