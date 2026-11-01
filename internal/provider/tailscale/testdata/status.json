@@ -1,0 +1,12 @@
+{
+  "BackendState": "Running",
+  "MagicDNSSuffix": "tail0000.ts.net",
+  "CurrentTailnet": { "Name": "me@example.com", "MagicDNSSuffix": "tail0000.ts.net", "MagicDNSEnabled": true },
+  "Self": { "HostName": "here", "DNSName": "here.tail0000.ts.net.", "OS": "linux", "Online": true },
+  "Peer": {
+    "nodekey:1": { "HostName": "berlin", "DNSName": "berlin.tail0000.ts.net.", "OS": "linux", "Online": true, "TailscaleIPs": ["100.64.0.2", "fd7a::2"] },
+    "nodekey:2": { "HostName": "Ana's MacBook", "DNSName": "anas-macbook.tail0000.ts.net.", "OS": "macOS", "Online": false, "TailscaleIPs": ["100.64.0.3"] },
+    "nodekey:3": { "HostName": "phone", "DNSName": "phone.tail0000.ts.net.", "OS": "iOS", "Online": true, "TailscaleIPs": ["100.64.0.4"] },
+    "nodekey:4": { "HostName": "se-sto-wg-001.mullvad.ts.net", "DNSName": "se-sto-wg-001.mullvad.ts.net.", "OS": "linux", "Online": true, "ExitNodeOption": true, "Location": { "Country": "Sweden", "City": "Stockholm" }, "TailscaleIPs": ["100.64.0.5"] }
+  }
+}

@@ -5,6 +5,7 @@ import (
 	"github.com/jazho76/uplink/internal/provider/docker"
 	"github.com/jazho76/uplink/internal/provider/lima"
 	"github.com/jazho76/uplink/internal/provider/local"
+	"github.com/jazho76/uplink/internal/provider/tailscale"
 )
 
-var providers = []inventory.Provider{local.Provider{}, lima.Provider{}, docker.Provider{}}
+var providers = []inventory.Provider{local.Provider{}, lima.Provider{}, docker.Provider{}, tailscale.Provider{}}
