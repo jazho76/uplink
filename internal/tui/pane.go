@@ -19,6 +19,7 @@ type pane struct {
 	key    rune
 	items  []item
 	cursor int
+	local  bool
 }
 
 func assignPaneKeys(panes []pane) {
@@ -88,14 +89,24 @@ func distributeRows(panes []pane, total int) []int {
 	}
 
 	sum := 0
+	var growing []int
 	for i, p := range panes {
 		rows[i] = max(len(p.items)+borderCells, minPaneRows)
 		sum += rows[i]
+		if !p.local {
+			growing = append(growing, i)
+		}
 	}
 
 	if slack := total - sum; slack > 0 {
-		for i, extra := range shares(slack, len(panes)) {
-			rows[i] += extra
+		if len(growing) == 0 {
+			growing = make([]int, len(panes))
+			for i := range growing {
+				growing[i] = i
+			}
+		}
+		for i, extra := range shares(slack, len(growing)) {
+			rows[growing[i]] += extra
 		}
 		return rows
 	}
@@ -135,7 +146,7 @@ func scrollHint(start, count, rows int) string {
 }
 
 func (m model) paneSummary(p pane) string {
-	if len(p.items) == 0 {
+	if p.local || len(p.items) == 0 {
 		return ""
 	}
 	running := 0

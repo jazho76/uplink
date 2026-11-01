@@ -12,7 +12,7 @@ import (
 const (
 	name    = "local"
 	key     = "localhost"
-	group   = "machines"
+	group   = "local"
 	journal = "journalctl --system -n 500 --no-pager -o short"
 )
 
@@ -33,6 +33,7 @@ func (Provider) Specs() ([]target.Spec, error) {
 	return []target.Spec{{
 		Name:    key,
 		Display: display,
+		Local:   true,
 		Defaults: &target.Spec{
 			Group: group,
 			Stats: stats.ForOS(goos),

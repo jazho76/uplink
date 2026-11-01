@@ -45,6 +45,7 @@ type Target struct {
 	Watch  bool
 	Stats  []stats.Metric
 	Modes  []Mode
+	Local  bool
 }
 
 func (t Target) DefaultMode() Mode {

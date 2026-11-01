@@ -49,11 +49,11 @@ func modeNames(s target.Spec) []string {
 func TestDescribesThisMachine(t *testing.T) {
 	on(t, "linux", "fedora", "tmux", "journalctl")
 	s := spec(t)
-	if s.Name != "localhost" || s.Display != "fedora" {
-		t.Errorf("want key localhost shown as fedora, got %q and %q", s.Name, s.Display)
+	if s.Name != "localhost" || s.Display != "fedora" || !s.Local {
+		t.Errorf("want local key localhost shown as fedora, got %q and %q, local %v", s.Name, s.Display, s.Local)
 	}
-	if s.Defaults.Group != "machines" || !slices.Equal(s.Defaults.Stats, stats.ForOS("linux")) {
-		t.Errorf("want the machines group with linux stats, got %+v", s.Defaults)
+	if s.Defaults.Group != "local" || !slices.Equal(s.Defaults.Stats, stats.ForOS("linux")) {
+		t.Errorf("want the local group with linux stats, got %+v", s.Defaults)
 	}
 	if got := modeNames(s); !slices.Equal(got, []string{"tmux", "shell"}) {
 		t.Errorf("want tmux then shell, got %v", got)

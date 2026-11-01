@@ -115,10 +115,11 @@ func (m *model) rebuild() {
 	for _, t := range m.targets {
 		i := slices.IndexFunc(panes, func(p pane) bool { return p.group == t.Group })
 		if i < 0 {
-			panes = append(panes, pane{group: t.Group})
+			panes = append(panes, pane{group: t.Group, local: true})
 			i = len(panes) - 1
 		}
 		panes[i].items = append(panes[i].items, item{target: t})
+		panes[i].local = panes[i].local && t.Local
 	}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)

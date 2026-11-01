@@ -106,7 +106,7 @@ The left side lists targets in their groups, in the order
 they first appear. The right side shows the selected target's status and launch
 mode, its declared stats, and recent logs; `uplink config check` shows the exact
 command behind each mode. This machine is listed by default, with stats for its
-OS; see [Discovery](#discovery).
+OS, in a compact `local` pane at the top; see [Discovery](#discovery).
 
 A target's status is checked while it is selected, and in the background for
 targets with `watch: true`; others show as unknown until you visit them. When a
@@ -244,7 +244,7 @@ target is named `<provider>/<key>` in `uplink config check`.
 | --- | --- | --- |
 | `docker` | Every container, running or stopped, in `containers`: entered with `docker exec`, started and stopped with `docker start`/`stop`, `docker logs` as logs, a memory gauge, `tmux` and `shell` modes, watched in the background | when `docker` is installed and its daemon is running |
 | `lima` | Every Lima instance, running or stopped, in `vms`: reached over its `ssh.config`, started and stopped with `limactl`, its serial log as logs, stats for its guest OS, `tmux` and `shell` modes, watched in the background | when `limactl` is installed |
-| `local` | This machine, shown by its hostname, in `machines`, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
+| `local` | This machine, shown by its hostname, in its own `local` group, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
 | `tailscale` | Every peer on your tailnet except phones, TVs, and Mullvad exit nodes, keyed by its MagicDNS name, in `machines`: reached with `ssh` at that name (or its Tailscale IP without MagicDNS), up when ssh gets in, stats for its OS, the journal as logs on Linux, `tmux` and `shell` modes, watched in the background | when `tailscale` is installed and connected |
 
 Without a `discover` section, the providers that are on by default run. A

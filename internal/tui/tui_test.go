@@ -1037,6 +1037,9 @@ func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	if got := m.paneSummary(pane{}); got != "" {
 		t.Errorf("an empty pane has nothing to count, got %q", got)
 	}
+	if got := m.paneSummary(pane{items: []item{up}, local: true}); got != "" {
+		t.Errorf("the local pane shows no count, got %q", got)
+	}
 }
 
 func TestClipMeasuresDisplayWidth(t *testing.T) {
@@ -1143,6 +1146,35 @@ func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 		if r < minPaneRows {
 			t.Errorf("an overfull column must not starve a pane, got %d", r)
 		}
+	}
+}
+
+func TestLocalPaneKeepsItsHeight(t *testing.T) {
+	panes := []pane{{items: make([]item, 1), local: true}, {items: make([]item, 2)}, {items: make([]item, 2)}}
+	rows := distributeRows(panes, 20)
+	if rows[0] != 1+borderCells || rows[0]+rows[1]+rows[2] != 20 {
+		t.Errorf("the local pane should stay one row tall and the rest fill the column, got %v", rows)
+	}
+
+	alone := distributeRows([]pane{{items: make([]item, 1), local: true}}, 20)
+	if alone[0] != 20 {
+		t.Errorf("a lone local pane still fills the column, got %v", alone)
+	}
+}
+
+func TestPaneIsLocalOnlyWhenEveryTargetIs(t *testing.T) {
+	here := hostTarget()
+	here.Local = true
+	stray := vm("stray")
+	stray.Group = "local"
+
+	m := newModel([]target.Target{here, vm("forge")}, &fakeBackend{})
+	if !m.panes[0].local || m.panes[1].local {
+		t.Errorf("only the pane of local targets should be local, got %v and %v", m.panes[0].local, m.panes[1].local)
+	}
+	m = newModel([]target.Target{here, stray}, &fakeBackend{})
+	if m.panes[0].local {
+		t.Error("a pane mixing in other targets is not local")
 	}
 }
 

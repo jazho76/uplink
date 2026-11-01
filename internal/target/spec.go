@@ -35,6 +35,7 @@ type Spec struct {
 	Modes  []ModeSpec     `yaml:"modes"`
 
 	Display  string `yaml:"-"`
+	Local    bool   `yaml:"-"`
 	Defaults *Spec  `yaml:"-"`
 }
 
@@ -81,6 +82,7 @@ func resolve(source string, spec Spec) (Target, error) {
 		Logs:   spec.Logs,
 		Watch:  valueOr(spec.Watch, false),
 		Stats:  spec.Stats,
+		Local:  spec.Local,
 	}
 
 	modes, err := t.modes(spec.Modes)
