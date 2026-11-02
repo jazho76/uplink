@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ const (
 	percentWidth = len("100%")
 	fieldGap     = 2
 	minLiveBar   = 8
+
+	maxWindowName = 24
 )
 
 var (
@@ -109,7 +112,7 @@ func (m model) previewBody(width, height int) string {
 	}
 
 	if sessions := m.renderSessions(it.id(), width); sessions != "" {
-		b.WriteString("\n" + rule("tmux", width))
+		b.WriteString("\n" + rule("sessions", width))
 		b.WriteString(sessions)
 	}
 
@@ -188,21 +191,43 @@ func (m model) renderSessions(id target.ID, width int) string {
 	}
 	fields := make([]field, len(e.snapshot.Sessions))
 	for i, s := range e.snapshot.Sessions {
-		fields[i] = field{clip(s.Name, width/2), sessionDetails(s)}
+		fields[i].key = clip(s.Name, width/2)
+		if s.Attached {
+			fields[i].key += modeMarker.Render("*")
+		}
+	}
+	room := width - widestKey(fields) - fieldGap
+	for i, s := range e.snapshot.Sessions {
+		fields[i].value = windowList(s.Windows, room)
 	}
 	return renderFields(fields, width)
 }
 
-func sessionDetails(s inspect.Session) string {
-	noun := "windows"
-	if s.Windows == 1 {
-		noun = "window"
+func windowList(windows []inspect.Window, width int) string {
+	labels := make([]string, len(windows))
+	for i, w := range windows {
+		labels[i] = windowLabel(w, width)
 	}
-	details := valueStyle.Render(fmt.Sprintf("%d %s", s.Windows, noun))
-	if s.Attached {
-		details += strings.Repeat(" ", fieldGap) + modeMarker.Render("attached")
+	gap := strings.Repeat(" ", fieldGap)
+	for shown := len(labels); shown >= 0; shown-- {
+		parts := slices.Clone(labels[:shown])
+		if hidden := len(labels) - shown; hidden > 0 {
+			parts = append(parts, labelStyle.Render(fmt.Sprintf("+%d", hidden)))
+		}
+		if list := strings.Join(parts, gap); lipgloss.Width(list) <= width {
+			return list
+		}
 	}
-	return details
+	return ""
+}
+
+func windowLabel(w inspect.Window, width int) string {
+	suffix := ""
+	if w.Panes > 1 {
+		suffix = labelStyle.Render(fmt.Sprintf(" (%d)", w.Panes))
+	}
+	name := clip(w.Name, min(maxWindowName, width-lipgloss.Width(suffix)))
+	return valueStyle.Render(name) + suffix
 }
 
 type gaugeRow struct {

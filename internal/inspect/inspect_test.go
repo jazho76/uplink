@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"testing"
@@ -14,8 +15,14 @@ import (
 
 var uptime = stats.Metric{Type: stats.TypeText, Label: "up", Value: "echo 42"}
 
+const tmuxStub = `case "$1" in
+list-sessions) echo 'session $0 1 work' ;;
+list-windows) echo 'window $0 2 my editor'; echo 'window $0 1 logs' ;;
+esac`
+
 func TestParseReadsEverySection(t *testing.T) {
-	out := "0 value 42\ntool tmux\nsession 3 1 main\nsession 1 0 my long name\n"
+	out := "0 value 42\ntool tmux\nsession $1 1 main\nsession $0 0 my long: name\n" +
+		"window $0 1 notes\nwindow $1 2 my editor\nwindow $1 1 logs\n"
 	snapshot := Parse(out, Request{Metrics: []stats.Metric{uptime}})
 
 	if len(snapshot.Readings) != 1 || snapshot.Readings[0].Text != "42" {
@@ -25,25 +32,32 @@ func TestParseReadsEverySection(t *testing.T) {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
 	want := []Session{
-		{Name: "main", Windows: 3, Attached: true},
-		{Name: "my long name", Windows: 1},
+		{Name: "main", Attached: true, Windows: []Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}},
+		{Name: "my long: name", Windows: []Window{{Name: "notes", Panes: 1}}},
 	}
-	if !slices.Equal(snapshot.Sessions, want) {
+	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}
 }
 
 func TestParseStripsEscapesFromSessionNames(t *testing.T) {
-	snapshot := Parse("session 1 0 \x1b[31mred\x1b[0m\n", Request{})
-	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Name != "red" {
+	snapshot := Parse("session $0 0 \x1b[31mred\x1b[0m\nwindow $0 1 \x1b[32mgreen\x1b[0m\n", Request{})
+	want := []Session{{Name: "red", Windows: []Window{{Name: "green", Panes: 1}}}}
+	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("a target must not be able to style the dashboard, got %+v", snapshot.Sessions)
 	}
 }
 
 func TestParseSkipsWhatItCannotRead(t *testing.T) {
-	snapshot := Parse("motd banner\ntool\nsession\nsession x 0 name\nsession 1 y name\nsession 1 0\n", Request{})
+	snapshot := Parse("motd banner\ntool\nsession\nsession x 0 name\nsession $0 y name\nsession $0 0\nwindow $0 1 orphan\n", Request{})
 	if len(snapshot.Sessions) != 0 || len(snapshot.Tools) != 0 {
 		t.Errorf("malformed lines should be dropped, got %+v", snapshot)
+	}
+
+	snapshot = Parse("session $0 0 main\nwindow $0 x bad\nwindow $0 1\nwindow $9 1 stranger\nwindow $0 1 good\n", Request{})
+	want := []Session{{Name: "main", Windows: []Window{{Name: "good", Panes: 1}}}}
+	if !reflect.DeepEqual(snapshot.Sessions, want) {
+		t.Errorf("want only the well-formed window, got %+v", snapshot.Sessions)
 	}
 }
 
@@ -89,13 +103,14 @@ func inspectLocally(t *testing.T) Snapshot {
 }
 
 func TestRunReportsSessions(t *testing.T) {
-	pathWith(t, map[string]string{"tmux": `echo "session 2 1 work"`})
+	pathWith(t, map[string]string{"tmux": tmuxStub})
 
 	snapshot := inspectLocally(t)
 	if !slices.Contains(snapshot.Tools, "tmux") {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
-	if want := []Session{{Name: "work", Windows: 2, Attached: true}}; !slices.Equal(snapshot.Sessions, want) {
+	want := []Session{{Name: "work", Attached: true, Windows: []Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
+	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}
 }
@@ -140,7 +155,7 @@ func TestRunSurvivesAMissingTmux(t *testing.T) {
 
 func builtinLabels(t *testing.T, kernel string) Snapshot {
 	t.Helper()
-	pathWith(t, map[string]string{"uname": "echo " + kernel, "tmux": `echo "session 1 0 work"`})
+	pathWith(t, map[string]string{"uname": "echo " + kernel, "tmux": tmuxStub})
 	snapshot, err := Run(30*time.Second, Request{BuiltinStats: true}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)

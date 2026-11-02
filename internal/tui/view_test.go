@@ -13,7 +13,7 @@ import (
 	"github.com/jazho76/uplink/internal/target"
 )
 
-const sessionsRule = "tmux ─"
+const sessionsRule = "sessions ─"
 
 func withSessions(m model, name string, sessions ...inspect.Session) model {
 	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
@@ -31,7 +31,7 @@ func focusedPreview(t *testing.T, sessions ...inspect.Session) model {
 func preview(m model) string { return ansi.Strip(m.previewBody(60, 30)) }
 
 func TestSessionsSitBetweenLiveAndLogs(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "main", Windows: 1})
+	m := focusedPreview(t, inspect.Session{Name: "main"})
 	m.logPeek = peek{id: configID("forge"), text: "boot line"}
 
 	got := preview(m)
@@ -56,14 +56,14 @@ func TestSessionsShowWithoutStats(t *testing.T) {
 	if got := preview(m); strings.Contains(got, sessionsRule) {
 		t.Errorf("an uninspected target has no section, got:\n%s", got)
 	}
-	got := preview(withSessions(m, "dojo", inspect.Session{Name: "main", Windows: 1}))
+	got := preview(withSessions(m, "dojo", inspect.Session{Name: "main"}))
 	if !strings.Contains(got, sessionsRule) || !strings.Contains(got, "main") || strings.Contains(got, "live ─") {
 		t.Errorf("want sessions and no live block, got:\n%s", got)
 	}
 }
 
 func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
-	sessions := inspect.Session{Name: "main", Windows: 1}
+	sessions := inspect.Session{Name: "main"}
 	m := focusedPreview(t, sessions)
 
 	down := probed(m, "forge", false)
@@ -84,8 +84,11 @@ func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
 
 func TestSessionRowsDescribeTheSession(t *testing.T) {
 	got := preview(focusedPreview(t,
-		inspect.Session{Name: "work", Windows: 3, Attached: true},
-		inspect.Session{Name: "my notes", Windows: 1},
+		inspect.Session{Name: "work", Attached: true, Windows: []inspect.Window{
+			{Name: "editor", Panes: 1},
+			{Name: "dev server", Panes: 2},
+		}},
+		inspect.Session{Name: "my notes", Windows: []inspect.Window{{Name: "vim", Panes: 1}}},
 	))
 	lines := strings.Split(got, "\n")
 	row := func(name string) string {
@@ -95,20 +98,48 @@ func TestSessionRowsDescribeTheSession(t *testing.T) {
 		}
 		return lines[i]
 	}
-	if work := row("work"); !strings.Contains(work, "3 windows") || !strings.Contains(work, "attached") {
-		t.Errorf("want plural and attached, got %q", work)
+	if work := row("work"); !strings.HasPrefix(work, "work*") || !strings.Contains(work, "editor  dev server (2)") {
+		t.Errorf("want the attached session marked and panes above one counted, got %q", work)
 	}
-	if notes := row("my notes"); !strings.Contains(notes, "1 window") || strings.Contains(notes, "windows") || strings.Contains(notes, "attached") {
-		t.Errorf("want singular and detached, got %q", notes)
+	if notes := row("my notes"); strings.Contains(notes, "*") || !strings.Contains(notes, "vim") || strings.Contains(notes, "(1)") {
+		t.Errorf("want a detached session with no single-pane count, got %q", notes)
+	}
+	nameColumn := strings.Index(row("my notes"), "vim")
+	if got := strings.Index(row("work"), "editor"); got != nameColumn {
+		t.Errorf("the mark must not shift the windows: %d and %d", got, nameColumn)
+	}
+}
+
+func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
+	var windows []inspect.Window
+	for _, name := range strings.Fields("alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike") {
+		windows = append(windows, inspect.Window{Name: name, Panes: 1})
+	}
+	got := preview(focusedPreview(t, inspect.Session{Name: "main", Attached: true, Windows: windows}))
+	for _, want := range []string{"main*", "alpha", "+"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "mike") {
+		t.Errorf("the last window should not fit:\n%s", got)
+	}
+}
+
+func TestLongWindowNameIsClipped(t *testing.T) {
+	long := strings.Repeat("w", 100)
+	got := preview(focusedPreview(t, inspect.Session{Name: "main", Windows: []inspect.Window{{Name: long, Panes: 2}, {Name: "next", Panes: 1}}}))
+	if strings.Contains(got, strings.Repeat("w", maxWindowName+1)) || !strings.Contains(got, "(2)") || !strings.Contains(got, "next") {
+		t.Errorf("one long name must not hide the rest:\n%s", got)
 	}
 }
 
 func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 	got := preview(focusedPreview(t,
-		inspect.Session{Name: strings.Repeat("x", 100), Windows: 2},
-		inspect.Session{Name: "main", Windows: 3, Attached: true},
+		inspect.Session{Name: strings.Repeat("x", 100), Windows: []inspect.Window{{Name: "editor", Panes: 1}}},
+		inspect.Session{Name: "main", Attached: true, Windows: []inspect.Window{{Name: "vim", Panes: 1}}},
 	))
-	for _, want := range []string{"2 windows", "3 windows", "attached"} {
+	for _, want := range []string{"editor", "vim", "main*"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("a long name must not push out %q:\n%s", want, got)
 		}
@@ -116,7 +147,10 @@ func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 }
 
 func TestNarrowSessionsStayInThePane(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "a session with a long name", Windows: 12, Attached: true})
+	m := focusedPreview(t, inspect.Session{Name: "a session with a long name", Attached: true, Windows: []inspect.Window{
+		{Name: "a window with a long name", Panes: 3},
+		{Name: "another", Panes: 1},
+	}})
 	const width = 20
 	for _, line := range strings.Split(m.previewBody(width, 30), "\n") {
 		if got := lipgloss.Width(line); got > width {
@@ -126,7 +160,7 @@ func TestNarrowSessionsStayInThePane(t *testing.T) {
 }
 
 func TestLogsShrinkToFitSessions(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "one", Windows: 1}, inspect.Session{Name: "two", Windows: 1})
+	m := focusedPreview(t, inspect.Session{Name: "one"}, inspect.Session{Name: "two"})
 	m.logPeek = peek{id: configID("forge"), text: strings.Repeat("old line\n", 30) + "newest line"}
 
 	const height = 16
