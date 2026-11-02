@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspect"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -75,14 +75,14 @@ type peek struct {
 }
 
 type liveEntry struct {
-	state     status
-	action    status
-	readings  []stats.Reading
-	statsOK   bool
-	statsAt   time.Time
-	checkedAt time.Time
-	pending   bool
-	epoch     int
+	state       status
+	action      status
+	snapshot    inspect.Snapshot
+	inspectOK   bool
+	inspectedAt time.Time
+	checkedAt   time.Time
+	pending     bool
+	epoch       int
 }
 
 func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), backend target.Backend) error {
@@ -250,12 +250,12 @@ type logViewMsg struct {
 }
 
 type liveMsg struct {
-	id       target.ID
-	epoch    int
-	up       bool
-	full     bool
-	readings []stats.Reading
-	statsOK  bool
+	id        target.ID
+	epoch     int
+	up        bool
+	full      bool
+	snapshot  inspect.Snapshot
+	inspectOK bool
 }
 
 type hookDoneMsg struct {
@@ -282,9 +282,9 @@ func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea
 	return func() tea.Msg {
 		msg := liveMsg{id: t.ID, epoch: epoch, full: full}
 		msg.up = backend.Status(t) == nil
-		if msg.up && full && len(t.Stats) > 0 {
-			readings, err := backend.Stats(t)
-			msg.readings, msg.statsOK = readings, err == nil
+		if msg.up && full {
+			snapshot, err := backend.Inspect(t)
+			msg.snapshot, msg.inspectOK = snapshot, err == nil
 		}
 		return msg
 	}
@@ -298,7 +298,7 @@ func (m model) check(t target.Target, full bool) tea.Cmd {
 }
 
 func (m model) checkSelectedIfStale() tea.Cmd {
-	if time.Since(m.live[m.selected().id()].statsAt) < liveInterval {
+	if time.Since(m.live[m.selected().id()].inspectedAt) < liveInterval {
 		return nil
 	}
 	return m.checkSelected()
@@ -346,14 +346,14 @@ func (m model) settle(msg liveMsg) liveEntry {
 		e.state = statusUp
 	}
 	if msg.full {
-		e.statsAt = e.checkedAt
-		e.statsOK = msg.statsOK
-		if msg.statsOK {
-			e.readings = msg.readings
+		e.inspectedAt = e.checkedAt
+		e.inspectOK = msg.inspectOK
+		if msg.inspectOK {
+			e.snapshot = msg.snapshot
 		}
 	}
 	if !msg.up {
-		e.statsOK = false
+		e.inspectOK = false
 	}
 	return e
 }

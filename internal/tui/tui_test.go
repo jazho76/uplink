@@ -11,29 +11,30 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/inspect"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
 type fakeBackend struct {
-	logs     map[string]string
-	down     map[string]bool
-	hooks    []string
-	statuses int
-	stats    int
-	sessions []string
+	logs        map[string]string
+	down        map[string]bool
+	hooks       []string
+	statuses    int
+	inspections int
+	sessions    []string
 }
 
-func (f *fakeBackend) Stats(t target.Target) ([]stats.Reading, error) {
-	f.stats++
+func (f *fakeBackend) Inspect(t target.Target) (inspect.Snapshot, error) {
+	f.inspections++
 	if f.down[t.Name] {
-		return nil, errBoom{}
+		return inspect.Snapshot{}, errBoom{}
 	}
 	readings := make([]stats.Reading, len(t.Stats))
 	for i, m := range t.Stats {
 		readings[i] = reading(m, 0.1, 4)
 	}
-	return readings, nil
+	return inspect.Snapshot{Readings: readings}, nil
 }
 
 var linuxMetrics = []stats.Metric{
@@ -147,7 +148,7 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, readings: linuxReadings(0, 4, 0, 0, 0), statsOK: up})
+	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: inspect.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
 	return next.(model)
 }
 
@@ -606,13 +607,13 @@ func TestStatusAndStatsAreSeparateChecks(t *testing.T) {
 	backend.down["gone"] = true
 
 	m = focus(m, "dojo").withSelectionRefreshed()
-	if backend.statuses != 1 || backend.stats != 1 || m.statusOf(itemNamed(m, "dojo").target) != statusUp {
-		t.Errorf("an up target runs one status check, then its stats; ran %d checks and %d probes", backend.statuses, backend.stats)
+	if backend.statuses != 1 || backend.inspections != 1 || m.statusOf(itemNamed(m, "dojo").target) != statusUp {
+		t.Errorf("an up target runs one status check, then one inspection; ran %d checks and %d inspections", backend.statuses, backend.inspections)
 	}
 
 	m = focus(m, "gone").withSelectionRefreshed()
-	if backend.statuses != 2 || backend.stats != 1 || m.statusOf(itemNamed(m, "gone").target) != statusDown {
-		t.Errorf("a down target runs its status check and no stats; ran %d checks and %d probes", backend.statuses, backend.stats)
+	if backend.statuses != 2 || backend.inspections != 1 || m.statusOf(itemNamed(m, "gone").target) != statusDown {
+		t.Errorf("a down target runs its status check and no inspection; ran %d checks and %d inspections", backend.statuses, backend.inspections)
 	}
 }
 
@@ -680,7 +681,7 @@ func TestSlowProbesNeverStack(t *testing.T) {
 
 	m = probed(m, "forge", true)
 	landed := m.live[configID("forge")]
-	landed.statsAt = time.Now().Add(-liveInterval)
+	landed.inspectedAt = time.Now().Add(-liveInterval)
 	m.live[configID("forge")] = landed
 	if m.checkSelectedIfStale() == nil {
 		t.Error("once the result lands and goes stale, the next probe may go out")
@@ -988,7 +989,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspect.Snapshot{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -1005,7 +1006,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true, readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspect.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1395,8 +1396,8 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	box.Stats = []stats.Metric{gpu, cache, agents, broken}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
-	m.live[configID("box")] = liveEntry{statsAt: time.Now(), state: statusUp, statsOK: true,
-		readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}
+	m.live[configID("box")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true,
+		snapshot: inspect.Snapshot{Readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}
@@ -1568,10 +1569,10 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 
 	next, _ := m.Update(configEditedMsg{})
 	m = next.(model)
-	if forge := m.live[configID("forge")]; forge.readings != nil || forge.state != statusUp {
+	if forge := m.live[configID("forge")]; forge.snapshot.Readings != nil || forge.state != statusUp {
 		t.Errorf("changed stats drop their readings but keep the status, got %+v", forge)
 	}
-	if m.live[configID("tokyo")].readings == nil {
+	if m.live[configID("tokyo")].snapshot.Readings == nil {
 		t.Errorf("unchanged stats keep their readings")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPresetsAreValid(t *testing.T) {
@@ -26,11 +25,7 @@ func TestPresetReadsThisMachine(t *testing.T) {
 	if metrics == nil {
 		t.Skipf("no preset for %s", runtime.GOOS)
 	}
-	readings, err := Run(10*time.Second, metrics, []string{"sh"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, r := range readings {
+	for _, r := range runLocally(t, metrics) {
 		if !r.OK {
 			t.Errorf("%s gave no reading", r.Metric.Label)
 		}

@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/jazho76/uplink/internal/run"
 )
 
 const (
@@ -96,7 +94,7 @@ func quote(s string) string {
 
 var metricTimeout = 5 * time.Second
 
-func compile(metrics []Metric) string {
+func Script(metrics []Metric) string {
 	lines := []string{fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))}
 	for i, m := range metrics {
 		lines = append(lines, capture(fmt.Sprintf("%d value", i), m.Value))
@@ -152,15 +150,4 @@ func (r Reading) Fraction() float64 {
 		return 0
 	}
 	return r.Value / r.Max
-}
-
-func Run(limit time.Duration, metrics []Metric, argv []string) ([]Reading, error) {
-	if len(argv) == 0 {
-		return nil, errors.New("stats: no command to run")
-	}
-	out, err := run.NonInteractive(limit, compile(metrics), argv[0], argv[1:]...)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(out, metrics), nil
 }

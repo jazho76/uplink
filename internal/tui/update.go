@@ -56,7 +56,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.connectAfterStart = target.ID{}
 		}
 		e := m.live[msg.id]
-		e.action, e.statsAt = "", time.Time{}
+		e.action, e.inspectedAt = "", time.Time{}
 		e.epoch++
 		m.live[msg.id] = e
 		t, ok := m.targetByID(msg.id)
@@ -208,7 +208,7 @@ func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	for _, t := range targets {
 		if previous, ok := m.targetByID(t.ID); ok && !slices.Equal(previous.Stats, t.Stats) {
 			e := m.live[t.ID]
-			e.readings, e.statsOK = nil, false
+			e.snapshot.Readings, e.inspectOK = nil, false
 			m.live[t.ID] = e
 		}
 	}
@@ -221,7 +221,7 @@ func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 
 func (m model) markStale(id target.ID) {
 	if e, ok := m.live[id]; ok {
-		e.statsAt = time.Time{}
+		e.inspectedAt = time.Time{}
 		m.live[id] = e
 	}
 }

@@ -133,16 +133,16 @@ func (m model) logsFor(it item) string {
 
 func (m model) renderLive(id target.ID, width int) string {
 	e := m.live[id]
-	if e.statsAt.IsZero() {
+	if e.inspectedAt.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
-	if !e.statsOK {
+	if !e.inspectOK {
 		return labelStyle.Render("unavailable") + "\n"
 	}
 
 	var gauges []gaugeRow
 	var labels []string
-	for _, r := range e.readings {
+	for _, r := range e.snapshot.Readings {
 		if r.Metric.Gauge() {
 			gauges = append(gauges, gaugeOf(r))
 		}
@@ -152,7 +152,7 @@ func (m model) renderLive(id target.ID, width int) string {
 	indent := labelIndent(labels)
 	gaugeRows := gaugeFields(gauges, width-indent)
 	var fields []field
-	for _, r := range e.readings {
+	for _, r := range e.snapshot.Readings {
 		switch {
 		case r.Metric.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]

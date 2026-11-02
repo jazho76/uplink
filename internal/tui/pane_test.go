@@ -12,7 +12,7 @@ import (
 func TestSelectedRowFillsEveryCell(t *testing.T) {
 	stylingEnabled(t)
 
-	m := model{live: map[target.ID]liveEntry{configID("kyoto"): {statsAt: time.Now()}}}
+	m := model{live: map[target.ID]liveEntry{configID("kyoto"): {inspectedAt: time.Now()}}}
 	it := named("kyoto")
 	it.key = 'k'
 

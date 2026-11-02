@@ -4,14 +4,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jazho76/uplink/internal/run"
 )
 
 func runLocally(t *testing.T, metrics []Metric) []Reading {
 	t.Helper()
-	readings, err := Run(10*time.Second, metrics, []string{"sh"})
+	out, err := run.NonInteractive(10*time.Second, Script(metrics), "sh")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
+	readings := Parse(out, metrics)
 	if len(readings) != len(metrics) {
 		t.Fatalf("one reading per metric, got %d for %d", len(readings), len(metrics))
 	}

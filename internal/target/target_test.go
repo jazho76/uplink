@@ -479,10 +479,11 @@ func TestStatsFlowThroughExec(t *testing.T) {
 		"local": {Stats: metrics},
 		"via":   {Stats: metrics, Via: []string{"false"}, Exec: []string{"sh", "-c", "exec sh"}},
 	} {
-		readings, err := System{}.Stats(target)
+		snapshot, err := System{}.Inspect(target)
 		if err != nil {
 			t.Fatalf("%s: stats through a local shell: %v", name, err)
 		}
+		readings := snapshot.Readings
 		if len(readings) != 1 || !readings[0].OK || readings[0].Value != 1 {
 			t.Errorf("%s: the declared metrics should come back, got %+v", name, readings)
 		}
