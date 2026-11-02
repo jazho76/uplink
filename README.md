@@ -1,15 +1,13 @@
 # Uplink
 
-**One shortcut. Every machine.**
+**Work In Progress**
 
 Uplink is the launcher I use to move between my local host, VMs, and remote
 machines. One shortcut, choose where you want to work and land there.
 
-![Uplink dashboard](docs/dashboard.png)
-
 ## Install
 
-The release installer supports Linux on x86-64:
+The release installer supports Linux and macOS, on x86-64 and arm64:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jazho76/uplink/main/scripts/install.sh | sh
@@ -32,7 +30,7 @@ make install
 
 ## Upgrade
 
-Release builds can update themselves to the latest Linux x86-64 release:
+Release builds can update themselves to the latest release:
 
 ```sh
 uplink upgrade
