@@ -175,21 +175,24 @@ func TestSessionRowsDescribeTheSession(t *testing.T) {
 	))
 	lines := strings.Split(got, "\n")
 	row := func(name string) string {
-		i := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, name) })
+		i := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(line, name) })
 		if i < 0 {
 			t.Fatalf("no row for %q in:\n%s", name, got)
 		}
 		return lines[i]
 	}
-	if work := row("work"); !strings.HasPrefix(work, "work*") || !strings.Contains(work, "editor  dev server (2)") {
+	if work := row("work"); !strings.HasPrefix(work, attachedGlyph+" work") || !strings.Contains(work, "editor · dev server (2)") {
 		t.Errorf("want the attached session marked and panes above one counted, got %q", work)
 	}
-	if notes := row("my notes"); strings.Contains(notes, "*") || !strings.Contains(notes, "vim") || strings.Contains(notes, "(1)") {
-		t.Errorf("want a detached session with no single-pane count, got %q", notes)
+	if notes := row("my notes"); !strings.HasPrefix(notes, "  my notes") || !strings.Contains(notes, "vim") || strings.Contains(notes, "(1)") {
+		t.Errorf("want a detached session with a blank margin and no single-pane count, got %q", notes)
 	}
-	nameColumn := strings.Index(row("my notes"), "vim")
-	if got := strings.Index(row("work"), "editor"); got != nameColumn {
-		t.Errorf("the mark must not shift the windows: %d and %d", got, nameColumn)
+	column := func(line, text string) int { return lipgloss.Width(line[:strings.Index(line, text)]) }
+	if work, notes := column(row("work"), "editor"), column(row("my notes"), "vim"); work != notes {
+		t.Errorf("the mark must not shift the windows: %d and %d", work, notes)
+	}
+	if work, notes := column(row("work"), "work"), column(row("my notes"), "my notes"); work != notes {
+		t.Errorf("the mark must not shift the names: %d and %d", work, notes)
 	}
 }
 
@@ -199,7 +202,7 @@ func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
 		windows = append(windows, multiplexer.Window{Name: name, Panes: 1})
 	}
 	got := preview(focusedPreview(t, multiplexer.Session{Name: "main", Attached: true, Windows: windows}))
-	for _, want := range []string{"main*", "alpha", "+"} {
+	for _, want := range []string{attachedGlyph + " main", "alpha", "+"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %q in:\n%s", want, got)
 		}
@@ -222,7 +225,7 @@ func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 		multiplexer.Session{Name: strings.Repeat("x", 100), Windows: []multiplexer.Window{{Name: "editor", Panes: 1}}},
 		multiplexer.Session{Name: "main", Attached: true, Windows: []multiplexer.Window{{Name: "vim", Panes: 1}}},
 	))
-	for _, want := range []string{"editor", "vim", "main*"} {
+	for _, want := range []string{"editor", "vim", attachedGlyph + " main"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("a long name must not push out %q:\n%s", want, got)
 		}

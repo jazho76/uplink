@@ -24,6 +24,9 @@ const (
 	minLiveBar   = 8
 
 	maxWindowName = 24
+
+	attachedGlyph   = "●"
+	windowSeparator = " · "
 )
 
 var (
@@ -32,6 +35,8 @@ var (
 
 	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(colorCyan)
 	modeMarker = lipgloss.NewStyle().Foreground(colorYellow)
+
+	attachedMarker = lipgloss.NewStyle().Foreground(colorCyan)
 
 	keyStyle       = lipgloss.NewStyle().Foreground(colorMagenta)
 	footerStyle    = lipgloss.NewStyle().Foreground(colorComment)
@@ -206,10 +211,7 @@ func (m model) renderSessions(id target.ID, width int) string {
 	}
 	fields := make([]field, len(sessions))
 	for i, s := range sessions {
-		fields[i].key = clip(s.Name, width/2)
-		if s.Attached {
-			fields[i].key += modeMarker.Render("*")
-		}
+		fields[i].key = sessionMargin(s.Attached) + valueStyle.Render(clip(s.Name, width/2))
 	}
 	room := width - widestKey(fields) - fieldGap
 	for i, s := range sessions {
@@ -218,12 +220,19 @@ func (m model) renderSessions(id target.ID, width int) string {
 	return renderFields(fields, width)
 }
 
+func sessionMargin(attached bool) string {
+	if attached {
+		return attachedMarker.Render(attachedGlyph) + " "
+	}
+	return "  "
+}
+
 func windowList(windows []multiplexer.Window, width int) string {
 	labels := make([]string, len(windows))
 	for i, w := range windows {
 		labels[i] = windowLabel(w, width)
 	}
-	gap := strings.Repeat(" ", fieldGap)
+	gap := labelStyle.Render(windowSeparator)
 	for shown := len(labels); shown >= 0; shown-- {
 		parts := slices.Clone(labels[:shown])
 		if hidden := len(labels) - shown; hidden > 0 {
