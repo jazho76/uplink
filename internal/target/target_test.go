@@ -359,8 +359,8 @@ targets:
 `)
 	for _, name := range []string{"omitted", "empty"} {
 		target := find(t, targets, name)
-		if got := modeNames(target); !slices.Equal(got, []string{"tmux", "shell"}) {
-			t.Errorf("%s: want tmux then shell, got %v", name, got)
+		if got := modeNames(target); !slices.Equal(got, []string{"tmux", "shell", "zellij"}) {
+			t.Errorf("%s: want tmux, shell, zellij, got %v", name, got)
 		}
 		if got := modeNamed(t, target, "tmux").Requires; got != "tmux" {
 			t.Errorf("%s: the default tmux mode needs tmux, got %q", name, got)
@@ -387,13 +387,20 @@ func TestRequiresCannotBeConfigured(t *testing.T) {
 }
 
 func TestDefaultTmuxModeFallsBackToTheShell(t *testing.T) {
-	const tmux = `echo "tmux $*"`
+	const (
+		tmux   = `echo "tmux $*"`
+		zellij = `echo "zellij $*"`
+	)
 	for name, c := range map[string]struct {
+		mode  string
 		tools map[string]string
 		want  string
 	}{
-		"with tmux":    {map[string]string{"tmux": tmux}, "tmux new-session -A -s 0"},
-		"without tmux": {nil, "user shell"},
+		"with tmux":           {"tmux", map[string]string{"tmux": tmux}, "tmux new-session -A -s 0"},
+		"without tmux":        {"tmux", nil, "user shell"},
+		"with zellij":         {"zellij", map[string]string{"zellij": zellij}, "zellij attach -c 0"},
+		"without zellij":      {"zellij", nil, "user shell"},
+		"tmux ignores zellij": {"tmux", map[string]string{"zellij": zellij}, "user shell"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -415,7 +422,7 @@ func TestDefaultTmuxModeFallsBackToTheShell(t *testing.T) {
 			t.Setenv("SHELL", filepath.Join(dir, "user-shell"))
 
 			targets := mustLoad(t, "targets:\n  - name: box\n")
-			argv := modeNamed(t, find(t, targets, "box"), "tmux").Argv
+			argv := modeNamed(t, find(t, targets, "box"), c.mode).Argv
 			out, err := exec.Command(argv[0], argv[1:]...).Output()
 			if err != nil {
 				t.Fatalf("%q: %v", argv, err)
@@ -777,6 +784,16 @@ func TestDefaultModeOrdersTheAutomaticModes(t *testing.T) {
 	}
 }
 
+func TestZellijCanBeTheDefaultMode(t *testing.T) {
+	targets, err := MergeWithDefault("zellij", fakeSource{name: "test", specs: []Spec{{Name: "box"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := modeNames(targets[0]); !slices.Equal(got, []string{"zellij", "shell", "tmux"}) {
+		t.Errorf("want zellij, shell, tmux, got %v", got)
+	}
+}
+
 func TestDefaultModeLeavesExplicitModesAlone(t *testing.T) {
 	withFakeMultiplexer(t)
 	modes := []ModeSpec{{Name: "root"}, {Name: "tmux"}}
@@ -798,7 +815,7 @@ func TestDefaultModeLeavesExplicitModesAlone(t *testing.T) {
 
 func TestUnknownDefaultModeIsReportedAndTargetsStillLoad(t *testing.T) {
 	targets, err := MergeWithDefault("zelij", fakeSource{name: "test", specs: []Spec{{Name: "box"}}})
-	if err == nil || !strings.Contains(err.Error(), `unknown mode "zelij"`) || !strings.Contains(err.Error(), "tmux, shell") {
+	if err == nil || !strings.Contains(err.Error(), `unknown mode "zelij"`) || !strings.Contains(err.Error(), "tmux, zellij, shell") {
 		t.Errorf("want the value and the choices reported, got %v", err)
 	}
 	if len(targets) != 1 || modeNames(targets[0])[0] != "tmux" {

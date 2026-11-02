@@ -37,7 +37,8 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # discovery off.
 # discover: [local, lima]
 
-# default_mode is what targets without modes open by default: tmux, or shell.
+# default_mode is what targets without modes open by default: tmux, zellij, or
+# shell.
 # Left out means tmux. If a target lacks the tool, you get its shell instead.
 # default_mode: tmux
 

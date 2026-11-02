@@ -19,4 +19,4 @@ type Multiplexer interface {
 	Parse(rows []string) []Session
 }
 
-var All = []Multiplexer{Tmux{}}
+var All = []Multiplexer{Tmux{}, Zellij{}}

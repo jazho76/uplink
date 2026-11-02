@@ -16,6 +16,22 @@ import (
 
 var uptime = stats.Metric{Type: stats.TypeText, Label: "up", Value: "echo 42"}
 
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "uplink-inspect")
+	if err != nil {
+		panic(err)
+	}
+	for _, m := range multiplexer.All {
+		if err := os.WriteFile(filepath.Join(dir, m.Tool()), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+			panic(err)
+		}
+	}
+	os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
 const tmuxStub = `case "$1" in
 list-sessions) echo 'session $0 1 work' ;;
 list-windows) echo 'window $0 2 my editor'; echo 'window $0 1 logs' ;;
@@ -153,6 +169,53 @@ func TestRunReportsSessions(t *testing.T) {
 	want := []multiplexer.Session{{Tool: "tmux", Name: "work", Attached: true, Windows: []multiplexer.Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
+	}
+}
+
+const zellijStub = `cat >/dev/null
+case "$*" in
+list-sessions*) echo 'my beta'; echo alpha ;;
+*list-clients*) echo 'CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND'; [ "$2" = alpha ] && echo '1 terminal_0 N/A' ;;
+*list-panes*) printf '[{"tab_id":0,"tab_position":0,"tab_name":"tab of %s"}]\n' "$2" ;;
+esac`
+
+func TestRunReportsZellijSessions(t *testing.T) {
+	pathWith(t, map[string]string{"zellij": zellijStub})
+
+	snapshot := inspectLocally(t)
+	if !slices.Contains(snapshot.Tools, "zellij") {
+		t.Errorf("want zellij reported, got %q", snapshot.Tools)
+	}
+	want := []multiplexer.Session{
+		{Tool: "zellij", Name: "alpha", Attached: true, Windows: []multiplexer.Window{{Name: "tab of alpha", Panes: 1}}},
+		{Tool: "zellij", Name: "my beta", Windows: []multiplexer.Window{{Name: "tab of my beta", Panes: 1}}},
+	}
+	if !reflect.DeepEqual(snapshot.Sessions, want) {
+		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
+	}
+}
+
+func TestRunSurvivesAZellijWithNoSessions(t *testing.T) {
+	pathWith(t, map[string]string{"zellij": "echo 'No active zellij sessions found.' >&2\nexit 1"})
+
+	snapshot := inspectLocally(t)
+	if !slices.Contains(snapshot.Tools, "zellij") {
+		t.Errorf("zellij is installed even with no sessions, got %q", snapshot.Tools)
+	}
+	if len(snapshot.Sessions) != 0 {
+		t.Errorf("want no sessions, got %+v", snapshot.Sessions)
+	}
+}
+
+func TestRunReportsEachToolsOwnSessions(t *testing.T) {
+	pathWith(t, map[string]string{"tmux": tmuxStub, "zellij": zellijStub})
+
+	var got []string
+	for _, s := range inspectLocally(t).Sessions {
+		got = append(got, s.Tool+"/"+s.Name)
+	}
+	if want := []string{"tmux/work", "zellij/alpha", "zellij/my beta"}; !slices.Equal(got, want) {
+		t.Errorf("want %q, got %q", want, got)
 	}
 }
 
