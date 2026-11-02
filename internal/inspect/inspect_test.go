@@ -15,7 +15,7 @@ var uptime = stats.Metric{Type: stats.TypeText, Label: "up", Value: "echo 42"}
 
 func TestParseReadsEverySection(t *testing.T) {
 	out := "0 value 42\ntool tmux\nsession 3 1 main\nsession 1 0 my long name\n"
-	snapshot := Parse(out, []stats.Metric{uptime})
+	snapshot := Parse(out, Request{Metrics: []stats.Metric{uptime}})
 
 	if len(snapshot.Readings) != 1 || snapshot.Readings[0].Text != "42" {
 		t.Errorf("want the metric read alongside the rest, got %+v", snapshot.Readings)
@@ -33,17 +33,35 @@ func TestParseReadsEverySection(t *testing.T) {
 }
 
 func TestParseStripsEscapesFromSessionNames(t *testing.T) {
-	snapshot := Parse("session 1 0 \x1b[31mred\x1b[0m\n", nil)
+	snapshot := Parse("session 1 0 \x1b[31mred\x1b[0m\n", Request{})
 	if len(snapshot.Sessions) != 1 || snapshot.Sessions[0].Name != "red" {
 		t.Errorf("a target must not be able to style the dashboard, got %+v", snapshot.Sessions)
 	}
 }
 
 func TestParseSkipsWhatItCannotRead(t *testing.T) {
-	snapshot := Parse("motd banner\nsession\nsession x 0 name\nsession 1 y name\nsession 1 0\n", nil)
+	snapshot := Parse("motd banner\ntool\nsession\nsession x 0 name\nsession 1 y name\nsession 1 0\n", Request{})
 	if len(snapshot.Sessions) != 0 || len(snapshot.Tools) != 0 {
 		t.Errorf("malformed lines should be dropped, got %+v", snapshot)
 	}
+}
+
+func TestTaggedKeepsOnlyItsOwnLines(t *testing.T) {
+	got := tagged("banner\ntool tmux\ntools are fun\nsession 1 0 tool x\ntool two words\n", "tool")
+	if want := []string{"tmux", "two words"}; !slices.Equal(got, want) {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
+
+func TestFailingSectionDoesNotFailTheInspection(t *testing.T) {
+	previous := sections
+	t.Cleanup(func() { sections = previous })
+	sections = append(slices.Clone(previous), section{
+		script: func(Request) string { return "false" },
+		parse:  func(Request, string, *Snapshot) {},
+	})
+
+	inspectLocally(t)
 }
 
 func pathWith(t *testing.T, stubs map[string]string) {
@@ -59,7 +77,7 @@ func pathWith(t *testing.T, stubs map[string]string) {
 
 func inspectLocally(t *testing.T) Snapshot {
 	t.Helper()
-	snapshot, err := Run(10*time.Second, []stats.Metric{uptime}, []string{"sh"})
+	snapshot, err := Run(10*time.Second, Request{Metrics: []stats.Metric{uptime}}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -113,7 +131,7 @@ func TestRunSurvivesAMissingTmux(t *testing.T) {
 }
 
 func TestRunNeedsACommand(t *testing.T) {
-	if _, err := Run(time.Second, nil, nil); err == nil {
+	if _, err := Run(time.Second, Request{}, nil); err == nil {
 		t.Error("no argv cannot run")
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 func runLocally(t *testing.T, metrics []Metric) []Reading {
 	t.Helper()
-	out, err := run.NonInteractive(10*time.Second, Script(metrics), "sh")
+	out, err := run.NonInteractive(10*time.Second, Preamble()+"\n"+Script(metrics), "sh")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}

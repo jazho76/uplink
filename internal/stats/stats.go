@@ -94,8 +94,12 @@ func quote(s string) string {
 
 var metricTimeout = 5 * time.Second
 
+func Preamble() string {
+	return fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))
+}
+
 func Script(metrics []Metric) string {
-	lines := []string{fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))}
+	var lines []string
 	for i, m := range metrics {
 		lines = append(lines, capture(fmt.Sprintf("%d value", i), m.Value))
 		if command := m.maxCommand(); command != "" {
