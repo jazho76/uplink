@@ -188,12 +188,15 @@ func (m model) selected() item {
 
 func (m model) modes(t target.Target) []target.Mode {
 	e := m.live[t.ID]
-	if !e.inspected {
-		return t.Modes
+	var modes []target.Mode
+	for i, mode := range t.Modes {
+		discovered := e.inspected && slices.Contains(e.snapshot.Tools, mode.Requires)
+		trustedDefault := !e.inspected && i == 0
+		if mode.Requires == "" || discovered || trustedDefault {
+			modes = append(modes, mode)
+		}
 	}
-	return slices.DeleteFunc(slices.Clone(t.Modes), func(mode target.Mode) bool {
-		return mode.Requires != "" && !slices.Contains(e.snapshot.Tools, mode.Requires)
-	})
+	return modes
 }
 
 func (m model) modeIndex() int {

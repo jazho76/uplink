@@ -472,6 +472,13 @@ func TestDownTargetDoubtsAModeItCouldNotConfirm(t *testing.T) {
 	}
 }
 
+func TestDownTargetTagCountsOnlyWhatItOffers(t *testing.T) {
+	m := probed(focusedOnAutomaticModes("tmux", "shell", "zellij"), "box", false)
+	if got := modeTagOf(m); !strings.Contains(got, "tmux?") || !strings.Contains(got, "1/2") {
+		t.Errorf("want tmux? 1/2, got %q", got)
+	}
+}
+
 func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
 	m, _ := focusedOn("box")
 	next, _ := m.Update(liveMsg{id: configID("box"), up: true})

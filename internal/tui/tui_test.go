@@ -403,35 +403,107 @@ func TestModeChosenBeforeFilteringLeavesNoBadge(t *testing.T) {
 	}
 }
 
-func focusedOnTwoMultiplexers() model {
+func focusedOnAutomaticModes(names ...string) model {
 	box := vm("box")
-	box.Modes = []target.Mode{
-		{Name: "tmux", Argv: box.Via, Requires: "tmux"},
-		{Name: "zellij", Argv: box.Via, Requires: "zellij"},
-		{Name: "shell", Argv: box.Via},
+	box.Modes = nil
+	for _, name := range names {
+		mode := target.Mode{Name: name, Argv: box.Via}
+		if name != "shell" {
+			mode.Requires = name
+		}
+		box.Modes = append(box.Modes, mode)
 	}
 	m, _ := newTestModel()
 	return focus(sized(withTargets(m, box)), "box")
 }
 
-func TestSelectedModeSurvivesTheListShrinking(t *testing.T) {
-	m := key(focusedOnTwoMultiplexers(), "tab")
-	if got := m.mode().Name; got != "zellij" {
-		t.Fatalf("tab should reach zellij, got %q", got)
+func offered(m model) []string {
+	var names []string
+	for _, mode := range m.modes(m.selected().target) {
+		names = append(names, mode.Name)
+	}
+	return names
+}
+
+func TestSelectedModeSurvivesTheListChanging(t *testing.T) {
+	m := key(focusedOnAutomaticModes("tmux", "shell", "zellij"), "tab")
+	if got := m.mode().Name; got != "shell" {
+		t.Fatalf("tab should reach shell, got %q", got)
 	}
 
 	m = inspected(m, "box", "zellij")
-	if got := m.mode().Name; got != "zellij" {
-		t.Errorf("zellij is still there, want it selected, got %q", got)
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("shell is still there, want it selected, got %q", got)
 	}
 }
 
 func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
-	m := key(focusedOnTwoMultiplexers(), "tab")
+	m := inspected(focusedOnAutomaticModes("tmux", "shell", "zellij"), "box", "zellij")
+	m = key(m, "tab")
+	if got := m.mode().Name; got != "zellij" {
+		t.Fatalf("tab should reach zellij, got %q", got)
+	}
 
-	m = inspected(m, "box", "tmux")
-	if got := m.mode().Name; got != "tmux" {
+	m = inspected(m, "box")
+	if got := m.mode().Name; got != "shell" {
 		t.Errorf("zellij is gone, want the first mode, got %q", got)
+	}
+}
+
+func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
+	for name, msg := range map[string]*liveMsg{
+		"never checked":     nil,
+		"down":              {id: configID("box"), up: false, full: true},
+		"up, not inspected": {id: configID("box"), up: true},
+		"failed inspection": {id: configID("box"), up: true, full: true},
+	} {
+		m := focusedOnAutomaticModes("tmux", "shell", "zellij")
+		if msg != nil {
+			next, _ := m.Update(*msg)
+			m = next.(model)
+		}
+		if got := offered(m); !slices.Equal(got, []string{"tmux", "shell"}) {
+			t.Errorf("%s: want tmux and shell, got %q", name, got)
+		}
+		if got := key(key(m, "tab"), "tab").mode().Name; got != "tmux" {
+			t.Errorf("%s: two tabs should wrap to tmux, got %q", name, got)
+		}
+	}
+}
+
+func TestDiscoveryDecidesTheModes(t *testing.T) {
+	m := focusedOnAutomaticModes("tmux", "shell", "zellij")
+
+	if got := offered(inspected(m, "box", "tmux", "zellij")); !slices.Equal(got, []string{"tmux", "shell", "zellij"}) {
+		t.Errorf("both tools: want all three, got %q", got)
+	}
+	if got := offered(inspected(m, "box", "zellij")); !slices.Equal(got, []string{"shell", "zellij"}) {
+		t.Errorf("only zellij: want shell and zellij, got %q", got)
+	}
+}
+
+func TestDiscoveredModesStayOnceDown(t *testing.T) {
+	m := probed(inspected(focusedOnAutomaticModes("tmux", "shell", "zellij"), "box", "tmux", "zellij"), "box", false)
+
+	if got := offered(m); !slices.Equal(got, []string{"tmux", "shell", "zellij"}) {
+		t.Errorf("want what was found, got %q", got)
+	}
+	if got := ansi.Strip(m.modeTag(m.selected())); strings.Contains(got, "?") {
+		t.Errorf("tmux was confirmed, got %q", got)
+	}
+}
+
+func TestShellDefaultOffersOnlyShellUntilDiscovery(t *testing.T) {
+	m := probed(focusedOnAutomaticModes("shell", "tmux", "zellij"), "box", false)
+
+	if got := offered(m); !slices.Equal(got, []string{"shell"}) {
+		t.Errorf("want only shell, got %q", got)
+	}
+	if got := m.modeTag(m.selected()); got != "" {
+		t.Errorf("a single mode needs no tag, got %q", got)
+	}
+	if got := ansi.Strip(m.renderFooter()); strings.Contains(got, "mode") {
+		t.Errorf("nothing to cycle, got %q", got)
 	}
 }
 
