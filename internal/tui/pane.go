@@ -244,7 +244,7 @@ func (m model) paneRow(it item, selected, focused bool, width int) string {
 	left := m.glyph(it, base) + space + accentLetter(it.name(), key, name)
 
 	badge := ""
-	if selected && focused && m.modeIdx != 0 {
+	if selected && focused && m.modeIndex() != 0 {
 		badge = layer(base, modeMarker).Render("["+m.mode().Name+"]") + space
 	}
 

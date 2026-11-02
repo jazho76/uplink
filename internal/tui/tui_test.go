@@ -23,6 +23,7 @@ type fakeBackend struct {
 	statuses    int
 	inspections int
 	sessions    []string
+	tools       map[string][]string
 }
 
 func (f *fakeBackend) Inspect(t target.Target) (inspect.Snapshot, error) {
@@ -34,7 +35,7 @@ func (f *fakeBackend) Inspect(t target.Target) (inspect.Snapshot, error) {
 	for i, m := range t.Stats {
 		readings[i] = reading(m, 0.1, 4)
 	}
-	return inspect.Snapshot{Readings: readings}, nil
+	return inspect.Snapshot{Readings: readings, Tools: f.tools[t.Name]}, nil
 }
 
 var linuxMetrics = []stats.Metric{
@@ -281,6 +282,122 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 type errBoom struct{}
 
 func (errBoom) Error() string { return "boom" }
+
+func withDefaultModes(name string) target.Target {
+	t := vm(name)
+	t.Modes = []target.Mode{
+		{Name: "tmux", Argv: append(slices.Clone(t.Via), "tmux"), Requires: "tmux"},
+		{Name: "shell", Argv: t.Via},
+	}
+	return t
+}
+
+func focusedOn(name string) (model, *fakeBackend) {
+	m, backend := newTestModel()
+	m = sized(withTargets(m, withDefaultModes(name)))
+	return focus(m, name), backend
+}
+
+func inspected(m model, name string, tools ...string) model {
+	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: inspect.Snapshot{Tools: tools}, inspectOK: true})
+	return next.(model)
+}
+
+func TestUninspectedTargetOffersTmux(t *testing.T) {
+	m, backend := focusedOn("box")
+	if got := m.mode().Name; got != "tmux" {
+		t.Errorf("want tmux before anything is known, got %q", got)
+	}
+	key(m, "enter")
+	if want := []string{"ssh lima-box tmux"}; !slices.Equal(backend.sessions, want) {
+		t.Errorf("want %q, got %q", want, backend.sessions)
+	}
+}
+
+func TestTargetWithoutTmuxOffersOnlyTheShell(t *testing.T) {
+	m, backend := focusedOn("box")
+	m = inspected(m, "box")
+
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("want shell as the default, got %q", got)
+	}
+	if got := m.modeTag(m.selected()); got != "" {
+		t.Errorf("a single mode needs no tag, got %q", got)
+	}
+	if strings.Contains(m.renderFooter(), "mode") {
+		t.Errorf("a single mode has nothing to cycle: %s", m.renderFooter())
+	}
+	key(m, "enter")
+	if want := []string{"ssh lima-box"}; !slices.Equal(backend.sessions, want) {
+		t.Errorf("want %q, got %q", want, backend.sessions)
+	}
+}
+
+func TestTargetWithTmuxDefaultsToIt(t *testing.T) {
+	m, _ := focusedOn("box")
+	m = inspected(m, "box", "tmux")
+
+	if got := m.mode().Name; got != "tmux" {
+		t.Errorf("want tmux as the default, got %q", got)
+	}
+	if got := ansi.Strip(m.modeTag(m.selected())); !strings.Contains(got, "1/2") {
+		t.Errorf("want both modes counted, got %q", got)
+	}
+}
+
+func TestInspectionRunsAndFiltersThroughTheBackend(t *testing.T) {
+	m, backend := focusedOn("box")
+	backend.tools = map[string][]string{"box": {"tmux"}}
+	if got := m.withSelectionRefreshed().mode().Name; got != "tmux" {
+		t.Errorf("a reported tool keeps its mode, got %q", got)
+	}
+
+	m, _ = focusedOn("box")
+	if got := m.withSelectionRefreshed().mode().Name; got != "shell" {
+		t.Errorf("no reported tool drops its mode, got %q", got)
+	}
+}
+
+func TestStoppedTargetKeepsItsLastAnswer(t *testing.T) {
+	m, _ := focusedOn("box")
+	m = probed(inspected(m, "box"), "box", false)
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("a stopped target still has no tmux, got %q", got)
+	}
+}
+
+func TestFailedInspectionStaysOptimistic(t *testing.T) {
+	m, _ := focusedOn("box")
+	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true})
+	if got := next.(model).mode().Name; got != "tmux" {
+		t.Errorf("a failed inspection knows nothing about tmux, got %q", got)
+	}
+}
+
+func TestDeclaredModesAreNeverFiltered(t *testing.T) {
+	m, _ := newTestModel()
+	m = focus(sized(m), "forge")
+	m = inspected(m, "forge")
+	if got := m.modes(m.selected().target); len(got) != 3 {
+		t.Errorf("modes from the config always stay, got %d", len(got))
+	}
+}
+
+func TestModeChosenBeforeFilteringLeavesNoBadge(t *testing.T) {
+	m, _ := focusedOn("box")
+	m = key(m, "tab")
+	if got := m.mode().Name; got != "shell" {
+		t.Fatalf("tab should reach shell, got %q", got)
+	}
+
+	m = inspected(m, "box")
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("want shell, got %q", got)
+	}
+	if row := ansi.Strip(m.paneRow(m.selected(), true, true, 40)); strings.Contains(row, "[") {
+		t.Errorf("the only mode is the default, got %q", row)
+	}
+}
 
 func TestModeCycling(t *testing.T) {
 	m, _ := newTestModel()

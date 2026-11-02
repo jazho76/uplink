@@ -38,7 +38,6 @@ func (Provider) Specs() ([]target.Spec, error) {
 			Group: group,
 			Stats: stats.ForOS(goos),
 			Logs:  logs(),
-			Modes: modes(),
 		},
 	}}, nil
 }
@@ -48,14 +47,6 @@ func logs() string {
 		return ""
 	}
 	return journal
-}
-
-func modes() []target.ModeSpec {
-	var modes []target.ModeSpec
-	if installed("tmux") {
-		modes = append(modes, target.ModeSpec{Name: "tmux", Run: "tmux new-session -A -s 0"})
-	}
-	return append(modes, target.ModeSpec{Name: "shell"})
 }
 
 func installed(tool string) bool {

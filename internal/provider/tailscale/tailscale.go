@@ -118,10 +118,6 @@ func (p peer) spec(magicDNS bool) (target.Spec, bool) {
 		Group: group,
 		Watch: &watch,
 		Stats: stats.ForOS(goos),
-		Modes: []target.ModeSpec{
-			{Name: "tmux", Run: "tmux new-session -A -s 0"},
-			{Name: "shell"},
-		},
 	}
 	if goos == "linux" {
 		defaults.Logs = probe + " " + quote(journal)

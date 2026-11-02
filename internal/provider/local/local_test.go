@@ -38,25 +38,14 @@ func spec(t *testing.T) target.Spec {
 	return specs[0]
 }
 
-func modeNames(s target.Spec) []string {
-	var names []string
-	for _, m := range s.Defaults.Modes {
-		names = append(names, m.Name)
-	}
-	return names
-}
-
 func TestDescribesThisMachine(t *testing.T) {
-	on(t, "linux", "fedora", "tmux", "journalctl")
+	on(t, "linux", "fedora", "journalctl")
 	s := spec(t)
 	if s.Name != "localhost" || s.Display != "fedora" || !s.Local {
 		t.Errorf("want local key localhost shown as fedora, got %q and %q, local %v", s.Name, s.Display, s.Local)
 	}
 	if s.Defaults.Group != "local" || !slices.Equal(s.Defaults.Stats, stats.ForOS("linux")) {
 		t.Errorf("want the local group with linux stats, got %+v", s.Defaults)
-	}
-	if got := modeNames(s); !slices.Equal(got, []string{"tmux", "shell"}) {
-		t.Errorf("want tmux then shell, got %v", got)
 	}
 	if s.Defaults.Logs != journal {
 		t.Errorf("want the journal as logs, got %q", s.Defaults.Logs)
@@ -74,12 +63,8 @@ func TestStatsFollowTheOS(t *testing.T) {
 
 func TestMissingToolsDropTheirFeatures(t *testing.T) {
 	on(t, "linux", "fedora")
-	s := spec(t)
-	if got := modeNames(s); !slices.Equal(got, []string{"shell"}) {
-		t.Errorf("without tmux want shell only, got %v", got)
-	}
-	if s.Defaults.Logs != "" {
-		t.Errorf("without journalctl want no logs, got %q", s.Defaults.Logs)
+	if got := spec(t).Defaults.Logs; got != "" {
+		t.Errorf("without journalctl want no logs, got %q", got)
 	}
 }
 

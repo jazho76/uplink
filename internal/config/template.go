@@ -21,7 +21,8 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         unit is bytes or seconds. A name instead of a metric adds a
 #         preset: linux, macos, or container. Left out means none.
 # modes   ways to enter; the first is the default. A mode without run opens
-#         the user's shell. Every session returns to the dashboard.
+#         the user's shell. Left out means tmux, when the target has it, and
+#         shell. Every session returns to the dashboard.
 #
 # {name} in a command becomes the target's name. Top-level keys starting with
 # x- hold YAML anchors for values targets share.

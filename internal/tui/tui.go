@@ -78,6 +78,7 @@ type liveEntry struct {
 	state       status
 	action      status
 	snapshot    inspect.Snapshot
+	inspected   bool
 	inspectOK   bool
 	inspectedAt time.Time
 	checkedAt   time.Time
@@ -184,20 +185,37 @@ func (m model) selected() item {
 	return p.items[p.cursor]
 }
 
-func (m model) mode() target.Mode {
-	modes := m.selected().target.Modes
-	if m.modeIdx < 0 || m.modeIdx >= len(modes) {
-		return m.selected().target.DefaultMode()
+func (m model) modes(t target.Target) []target.Mode {
+	e := m.live[t.ID]
+	if !e.inspected {
+		return t.Modes
 	}
-	return modes[m.modeIdx]
+	return slices.DeleteFunc(slices.Clone(t.Modes), func(mode target.Mode) bool {
+		return mode.Requires != "" && !slices.Contains(e.snapshot.Tools, mode.Requires)
+	})
+}
+
+func (m model) modeIndex() int {
+	if m.modeIdx < 0 || m.modeIdx >= len(m.modes(m.selected().target)) {
+		return 0
+	}
+	return m.modeIdx
+}
+
+func (m model) mode() target.Mode {
+	modes := m.modes(m.selected().target)
+	if len(modes) == 0 {
+		return target.Mode{}
+	}
+	return modes[m.modeIndex()]
 }
 
 func (m *model) cycleMode(delta int) {
-	n := len(m.selected().target.Modes)
+	n := len(m.modes(m.selected().target))
 	if n < 2 {
 		return
 	}
-	m.modeIdx = wrap(m.modeIdx+delta, n)
+	m.modeIdx = wrap(m.modeIndex()+delta, n)
 }
 
 func (m *model) moveCursor(delta int) tea.Cmd {
@@ -349,7 +367,7 @@ func (m model) settle(msg liveMsg) liveEntry {
 		e.inspectedAt = e.checkedAt
 		e.inspectOK = msg.inspectOK
 		if msg.inspectOK {
-			e.snapshot = msg.snapshot
+			e.snapshot, e.inspected = msg.snapshot, true
 		}
 	}
 	if !msg.up {

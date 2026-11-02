@@ -264,11 +264,11 @@ func unitOf(size string) string {
 }
 
 func (m model) modeTag(it item) string {
-	n := len(it.target.Modes)
+	n := len(m.modes(it.target))
 	if n < 2 {
 		return ""
 	}
-	return modeMarker.Render(m.mode().Name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIdx+1, n))
+	return modeMarker.Render(m.mode().Name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIndex()+1, n))
 }
 
 type field struct{ key, value string }
@@ -318,7 +318,7 @@ func (m model) renderFooter() string {
 	if !it.empty() {
 		pairs = append(pairs, [2]string{"↵", "connect"})
 	}
-	if len(it.target.Modes) > 1 {
+	if len(m.modes(it.target)) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
 	if it.target.Logs != "" {

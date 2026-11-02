@@ -16,8 +16,9 @@ const (
 var localVia = []string{"sh", "-c"}
 
 type Mode struct {
-	Name string
-	Argv []string
+	Name     string
+	Argv     []string
+	Requires string
 }
 
 type ID struct {
@@ -46,13 +47,6 @@ type Target struct {
 	Stats  []stats.Metric
 	Modes  []Mode
 	Local  bool
-}
-
-func (t Target) DefaultMode() Mode {
-	if len(t.Modes) == 0 {
-		return Mode{}
-	}
-	return t.Modes[0]
 }
 
 func (t Target) ArgvFor(command string) []string {

@@ -175,7 +175,7 @@ without `via` runs here.
 | `logs` | Host-side command whose output fills the log view |
 | `watch` | `true` checks status in the background, not only while selected |
 | `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
-| `modes` | Ways to enter the target; the first is the default |
+| `modes` | Ways to enter the target; the first is the default. See [Modes](#modes) for what leaving it out does |
 
 ### How `via` works
 
@@ -223,6 +223,16 @@ profile, such as a function or `PATH` entry, ask for one:
 | `name` | Name shown in the dashboard |
 | `run` | Shell command to run on the target; omit it to open the user's shell |
 
+A target without modes, and every discovered target, gets `tmux`
+(`tmux new-session -A -s 0`) and `shell`. The `tmux` mode disappears once a
+check of the target finds no tmux. Until then it stays listed, and entering it
+on a target without tmux opens the user's shell instead. Modes you declare are
+never removed.
+
+The check runs in the same non-login shell as the stats probe, so tmux must be
+on that `PATH` to count. Otherwise declare your own mode, for example
+`run: "bash -lc tmux"`.
+
 ### Sharing values
 
 `{name}` in `via`, `exec`, `status`, `up`, `down`, `logs`, `run`, and stats
@@ -242,10 +252,10 @@ target is named `<provider>/<key>` in `uplink config check`.
 
 | Provider | Lists | On by default |
 | --- | --- | --- |
-| `docker` | Every container, running or stopped, in `containers`: entered with `docker exec`, started and stopped with `docker start`/`stop`, its start, stop, exit, and session events from the last day as logs, a memory gauge, `tmux` and `shell` modes, watched in the background | when `docker` is installed and its daemon is running |
-| `lima` | Every Lima instance, running or stopped, in `vms`: reached over its `ssh.config`, started and stopped with `limactl`, its serial log as logs, stats for its guest OS, `tmux` and `shell` modes, watched in the background | when `limactl` is installed |
-| `local` | This machine, shown by its hostname, in its own `local` group, with stats for its OS, the systemd journal as logs (when `journalctl` exists), and `tmux` (when installed) and `shell` modes | yes |
-| `tailscale` | Every peer on your tailnet except phones, TVs, and Mullvad exit nodes, keyed by its MagicDNS name, in `machines`: reached with `ssh` at that name (or its Tailscale IP without MagicDNS), up when ssh gets in, stats for its OS, the journal as logs on Linux, `tmux` and `shell` modes, watched in the background | when `tailscale` is installed and connected |
+| `docker` | Every container, running or stopped, in `containers`: entered with `docker exec`, started and stopped with `docker start`/`stop`, its start, stop, exit, and session events from the last day as logs, a memory gauge, watched in the background | when `docker` is installed and its daemon is running |
+| `lima` | Every Lima instance, running or stopped, in `vms`: reached over its `ssh.config`, started and stopped with `limactl`, its serial log as logs, stats for its guest OS, watched in the background | when `limactl` is installed |
+| `local` | This machine, shown by its hostname, in its own `local` group, with stats for its OS and the systemd journal as logs (when `journalctl` exists) | yes |
+| `tailscale` | Every peer on your tailnet except phones, TVs, and Mullvad exit nodes, keyed by its MagicDNS name, in `machines`: reached with `ssh` at that name (or its Tailscale IP without MagicDNS), up when ssh gets in, stats for its OS, the journal as logs on Linux, watched in the background | when `tailscale` is installed and connected |
 
 Without a `discover` section, the providers that are on by default run. A
 `discover` list runs exactly the providers it names; `discover: []` turns

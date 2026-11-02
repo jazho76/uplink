@@ -19,6 +19,13 @@ var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 type ModeSpec struct {
 	Name string `yaml:"name"`
 	Run  string `yaml:"run"`
+
+	Requires string `yaml:"-"`
+}
+
+var defaultModes = []ModeSpec{
+	{Name: "tmux", Requires: "tmux", Run: `command -v tmux >/dev/null && exec tmux new-session -A -s 0; ` + loginShell},
+	{Name: "shell"},
 }
 
 type Spec struct {
@@ -48,6 +55,9 @@ func resolve(source string, spec Spec) (Target, error) {
 	}
 	if spec.Defaults != nil {
 		spec = spec.over(*spec.Defaults)
+	}
+	if len(spec.Modes) == 0 {
+		spec.Modes = defaultModes
 	}
 	expanded, err := stats.Expand(spec.Stats)
 	if err != nil {
@@ -154,9 +164,6 @@ func (s Spec) interpolate() Spec {
 }
 
 func (t Target) modes(specs []ModeSpec) ([]Mode, error) {
-	if len(specs) == 0 {
-		return nil, errors.New("no modes")
-	}
 	seen := map[string]bool{}
 	modes := make([]Mode, 0, len(specs))
 	for i, s := range specs {
@@ -167,7 +174,7 @@ func (t Target) modes(specs []ModeSpec) ([]Mode, error) {
 			return nil, fmt.Errorf("duplicate mode %q", s.Name)
 		}
 		seen[s.Name] = true
-		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(cmp.Or(s.Run, loginShell))})
+		modes = append(modes, Mode{Name: s.Name, Argv: t.ArgvFor(cmp.Or(s.Run, loginShell)), Requires: s.Requires})
 	}
 	return modes, nil
 }

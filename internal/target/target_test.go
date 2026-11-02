@@ -2,7 +2,9 @@ package target
 
 import (
 	"errors"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -210,14 +212,14 @@ func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
 }
 
 func TestDuplicateSourcesAndBrokenSpecsAreReported(t *testing.T) {
-	first := fakeSource{name: "lima", specs: []Spec{{Name: "x"}, {Modes: shell}}}
+	first := fakeSource{name: "lima", specs: []Spec{{Name: "x", Modes: []ModeSpec{{}}}, {Modes: shell}}}
 	second := fakeSource{name: "lima", specs: []Spec{{Name: "y", Modes: shell}}}
 
 	targets, err := Merge(first, second)
 	if len(targets) != 0 {
 		t.Errorf("want no targets, got %v", targets)
 	}
-	for _, want := range []string{`target "lima/x": no modes`, "target lima #2: no name", `duplicate source "lima"`} {
+	for _, want := range []string{`target "lima/x": mode 1 has no name`, "target lima #2: no name", `duplicate source "lima"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("errors should mention %q, got %v", want, err)
 		}
@@ -260,7 +262,7 @@ targets:`+host+`
 	if forge.Logs != "tail ~/.lima/forge/serial.log" {
 		t.Errorf("logs should interpolate the name and leave ~ to the shell, got %q", forge.Logs)
 	}
-	if got := forge.DefaultMode().Argv; !slices.Equal(got, append(wantVia, "tmux new-session -A -s forge")) {
+	if got := forge.Modes[0].Argv; !slices.Equal(got, append(wantVia, "tmux new-session -A -s forge")) {
 		t.Errorf("tmux argv = %q", got)
 	}
 	if shell := modeNamed(t, forge, "shell"); !slices.Equal(shell.Argv, append(wantVia, loginShell)) {
@@ -288,7 +290,7 @@ targets:
       - { name: shell }
 `)
 	local := find(t, targets, "host")
-	if got := local.DefaultMode().Argv; !slices.Equal(got, []string{"sh", "-c", "tmux new-session -A -s host"}) {
+	if got := local.Modes[0].Argv; !slices.Equal(got, []string{"sh", "-c", "tmux new-session -A -s host"}) {
 		t.Errorf("tmux argv = %q", got)
 	}
 	if shell := modeNamed(t, local, "shell"); !slices.Equal(shell.Argv, []string{"sh", "-c", loginShell}) {
@@ -347,6 +349,83 @@ targets:
 	}
 }
 
+func TestModesDefaultWhenLeftOut(t *testing.T) {
+	targets := mustLoad(t, `
+targets:
+  - name: omitted
+  - { name: empty, modes: [] }
+  - { name: declared, modes: [{ name: tmux, run: tmux }] }
+`)
+	for _, name := range []string{"omitted", "empty"} {
+		target := find(t, targets, name)
+		if got := modeNames(target); !slices.Equal(got, []string{"tmux", "shell"}) {
+			t.Errorf("%s: want tmux then shell, got %v", name, got)
+		}
+		if got := modeNamed(t, target, "tmux").Requires; got != "tmux" {
+			t.Errorf("%s: the default tmux mode needs tmux, got %q", name, got)
+		}
+		if got := modeNamed(t, target, "shell").Requires; got != "" {
+			t.Errorf("%s: a shell needs nothing, got %q", name, got)
+		}
+	}
+
+	declared := find(t, targets, "declared")
+	if got := modeNames(declared); !slices.Equal(got, []string{"tmux"}) {
+		t.Errorf("declared modes replace the defaults, got %v", got)
+	}
+	if got := modeNamed(t, declared, "tmux").Requires; got != "" {
+		t.Errorf("a declared mode is never filtered, got %q", got)
+	}
+}
+
+func TestRequiresCannotBeConfigured(t *testing.T) {
+	_, err := load(t, "targets:\n  - { name: box, modes: [{ name: a, requires: tmux }] }\n")
+	if err == nil || !strings.Contains(err.Error(), "requires") {
+		t.Errorf("requires belongs to the core, got %v", err)
+	}
+}
+
+func TestDefaultTmuxModeFallsBackToTheShell(t *testing.T) {
+	const tmux = `echo "tmux $*"`
+	for name, c := range map[string]struct {
+		tools map[string]string
+		want  string
+	}{
+		"with tmux":    {map[string]string{"tmux": tmux}, "tmux new-session -A -s 0"},
+		"without tmux": {nil, "user shell"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			sh, err := exec.LookPath("sh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(sh, filepath.Join(dir, "sh")); err != nil {
+				t.Fatal(err)
+			}
+			stubs := map[string]string{"user-shell": `echo "user shell"`}
+			maps.Copy(stubs, c.tools)
+			for stub, body := range stubs {
+				if err := os.WriteFile(filepath.Join(dir, stub), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("PATH", dir)
+			t.Setenv("SHELL", filepath.Join(dir, "user-shell"))
+
+			targets := mustLoad(t, "targets:\n  - name: box\n")
+			argv := modeNamed(t, find(t, targets, "box"), "tmux").Argv
+			out, err := exec.Command(argv[0], argv[1:]...).Output()
+			if err != nil {
+				t.Fatalf("%q: %v", argv, err)
+			}
+			if got := strings.TrimSpace(string(out)); got != c.want {
+				t.Errorf("got %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
 func TestModeCommandTravelsAsOneArgument(t *testing.T) {
 	targets := mustLoad(t, `
 targets:`+host+`
@@ -355,7 +434,7 @@ targets:`+host+`
     modes:
       - { name: tmux, run: "bash -lc 'lc && tmux'" }
 `)
-	argv := find(t, targets, "dojo").DefaultMode().Argv
+	argv := find(t, targets, "dojo").Modes[0].Argv
 	if want := []string{"ssh", "-t", "dojo", "bash -lc 'lc && tmux'"}; !slices.Equal(argv, want) {
 		t.Errorf("argv = %q, want %q", argv, want)
 	}
@@ -370,8 +449,6 @@ targets:`+host+`
   - name: good
     via: ssh good
     modes: [{ name: shell }]
-  - name: nomodes
-    via: ssh x
   - name: dupmodes
     via: ssh x
     modes: [{ name: a }, { name: a }]
@@ -391,8 +468,8 @@ targets:`+host+`
 	if err == nil {
 		t.Fatal("every broken target must be reported")
 	}
-	for _, want := range []string{"nomodes", `duplicate mode "a"`,
-		"badquote", `"badexec": exec`, `duplicate target "good"`, "#8"} {
+	for _, want := range []string{`duplicate mode "a"`,
+		"badquote", `"badexec": exec`, `duplicate target "good"`, "#7"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q:\n%v", want, err)
 		}

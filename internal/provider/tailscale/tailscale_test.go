@@ -85,13 +85,6 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 	if !slices.Equal(mac.Stats, stats.ForOS("darwin")) || mac.Logs != "" {
 		t.Errorf("want macos stats and no logs, got %d stats and %q", len(mac.Stats), mac.Logs)
 	}
-	var modes []string
-	for _, m := range berlin.Modes {
-		modes = append(modes, m.Command())
-	}
-	if len(modes) != 2 || !strings.Contains(modes[0], "tmux new-session -A -s 0") {
-		t.Errorf("want tmux then shell, got %q", modes)
-	}
 }
 
 func TestFailuresBelongToTheSource(t *testing.T) {

@@ -81,13 +81,6 @@ func TestInstanceDefaults(t *testing.T) {
 	if bsd.Stats != nil {
 		t.Errorf("a non-Linux guest gets no stats, got %v", bsd.Stats)
 	}
-	var modes []string
-	for _, m := range dev.Modes {
-		modes = append(modes, m.Command())
-	}
-	if want := "tmux new-session -A -s 0"; !strings.Contains(modes[0], want) || len(modes) != 2 {
-		t.Errorf("want tmux then shell, got %q", modes)
-	}
 }
 
 func TestFailuresBelongToTheSource(t *testing.T) {
