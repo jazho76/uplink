@@ -206,7 +206,7 @@ func configEdited(err error) tea.Msg {
 func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	targets, problems := m.load()
 	for _, t := range targets {
-		if previous, ok := m.targetByID(t.ID); ok && !slices.Equal(previous.Stats, t.Stats) {
+		if previous, ok := m.targetByID(t.ID); ok && (!slices.Equal(previous.Stats, t.Stats) || previous.BuiltinStats != t.BuiltinStats) {
 			e := m.live[t.ID]
 			e.snapshot.Readings, e.inspectOK = nil, false
 			m.live[t.ID] = e

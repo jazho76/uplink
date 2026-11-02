@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -73,13 +72,10 @@ func TestInstanceFacts(t *testing.T) {
 func TestInstanceDefaults(t *testing.T) {
 	fixture(t)
 	targets := resolved(t)
-	bsd, dev := targets[0], targets[1]
+	dev := targets[1]
 
-	if dev.Group != "vms" || !dev.Watch || !slices.Equal(dev.Stats, stats.ForOS("linux")) {
-		t.Errorf("want a watched vms target with linux stats, got %q %v %d stats", dev.Group, dev.Watch, len(dev.Stats))
-	}
-	if bsd.Stats != nil {
-		t.Errorf("a non-Linux guest gets no stats, got %v", bsd.Stats)
+	if dev.Group != "vms" || !dev.Watch || !dev.BuiltinStats {
+		t.Errorf("want a watched vms target with built-in stats, got %q %v %v", dev.Group, dev.Watch, dev.BuiltinStats)
 	}
 }
 

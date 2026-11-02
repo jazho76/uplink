@@ -43,6 +43,7 @@ type Spec struct {
 
 	Display  string `yaml:"-"`
 	Local    bool   `yaml:"-"`
+	Kind     string `yaml:"-"`
 	Defaults *Spec  `yaml:"-"`
 }
 
@@ -59,6 +60,10 @@ func resolve(source string, spec Spec) (Target, error) {
 	if len(spec.Modes) == 0 {
 		spec.Modes = defaultModes
 	}
+	if spec.Stats == nil && spec.Kind == KindContainer {
+		spec.Stats = []stats.Metric{{Preset: stats.PresetContainer}}
+	}
+	builtinStats := spec.Stats == nil
 	expanded, err := stats.Expand(spec.Stats)
 	if err != nil {
 		return Target{}, fmt.Errorf("stats: %w", err)
@@ -93,6 +98,8 @@ func resolve(source string, spec Spec) (Target, error) {
 		Watch:  valueOr(spec.Watch, false),
 		Stats:  spec.Stats,
 		Local:  spec.Local,
+
+		BuiltinStats: builtinStats,
 	}
 
 	modes, err := t.modes(spec.Modes)

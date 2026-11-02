@@ -11,6 +11,8 @@ const (
 	ConfigSource = "config"
 	DefaultGroup = "ungrouped"
 	loginShell   = `exec "${SHELL:-/bin/sh}"`
+
+	KindContainer = "container"
 )
 
 var localVia = []string{"sh", "-c"}
@@ -47,6 +49,8 @@ type Target struct {
 	Stats  []stats.Metric
 	Modes  []Mode
 	Local  bool
+
+	BuiltinStats bool
 }
 
 func (t Target) ArgvFor(command string) []string {

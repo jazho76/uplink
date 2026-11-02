@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/run"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -109,17 +108,12 @@ func (p peer) spec(magicDNS bool) (target.Spec, bool) {
 
 	quote := func(args ...string) string { return target.Quote(args) }
 	probe := quote("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address)
-	goos := strings.ToLower(p.OS)
-	if p.OS == "macOS" {
-		goos = "darwin"
-	}
 	watch := true
 	defaults := &target.Spec{
 		Group: group,
 		Watch: &watch,
-		Stats: stats.ForOS(goos),
 	}
-	if goos == "linux" {
+	if strings.EqualFold(p.OS, "linux") {
 		defaults.Logs = probe + " " + quote(journal)
 	}
 	return target.Spec{

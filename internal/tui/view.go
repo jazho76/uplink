@@ -103,7 +103,7 @@ func (m model) previewBody(width, height int) string {
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.target))
 	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
 
-	if len(it.target.Stats) > 0 {
+	if m.showsLive(it.target) {
 		b.WriteString("\n" + rule("live", width))
 		b.WriteString(m.renderLive(it.id(), width))
 	}
@@ -135,6 +135,17 @@ func (m model) logsFor(it item) string {
 		return ""
 	}
 	return m.logPeek.text
+}
+
+func (m model) showsLive(t target.Target) bool {
+	if !t.BuiltinStats {
+		return len(t.Stats) > 0
+	}
+	e := m.live[t.ID]
+	if e.inspected {
+		return len(e.snapshot.Readings) > 0
+	}
+	return e.inspectedAt.IsZero()
 }
 
 func (m model) renderLive(id target.ID, width int) string {

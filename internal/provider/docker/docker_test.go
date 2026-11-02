@@ -72,7 +72,7 @@ func TestContainerFacts(t *testing.T) {
 func TestContainerDefaults(t *testing.T) {
 	fixture(t)
 	web := resolved(t)[1]
-	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, containerPreset(t)) {
+	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, containerPreset(t)) || web.BuiltinStats {
 		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -76,14 +75,14 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 	targets := resolved(t)
 	mac, berlin := targets[0], targets[1]
 
-	if berlin.Group != "machines" || !berlin.Watch || !slices.Equal(berlin.Stats, stats.ForOS("linux")) {
-		t.Errorf("want a watched machine with linux stats, got %q %v %d stats", berlin.Group, berlin.Watch, len(berlin.Stats))
+	if berlin.Group != "machines" || !berlin.Watch || !berlin.BuiltinStats {
+		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.BuiltinStats)
 	}
 	if want := "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=2 berlin.tail0000.ts.net 'journalctl --system -n 500 --no-pager -o short'"; berlin.Logs != want {
 		t.Errorf("logs: got %q, want %q", berlin.Logs, want)
 	}
-	if !slices.Equal(mac.Stats, stats.ForOS("darwin")) || mac.Logs != "" {
-		t.Errorf("want macos stats and no logs, got %d stats and %q", len(mac.Stats), mac.Logs)
+	if !mac.BuiltinStats || mac.Logs != "" {
+		t.Errorf("want built-in stats and no logs, got %v and %q", mac.BuiltinStats, mac.Logs)
 	}
 }
 

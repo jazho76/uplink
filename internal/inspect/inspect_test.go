@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -127,6 +128,84 @@ func TestRunSurvivesAMissingTmux(t *testing.T) {
 	snapshot := inspectLocally(t)
 	if len(snapshot.Tools) != 0 || len(snapshot.Sessions) != 0 {
 		t.Errorf("want no tmux and no sessions, got %+v", snapshot)
+	}
+}
+
+func builtinLabels(t *testing.T, kernel string) Snapshot {
+	t.Helper()
+	pathWith(t, map[string]string{"uname": "echo " + kernel, "tmux": `echo "session 1 0 work"`})
+	snapshot, err := Run(30*time.Second, Request{BuiltinStats: true}, []string{"sh"})
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if snapshot.OS != kernel {
+		t.Errorf("want %s reported, got %q", kernel, snapshot.OS)
+	}
+	return snapshot
+}
+
+func labels(readings []stats.Reading) []string {
+	names := make([]string, len(readings))
+	for i, r := range readings {
+		names[i] = r.Metric.Label
+	}
+	return names
+}
+
+func metricLabels(metrics []stats.Metric) []string {
+	names := make([]string, len(metrics))
+	for i, m := range metrics {
+		names[i] = m.Label
+	}
+	return names
+}
+
+func TestBuiltinStatsFollowTheKernel(t *testing.T) {
+	for _, kernel := range []string{"Linux", "Darwin"} {
+		t.Run(kernel, func(t *testing.T) {
+			snapshot := builtinLabels(t, kernel)
+			want := metricLabels(builtinMetrics(kernel))
+			if len(want) == 0 || !slices.Equal(labels(snapshot.Readings), want) {
+				t.Errorf("want %q, got %q", want, labels(snapshot.Readings))
+			}
+		})
+	}
+}
+
+func TestBuiltinStatsReadThisLinuxMachine(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skipf("no linux here: %s", runtime.GOOS)
+	}
+	snapshot := builtinLabels(t, "Linux")
+	for _, r := range snapshot.Readings {
+		if !r.OK {
+			t.Errorf("%s gave no reading", r.Metric.Label)
+		}
+	}
+}
+
+func TestUnknownKernelHasNoStatsButTheRestStillWorks(t *testing.T) {
+	snapshot := builtinLabels(t, "Plan9")
+	if len(snapshot.Readings) != 0 {
+		t.Errorf("want no readings, got %+v", snapshot.Readings)
+	}
+	if !slices.Contains(snapshot.Tools, "tmux") || len(snapshot.Sessions) != 1 {
+		t.Errorf("tools and sessions do not depend on the kernel, got %+v", snapshot)
+	}
+}
+
+func TestDeclaredStatsIgnoreTheKernel(t *testing.T) {
+	pathWith(t, map[string]string{"uname": "echo Plan9"})
+	snapshot := inspectLocally(t)
+	if snapshot.OS != "Plan9" {
+		t.Errorf("the OS is still reported, got %q", snapshot.OS)
+	}
+}
+
+func TestBannerCannotOverrideTheKernel(t *testing.T) {
+	snapshot := Parse("os Linux and friends\nos Darwin\n", Request{BuiltinStats: true})
+	if snapshot.OS != "Darwin" {
+		t.Errorf("the script's line comes last and wins, got %q", snapshot.OS)
 	}
 }
 

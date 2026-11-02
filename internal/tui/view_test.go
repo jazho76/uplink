@@ -8,6 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/inspect"
+	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 const sessionsRule = "tmux ─"
@@ -135,6 +137,72 @@ func TestLogsShrinkToFitSessions(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %q to fit:\n%s", want, got)
 		}
+	}
+}
+
+const liveRule = "live ─"
+
+func focusedOnBuiltin() model {
+	box := remote("box")
+	box.Stats, box.BuiltinStats = nil, true
+	m, _ := newTestModel()
+	return focus(sized(withTargets(m, box)), "box")
+}
+
+func inspectedWith(m model, readings []stats.Reading) model {
+	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspect.Snapshot{OS: "Linux", Readings: readings}, inspectOK: true})
+	return next.(model)
+}
+
+func TestBuiltinStatsWaitForTheFirstCheck(t *testing.T) {
+	got := preview(focusedOnBuiltin())
+	if !strings.Contains(got, liveRule) || !strings.Contains(got, "…") {
+		t.Errorf("want the live block pending, got:\n%s", got)
+	}
+}
+
+func TestBuiltinStatsShowTheirReadings(t *testing.T) {
+	m := inspectedWith(focusedOnBuiltin(), linuxReadings(1, 4, 1<<30, 4<<30, 0))
+	if got := preview(m); !strings.Contains(got, liveRule) || !strings.Contains(got, "memory") {
+		t.Errorf("want readings, got:\n%s", got)
+	}
+	if got := preview(probed(m, "box", false)); !strings.Contains(got, "unavailable") {
+		t.Errorf("a known target going down has its stats unavailable, got:\n%s", got)
+	}
+}
+
+func TestUnsupportedKernelHidesTheLiveBlock(t *testing.T) {
+	m := inspectedWith(focusedOnBuiltin(), nil)
+	if got := preview(m); strings.Contains(got, liveRule) {
+		t.Errorf("no built-in stats for this kernel, got:\n%s", got)
+	}
+	m.markStale(configID("box"))
+	if got := preview(m); strings.Contains(got, liveRule) {
+		t.Errorf("going stale must not flash the block back, got:\n%s", got)
+	}
+}
+
+func TestBuiltinStatsStayHiddenWhenNeverInspected(t *testing.T) {
+	if got := preview(probed(focusedOnBuiltin(), "box", false)); strings.Contains(got, liveRule) {
+		t.Errorf("a stopped target of unknown kernel has nothing to promise, got:\n%s", got)
+	}
+	next, _ := focusedOnBuiltin().Update(liveMsg{id: configID("box"), up: true, full: true})
+	if got := preview(next.(model)); strings.Contains(got, liveRule) {
+		t.Errorf("a failed first inspection has nothing to promise, got:\n%s", got)
+	}
+}
+
+func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
+	m, _ := newTestModel()
+	m = probed(sized(m), "forge", true)
+
+	changed := vm("forge")
+	changed.Stats, changed.BuiltinStats = nil, true
+	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+
+	next, _ := m.Update(configEditedMsg{})
+	if got := next.(model).live[configID("forge")].snapshot.Readings; got != nil {
+		t.Errorf("the old metrics no longer apply, got %+v", got)
 	}
 }
 

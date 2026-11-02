@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/run"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -32,9 +31,6 @@ type instance struct {
 	Hostname      string `json:"hostname"`
 	Dir           string `json:"dir"`
 	SSHConfigFile string `json:"sshConfigFile"`
-	Config        struct {
-		OS string `json:"os"`
-	} `json:"config"`
 }
 
 type Provider struct{}
@@ -94,7 +90,6 @@ func (vm instance) spec() target.Spec {
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
-			Stats: stats.ForOS(strings.ToLower(vm.Config.OS)),
 		},
 	}
 }

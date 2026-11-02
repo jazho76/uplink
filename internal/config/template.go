@@ -19,7 +19,8 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # stats   metrics shown while selected, measured in one probe through exec:
 #         gauge (label, value, max, unit) and text (label, value, unit).
 #         unit is bytes or seconds. A name instead of a metric adds a
-#         preset: linux, macos, or container. Left out means none.
+#         preset: linux, macos, or container. Left out means the built-in
+#         metrics for the target's OS; [] means none.
 # modes   ways to enter; the first is the default. A mode without run opens
 #         the user's shell. Left out means tmux, when the target has it, and
 #         shell. Every session returns to the dashboard.

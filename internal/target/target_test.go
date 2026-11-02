@@ -587,6 +587,41 @@ targets:`+host+`
 	}
 }
 
+func TestStatsDefaultToBuiltIn(t *testing.T) {
+	targets := mustLoad(t, `
+targets:
+  - name: omitted
+  - { name: off, stats: [] }
+  - { name: declared, stats: [{ type: text, label: a, value: x }] }
+`)
+	if omitted := find(t, targets, "omitted"); !omitted.BuiltinStats || len(omitted.Stats) != 0 {
+		t.Errorf("left out means built-in, got %+v", omitted)
+	}
+	if off := find(t, targets, "off"); off.BuiltinStats || len(off.Stats) != 0 {
+		t.Errorf("an empty list turns stats off, got %+v", off)
+	}
+	if declared := find(t, targets, "declared"); declared.BuiltinStats || len(declared.Stats) != 1 {
+		t.Errorf("declared stats are used as written, got %+v", declared)
+	}
+}
+
+func TestContainersGetTheContainerPreset(t *testing.T) {
+	targets, err := Merge(fakeSource{name: "docker", specs: []Spec{{Name: "web", Kind: KindContainer}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preset, _ := stats.Preset(stats.PresetContainer)
+	if got := targets[0]; got.BuiltinStats || !slices.Equal(got.Stats, preset) {
+		t.Errorf("uname cannot tell a container apart, got %+v", got)
+	}
+}
+
+func TestKindCannotBeConfigured(t *testing.T) {
+	if _, err := load(t, "targets:\n  - { name: box, kind: container }\n"); err == nil || !strings.Contains(err.Error(), "kind") {
+		t.Errorf("kind belongs to providers, got %v", err)
+	}
+}
+
 func TestAnchoredStatsAreShared(t *testing.T) {
 	targets := mustLoad(t, `
 x-linux: &linux [{ type: text, label: a, value: x }, { type: text, label: b, value: y }]

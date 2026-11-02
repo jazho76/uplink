@@ -5,16 +5,14 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
-func on(t *testing.T, os, host string, tools ...string) {
+func on(t *testing.T, host string, tools ...string) {
 	t.Helper()
-	previousOS, previousHost, previousLook := goos, hostname, lookPath
-	t.Cleanup(func() { goos, hostname, lookPath = previousOS, previousHost, previousLook })
+	previousHost, previousLook := hostname, lookPath
+	t.Cleanup(func() { hostname, lookPath = previousHost, previousLook })
 
-	goos = os
 	hostname = func() (string, error) {
 		if host == "" {
 			return "", errors.New("no hostname")
@@ -39,37 +37,28 @@ func spec(t *testing.T) target.Spec {
 }
 
 func TestDescribesThisMachine(t *testing.T) {
-	on(t, "linux", "fedora", "journalctl")
+	on(t, "fedora", "journalctl")
 	s := spec(t)
 	if s.Name != "localhost" || s.Display != "fedora" || !s.Local {
 		t.Errorf("want local key localhost shown as fedora, got %q and %q, local %v", s.Name, s.Display, s.Local)
 	}
-	if s.Defaults.Group != "local" || !slices.Equal(s.Defaults.Stats, stats.ForOS("linux")) {
-		t.Errorf("want the local group with linux stats, got %+v", s.Defaults)
+	if s.Defaults.Group != "local" {
+		t.Errorf("want the local group, got %+v", s.Defaults)
 	}
 	if s.Defaults.Logs != journal {
 		t.Errorf("want the journal as logs, got %q", s.Defaults.Logs)
 	}
 }
 
-func TestStatsFollowTheOS(t *testing.T) {
-	for goos, want := range map[string][]stats.Metric{"darwin": stats.ForOS("darwin"), "plan9": nil} {
-		on(t, goos, "box")
-		if got := spec(t).Defaults.Stats; !slices.Equal(got, want) {
-			t.Errorf("%s: got %v", goos, got)
-		}
-	}
-}
-
 func TestMissingToolsDropTheirFeatures(t *testing.T) {
-	on(t, "linux", "fedora")
+	on(t, "fedora")
 	if got := spec(t).Defaults.Logs; got != "" {
 		t.Errorf("without journalctl want no logs, got %q", got)
 	}
 }
 
 func TestUnknownHostnameShowsTheKey(t *testing.T) {
-	on(t, "linux", "")
+	on(t, "")
 	targets, err := target.Merge(Provider{})
 	if err != nil || len(targets) != 1 || targets[0].Name != "localhost" {
 		t.Errorf("want a target named localhost, got %v and %v", targets, err)

@@ -104,7 +104,7 @@ terminal emulator, bind your preferred shortcut to:
 
 The left side lists targets in their groups, in the order
 they first appear. The right side shows the selected target's status and launch
-mode, its declared stats, its running tmux sessions, and recent logs; `uplink
+mode, its stats, its running tmux sessions, and recent logs; `uplink
 config check` shows the exact command behind each mode. This machine is listed
 by default, with stats for its OS, in a compact `local` pane at the top; see
 [Discovery](#discovery).
@@ -180,7 +180,7 @@ without `via` runs here.
 | `down` | Host-side stop, run by `Ctrl+X` |
 | `logs` | Host-side command whose output fills the log view |
 | `watch` | `true` checks status in the background, not only while selected |
-| `stats` | Metrics shown while the target is selected; see [Stats](#stats). None when left out |
+| `stats` | Metrics shown while the target is selected; see [Stats](#stats). Built-in metrics for the target's OS when left out, none with `[]` |
 | `modes` | Ways to enter the target; the first is the default. See [Modes](#modes) for what leaving it out does |
 
 ### How `via` works
@@ -305,7 +305,10 @@ is not a number then shows `?`. `{name}` works in `value` and `max`.
 | `macos` | the same, read with `sysctl` and `vm_stat`, disk on the data volume |
 | `container` | memory from cgroup v2, against the container's limit or the host's memory |
 
-Discovered targets come with the preset for their OS (`container` for Docker).
+A target that leaves out `stats` gets the `linux` or `macos` metrics, chosen by
+what `uname` reports on each refresh; on any other OS the live block is hidden.
+Docker containers get `container`, because `uname` cannot tell them apart.
+`stats: []` turns stats off.
 
 All metrics travel in one script piped through `exec` into `sh`, one round trip
 per refresh, but each command runs in its own `sh -c` with no stdin and, where

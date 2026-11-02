@@ -75,7 +75,7 @@ func checkConfig() error {
 			{"up", t.Up},
 			{"down", t.Down},
 			{"logs", t.Logs},
-			{"stats", statNames(t.Stats)},
+			{"stats", statsSummary(t)},
 		} {
 			if f.value != "" {
 				fmt.Printf("  %-7s %s\n", f.key, f.value)
@@ -94,6 +94,13 @@ func checkConfig() error {
 		fmt.Println()
 	}
 	return problems
+}
+
+func statsSummary(t target.Target) string {
+	if t.BuiltinStats {
+		return "built-in (by OS)"
+	}
+	return statNames(t.Stats)
 }
 
 func statNames(metrics []stats.Metric) string {

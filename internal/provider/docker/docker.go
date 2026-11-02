@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/run"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -85,9 +84,9 @@ func parse(out string) ([]string, error) {
 func spec(container string) target.Spec {
 	quote := func(args ...string) string { return target.Quote(args) }
 	watch := true
-	metrics, _ := stats.Preset(stats.PresetContainer)
 	return target.Spec{
 		Name:   container,
+		Kind:   target.KindContainer,
 		Via:    quote("docker", "exec", "-it", container, "sh", "-c"),
 		Exec:   quote("docker", "exec", "-i", container, "sh", "-c"),
 		Status: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
@@ -97,7 +96,6 @@ func spec(container string) target.Spec {
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
-			Stats: metrics,
 		},
 	}
 }

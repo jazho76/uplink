@@ -28,7 +28,7 @@ type Backend interface {
 type System struct{}
 
 func (System) Inspect(t Target) (inspect.Snapshot, error) {
-	return inspect.Run(probeCeiling, inspect.Request{Metrics: t.Stats}, t.ExecArgvFor("sh"))
+	return inspect.Run(probeCeiling, inspect.Request{Metrics: t.Stats, BuiltinStats: t.BuiltinStats}, t.ExecArgvFor("sh"))
 }
 
 func (System) Status(t Target) error {

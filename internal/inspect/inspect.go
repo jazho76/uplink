@@ -10,10 +10,12 @@ import (
 )
 
 type Request struct {
-	Metrics []stats.Metric
+	Metrics      []stats.Metric
+	BuiltinStats bool
 }
 
 type Snapshot struct {
+	OS       string
 	Readings []stats.Reading
 	Tools    []string
 	Sessions []Session
@@ -24,7 +26,7 @@ type section struct {
 	parse  func(request Request, out string, snapshot *Snapshot)
 }
 
-var sections = []section{statsSection, toolsSection, sessionsSection}
+var sections = []section{osSection, statsSection, toolsSection, sessionsSection}
 
 func Run(limit time.Duration, request Request, argv []string) (Snapshot, error) {
 	if len(argv) == 0 {

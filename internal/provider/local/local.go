@@ -3,9 +3,7 @@ package local
 import (
 	"os"
 	"os/exec"
-	"runtime"
 
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -17,7 +15,6 @@ const (
 )
 
 var (
-	goos     = runtime.GOOS
 	hostname = os.Hostname
 	lookPath = exec.LookPath
 )
@@ -36,7 +33,6 @@ func (Provider) Specs() ([]target.Spec, error) {
 		Local:   true,
 		Defaults: &target.Spec{
 			Group: group,
-			Stats: stats.ForOS(goos),
 			Logs:  logs(),
 		},
 	}}, nil
