@@ -18,7 +18,6 @@ const (
 	running     = "Running"
 	pingTimeout = 2 * time.Second
 	listTimeout = 5 * time.Second
-	journal     = "journalctl --system -n 500 --no-pager -o short"
 )
 
 var (
@@ -107,20 +106,12 @@ func (p peer) spec(magicDNS bool) (target.Spec, bool) {
 	}
 
 	quote := func(args ...string) string { return target.Quote(args) }
-	probe := quote("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address)
 	watch := true
-	defaults := &target.Spec{
-		Group: group,
-		Watch: &watch,
-	}
-	if strings.EqualFold(p.OS, "linux") {
-		defaults.Logs = probe + " " + quote(journal)
-	}
 	return target.Spec{
 		Name:     key,
 		Display:  p.HostName,
 		Via:      quote("ssh", "-t", "-o", "ConnectTimeout=2", address),
-		Exec:     probe,
-		Defaults: defaults,
+		Exec:     quote("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address),
+		Defaults: &target.Spec{Group: group, Watch: &watch},
 	}, true
 }

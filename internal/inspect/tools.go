@@ -2,9 +2,14 @@ package inspect
 
 import "strings"
 
-const toolTag = "tool"
+const (
+	ToolTmux    = "tmux"
+	ToolJournal = "journalctl"
 
-var tools = []string{"tmux"}
+	toolTag = "tool"
+)
+
+var tools = []string{ToolTmux, ToolJournal}
 
 var toolsSection = section{
 	script: func(Request) string {

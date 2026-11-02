@@ -140,7 +140,7 @@ func TestDefaultsFillWhatFactsLeaveOut(t *testing.T) {
 		Name:     "dev",
 		Display:  "Dev box",
 		Group:    "work",
-		Defaults: &Spec{Group: "vms", Logs: "tail {name}.log", Modes: shell},
+		Defaults: &Spec{Group: "vms", Logs: new("tail {name}.log"), Modes: shell},
 	}}}
 
 	targets, err := Merge(discovered)
@@ -584,6 +584,34 @@ targets:`+host+`
 	}
 	if len(targets) == 0 || targets[0].Name != "host" {
 		t.Errorf("the host should survive, got %+v", targets)
+	}
+}
+
+func TestLogsDefaultToTheGuestJournal(t *testing.T) {
+	targets := mustLoad(t, `
+targets:
+  - name: omitted
+  - { name: off, logs: "" }
+  - { name: declared, logs: "tail {name}.log" }
+`)
+	if omitted := find(t, targets, "omitted"); !omitted.GuestLogs || omitted.Logs != "" {
+		t.Errorf("left out means the guest journal, got %+v", omitted)
+	}
+	if off := find(t, targets, "off"); off.GuestLogs || off.Logs != "" {
+		t.Errorf(`logs: "" turns logs off, got %+v`, off)
+	}
+	if declared := find(t, targets, "declared"); declared.GuestLogs || declared.Logs != "tail declared.log" {
+		t.Errorf("declared logs stay host-side and interpolate, got %+v", declared)
+	}
+}
+
+func TestGuestLogsFlowThroughExec(t *testing.T) {
+	guest := Target{GuestLogs: true, Exec: []string{"sh", "-c", `printf 'old\n\033[31m%s\033[0m\n' "$0"`}}
+	if got, want := (System{}).Logs(guest, 1), journalCommand; got != want {
+		t.Errorf("want the journal command through exec, stripped and limited, got %q", got)
+	}
+	if got := (System{}).Logs(Target{}, 1); got != "" {
+		t.Errorf("no logs at all should run nothing, got %q", got)
 	}
 }
 

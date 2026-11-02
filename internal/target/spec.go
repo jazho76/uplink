@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jazho76/uplink/internal/inspect"
 	"github.com/jazho76/uplink/internal/stats"
 )
 
@@ -24,7 +25,7 @@ type ModeSpec struct {
 }
 
 var defaultModes = []ModeSpec{
-	{Name: "tmux", Requires: "tmux", Run: `command -v tmux >/dev/null && exec tmux new-session -A -s 0; ` + loginShell},
+	{Name: "tmux", Requires: inspect.ToolTmux, Run: `command -v tmux >/dev/null && exec tmux new-session -A -s 0; ` + loginShell},
 	{Name: "shell"},
 }
 
@@ -36,7 +37,7 @@ type Spec struct {
 	Status string         `yaml:"status"`
 	Up     string         `yaml:"up"`
 	Down   string         `yaml:"down"`
-	Logs   string         `yaml:"logs"`
+	Logs   *string        `yaml:"logs"`
 	Watch  *bool          `yaml:"watch"`
 	Stats  []stats.Metric `yaml:"stats"`
 	Modes  []ModeSpec     `yaml:"modes"`
@@ -94,12 +95,13 @@ func resolve(source string, spec Spec) (Target, error) {
 		Status: spec.Status,
 		Up:     spec.Up,
 		Down:   spec.Down,
-		Logs:   spec.Logs,
+		Logs:   valueOr(spec.Logs, ""),
 		Watch:  valueOr(spec.Watch, false),
 		Stats:  spec.Stats,
 		Local:  spec.Local,
 
 		BuiltinStats: builtinStats,
+		GuestLogs:    spec.Logs == nil,
 	}
 
 	modes, err := t.modes(spec.Modes)
@@ -124,11 +126,11 @@ func prefix(field, value string) ([]string, error) {
 	return expandHome(words), nil
 }
 
-func valueOr(flag *bool, fallback bool) bool {
-	if flag == nil {
+func valueOr[T any](value *T, fallback T) T {
+	if value == nil {
 		return fallback
 	}
-	return *flag
+	return *value
 }
 
 func (s Spec) over(base Spec) Spec {
@@ -151,7 +153,10 @@ func (s Spec) over(base Spec) Spec {
 
 func (s Spec) interpolate() Spec {
 	fill := func(v string) string { return strings.ReplaceAll(v, namePlaceholder, s.Name) }
-	s.Via, s.Exec, s.Logs = fill(s.Via), fill(s.Exec), fill(s.Logs)
+	s.Via, s.Exec = fill(s.Via), fill(s.Exec)
+	if s.Logs != nil {
+		s.Logs = new(fill(*s.Logs))
+	}
 	s.Status, s.Up, s.Down = fill(s.Status), fill(s.Up), fill(s.Down)
 	modes := make([]ModeSpec, len(s.Modes))
 	for i, m := range s.Modes {

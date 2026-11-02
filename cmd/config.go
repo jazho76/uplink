@@ -74,7 +74,7 @@ func checkConfig() error {
 			{"status", t.Status},
 			{"up", t.Up},
 			{"down", t.Down},
-			{"logs", t.Logs},
+			{"logs", logsSummary(t)},
 			{"stats", statsSummary(t)},
 		} {
 			if f.value != "" {
@@ -94,6 +94,13 @@ func checkConfig() error {
 		fmt.Println()
 	}
 	return problems
+}
+
+func logsSummary(t target.Target) string {
+	if t.GuestLogs {
+		return "journal through exec, when present"
+	}
+	return t.Logs
 }
 
 func statsSummary(t target.Target) string {

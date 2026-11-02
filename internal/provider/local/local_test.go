@@ -2,28 +2,21 @@ package local
 
 import (
 	"errors"
-	"slices"
 	"testing"
 
 	"github.com/jazho76/uplink/internal/target"
 )
 
-func on(t *testing.T, host string, tools ...string) {
+func on(t *testing.T, host string) {
 	t.Helper()
-	previousHost, previousLook := hostname, lookPath
-	t.Cleanup(func() { hostname, lookPath = previousHost, previousLook })
+	previous := hostname
+	t.Cleanup(func() { hostname = previous })
 
 	hostname = func() (string, error) {
 		if host == "" {
 			return "", errors.New("no hostname")
 		}
 		return host, nil
-	}
-	lookPath = func(tool string) (string, error) {
-		if !slices.Contains(tools, tool) {
-			return "", errors.New("not found")
-		}
-		return "/usr/bin/" + tool, nil
 	}
 }
 
@@ -37,7 +30,7 @@ func spec(t *testing.T) target.Spec {
 }
 
 func TestDescribesThisMachine(t *testing.T) {
-	on(t, "fedora", "journalctl")
+	on(t, "fedora")
 	s := spec(t)
 	if s.Name != "localhost" || s.Display != "fedora" || !s.Local {
 		t.Errorf("want local key localhost shown as fedora, got %q and %q, local %v", s.Name, s.Display, s.Local)
@@ -45,15 +38,16 @@ func TestDescribesThisMachine(t *testing.T) {
 	if s.Defaults.Group != "local" {
 		t.Errorf("want the local group, got %+v", s.Defaults)
 	}
-	if s.Defaults.Logs != journal {
-		t.Errorf("want the journal as logs, got %q", s.Defaults.Logs)
-	}
 }
 
-func TestMissingToolsDropTheirFeatures(t *testing.T) {
+func TestLeavesTheInsideToTheCore(t *testing.T) {
 	on(t, "fedora")
-	if got := spec(t).Defaults.Logs; got != "" {
-		t.Errorf("without journalctl want no logs, got %q", got)
+	targets, err := target.Merge(Provider{})
+	if err != nil || len(targets) != 1 {
+		t.Fatalf("want one target, got %v and %v", targets, err)
+	}
+	if got := targets[0]; !got.GuestLogs || !got.BuiltinStats {
+		t.Errorf("logs and stats are the core's to decide, got %+v", got)
 	}
 }
 

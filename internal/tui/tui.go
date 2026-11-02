@@ -83,6 +83,7 @@ type liveEntry struct {
 	inspectedAt time.Time
 	checkedAt   time.Time
 	pending     bool
+	logsPending bool
 	epoch       int
 }
 
@@ -429,10 +430,22 @@ func (m model) peekSelectedLogsIfStale() tea.Cmd {
 
 func (m model) peekSelectedLogs() tea.Cmd {
 	it := m.selected()
-	if it.target.Logs == "" || m.screen == screenLogs {
+	e := m.live[it.id()]
+	if !m.hasLogs(it.target) || m.screen == screenLogs || e.logsPending {
 		return nil
 	}
+	e.logsPending = true
+	m.live[it.id()] = e
 	return peekLogsCmd(m.backend, it.target)
+}
+
+func (m model) hasLogs(t target.Target) bool {
+	if t.Logs != "" {
+		return true
+	}
+	e := m.live[t.ID]
+	return t.GuestLogs && e.inspected && e.state != statusDown &&
+		slices.Contains(e.snapshot.Tools, inspect.ToolJournal)
 }
 
 func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {

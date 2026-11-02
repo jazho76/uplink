@@ -30,6 +30,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.viewLogsCmd()
 
 	case logPeekMsg:
+		e := m.live[msg.id]
+		e.logsPending = false
+		m.live[msg.id] = e
 		if msg.id == m.selected().id() {
 			m.logPeek = peek{id: msg.id, text: msg.text, at: time.Now()}
 		}
@@ -47,6 +50,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case liveMsg:
 		m.live[msg.id] = m.settle(msg)
+		if msg.id == m.selected().id() {
+			return m, m.peekSelectedLogsIfStale()
+		}
 		return m, nil
 
 	case hookDoneMsg:
@@ -125,7 +131,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.exec(cmd, configEdited)
 
 	case "ctrl+l":
-		if it := m.selected(); it.target.Logs != "" {
+		if it := m.selected(); m.hasLogs(it.target) {
 			m.screen = screenLogs
 			m.logTarget = it.target
 			m.logRound++

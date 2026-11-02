@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/inspect"
@@ -203,6 +204,108 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 	next, _ := m.Update(configEditedMsg{})
 	if got := next.(model).live[configID("forge")].snapshot.Readings; got != nil {
 		t.Errorf("the old metrics no longer apply, got %+v", got)
+	}
+}
+
+func focusedOnGuestLogs() (model, *fakeBackend) {
+	box := remote("box")
+	box.Logs, box.GuestLogs = "", true
+	m, backend := newTestModel()
+	backend.logs["box"] = "journal line"
+	return focus(sized(withTargets(m, box)), "box"), backend
+}
+
+func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
+	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspect.Snapshot{Tools: tools}, inspectOK: true})
+	return next.(model), cmd
+}
+
+func TestGuestLogsWaitForTheJournalToBeReported(t *testing.T) {
+	m, backend := focusedOnGuestLogs()
+	m = applyCmd(m, m.peekSelectedLogs())
+	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf("nothing is known yet: %d calls, footer %s", backend.logCalls, m.renderFooter())
+	}
+	if got := key(m, "ctrl+l"); got.screen == screenLogs {
+		t.Error("ctrl+l has nothing to open")
+	}
+
+	m, cmd := inspectedTools(m)
+	m = applyCmd(m, cmd)
+	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf("no journal here: %d calls, footer %s", backend.logCalls, m.renderFooter())
+	}
+}
+
+func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
+	m, backend := focusedOnGuestLogs()
+	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m = applyCmd(m, cmd)
+
+	if backend.logCalls != 1 || !strings.Contains(preview(m), "journal line") {
+		t.Errorf("want one peek landing with the snapshot, got %d calls:\n%s", backend.logCalls, preview(m))
+	}
+	if !strings.Contains(m.renderFooter(), "logs") || key(m, "ctrl+l").screen != screenLogs {
+		t.Errorf("logs should now be offered: %s", m.renderFooter())
+	}
+}
+
+func TestGuestLogsStopWhileDown(t *testing.T) {
+	m, backend := focusedOnGuestLogs()
+	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m = applyCmd(m, cmd)
+
+	m = probed(m, "box", false)
+	calls := backend.logCalls
+	m = applyCmd(m, m.peekSelectedLogs())
+	if backend.logCalls != calls || strings.Contains(preview(m), "journal line") || strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf("a stopped target has no journal to read, %d calls:\n%s", backend.logCalls-calls, preview(m))
+	}
+}
+
+func TestHostSideLogsSurviveDown(t *testing.T) {
+	m, backend := newTestModel()
+	backend.logs["forge"] = "serial line"
+	next, cmd := focus(sized(m), "forge").Update(liveMsg{id: configID("forge"), up: false, full: true})
+	m = applyCmd(next.(model), cmd)
+	if !strings.Contains(preview(m), "serial line") || !strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf("host-side logs do not need the target up:\n%s", preview(m))
+	}
+}
+
+func TestNoLogsOffersNothing(t *testing.T) {
+	m, backend := focusedOnGuestLogs()
+	box := m.selected().target
+	box.GuestLogs = false
+	m = focus(withTargets(m, box), "box")
+	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m = applyCmd(m, cmd)
+	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
+		t.Errorf(`logs: "" reads nothing: %d calls, footer %s`, backend.logCalls, m.renderFooter())
+	}
+}
+
+func TestOnlyOneLogPeekRunsAtATime(t *testing.T) {
+	m, _ := newTestModel()
+	m = focus(sized(m), "forge")
+	if m.peekSelectedLogs() == nil {
+		t.Fatal("the first peek should go out")
+	}
+	if m.peekSelectedLogs() != nil {
+		t.Error("a slow host must not stack up peeks")
+	}
+
+	next, _ := m.Update(logPeekMsg{id: configID("forge")})
+	m = next.(model)
+	if m.peekSelectedLogs() == nil {
+		t.Error("the next peek may go out once the last one lands")
+	}
+
+	m = focus(m, "tokyo")
+	next, _ = m.Update(logPeekMsg{id: configID("forge")})
+	m = focus(next.(model), "forge")
+	if m.peekSelectedLogs() == nil {
+		t.Error("a result landing after moving away still frees its target")
 	}
 }
 

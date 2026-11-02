@@ -51,6 +51,7 @@ type Target struct {
 	Local  bool
 
 	BuiltinStats bool
+	GuestLogs    bool
 }
 
 func (t Target) ArgvFor(command string) []string {

@@ -15,6 +15,9 @@ const (
 	statusTimeout = 5 * time.Second
 	hookTimeout   = 10 * time.Minute
 	logsTimeout   = 2 * time.Second
+
+	guestLogsTimeout = 10 * time.Second
+	journalCommand   = "journalctl --system -n 500 --no-pager -o short"
 )
 
 type Backend interface {
@@ -56,10 +59,19 @@ func hook(limit time.Duration, command string) error {
 }
 
 func (System) Logs(t Target, lines int) string {
-	if t.Logs == "" {
+	var (
+		out string
+		err error
+	)
+	switch {
+	case t.Logs != "":
+		out, err = run.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs)
+	case t.GuestLogs:
+		argv := t.ExecArgvFor(journalCommand)
+		out, err = run.NonInteractive(guestLogsTimeout, "", argv[0], argv[1:]...)
+	default:
 		return ""
 	}
-	out, err := run.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs)
 	if err != nil && out == "" {
 		return ""
 	}

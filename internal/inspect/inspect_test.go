@@ -100,6 +100,13 @@ func TestRunReportsSessions(t *testing.T) {
 	}
 }
 
+func TestRunReportsTheJournal(t *testing.T) {
+	pathWith(t, map[string]string{ToolJournal: "exit 0"})
+	if snapshot := inspectLocally(t); !slices.Contains(snapshot.Tools, ToolJournal) {
+		t.Errorf("want journalctl reported, got %q", snapshot.Tools)
+	}
+}
+
 func TestRunSurvivesATmuxWithNoServer(t *testing.T) {
 	pathWith(t, map[string]string{"tmux": "echo 'no server running' >&2\nexit 1"})
 

@@ -92,7 +92,7 @@ func spec(container string) target.Spec {
 		Status: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
 		Up:     quote("docker", "start", container),
 		Down:   quote("docker", "stop", container),
-		Logs:   events(container),
+		Logs:   new(events(container)),
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,

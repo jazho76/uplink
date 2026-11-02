@@ -24,6 +24,7 @@ type fakeBackend struct {
 	inspections int
 	sessions    []string
 	tools       map[string][]string
+	logCalls    int
 }
 
 func (f *fakeBackend) Inspect(t target.Target) (inspect.Snapshot, error) {
@@ -88,7 +89,10 @@ func (f *fakeBackend) Down(t target.Target) error {
 	return nil
 }
 
-func (f *fakeBackend) Logs(t target.Target, _ int) string { return f.logs[t.Name] }
+func (f *fakeBackend) Logs(t target.Target, _ int) string {
+	f.logCalls++
+	return f.logs[t.Name]
+}
 
 func hostTarget() target.Target {
 	return target.Target{

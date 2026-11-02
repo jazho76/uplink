@@ -131,7 +131,7 @@ func (m model) previewBody(width, height int) string {
 }
 
 func (m model) logsFor(it item) string {
-	if m.logPeek.id != it.id() {
+	if m.logPeek.id != it.id() || !m.hasLogs(it.target) {
 		return ""
 	}
 	return m.logPeek.text
@@ -362,7 +362,7 @@ func (m model) renderFooter() string {
 	if len(m.modes(it.target)) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
-	if it.target.Logs != "" {
+	if m.hasLogs(it.target) {
 		pairs = append(pairs, [2]string{"^l", "logs"})
 	}
 	if m.canHook(it.target, statusStarting) {

@@ -78,11 +78,13 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 	if berlin.Group != "machines" || !berlin.Watch || !berlin.BuiltinStats {
 		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.BuiltinStats)
 	}
-	if want := "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=2 berlin.tail0000.ts.net 'journalctl --system -n 500 --no-pager -o short'"; berlin.Logs != want {
-		t.Errorf("logs: got %q, want %q", berlin.Logs, want)
+	for _, peer := range []target.Target{berlin, mac} {
+		if !peer.GuestLogs || peer.Logs != "" {
+			t.Errorf("%s: the core decides on guest logs, got %v and %q", peer.Name, peer.GuestLogs, peer.Logs)
+		}
 	}
-	if !mac.BuiltinStats || mac.Logs != "" {
-		t.Errorf("want built-in stats and no logs, got %v and %q", mac.BuiltinStats, mac.Logs)
+	if !mac.BuiltinStats {
+		t.Errorf("want built-in stats, got %v", mac.BuiltinStats)
 	}
 }
 

@@ -86,7 +86,7 @@ func (vm instance) spec() target.Spec {
 		Status: "limactl list --format '{{.Status}}' " + quote(vm.Name) + " | grep -qx Running",
 		Up:     quote("limactl", "start", vm.Name),
 		Down:   quote("limactl", "stop", vm.Name),
-		Logs:   quote("tail", "-n", "500", vm.Dir+"/serial.log"),
+		Logs:   new(quote("tail", "-n", "500", vm.Dir+"/serial.log")),
 		Defaults: &target.Spec{
 			Group: group,
 			Watch: &watch,
