@@ -218,7 +218,7 @@ func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 			m.live[t.ID] = e
 		}
 	}
-	m.targets, m.modeIdx = targets, 0
+	m.targets, m.modeName = targets, ""
 	m.rebuild()
 	m.markStale(m.selected().id())
 	m.notice = cmp.Or(editStatus, configNotice(problems))

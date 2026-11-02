@@ -51,7 +51,7 @@ type model struct {
 	backend   target.Backend
 	panes     []pane
 	focus     int
-	modeIdx   int
+	modeName  string
 	width     int
 	height    int
 	notice    string
@@ -197,10 +197,10 @@ func (m model) modes(t target.Target) []target.Mode {
 }
 
 func (m model) modeIndex() int {
-	if m.modeIdx < 0 || m.modeIdx >= len(m.modes(m.selected().target)) {
-		return 0
-	}
-	return m.modeIdx
+	selected := slices.IndexFunc(m.modes(m.selected().target), func(mode target.Mode) bool {
+		return mode.Name == m.modeName
+	})
+	return max(selected, 0)
 }
 
 func (m model) mode() target.Mode {
@@ -212,11 +212,11 @@ func (m model) mode() target.Mode {
 }
 
 func (m *model) cycleMode(delta int) {
-	n := len(m.modes(m.selected().target))
-	if n < 2 {
+	modes := m.modes(m.selected().target)
+	if len(modes) < 2 {
 		return
 	}
-	m.modeIdx = wrap(m.modeIndex()+delta, n)
+	m.modeName = modes[wrap(m.modeIndex()+delta, len(modes))].Name
 }
 
 func (m *model) moveCursor(delta int) tea.Cmd {
@@ -247,7 +247,7 @@ func (m *model) focusItem(inPane, cursor int) tea.Cmd {
 
 	m.panes = append([]pane(nil), m.panes...)
 	m.panes[inPane] = landed
-	m.focus, m.modeIdx = inPane, 0
+	m.focus, m.modeName = inPane, ""
 	return m.refreshSelected()
 }
 

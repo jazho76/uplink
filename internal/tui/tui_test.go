@@ -403,6 +403,38 @@ func TestModeChosenBeforeFilteringLeavesNoBadge(t *testing.T) {
 	}
 }
 
+func focusedOnTwoMultiplexers() model {
+	box := vm("box")
+	box.Modes = []target.Mode{
+		{Name: "tmux", Argv: box.Via, Requires: "tmux"},
+		{Name: "zellij", Argv: box.Via, Requires: "zellij"},
+		{Name: "shell", Argv: box.Via},
+	}
+	m, _ := newTestModel()
+	return focus(sized(withTargets(m, box)), "box")
+}
+
+func TestSelectedModeSurvivesTheListShrinking(t *testing.T) {
+	m := key(focusedOnTwoMultiplexers(), "tab")
+	if got := m.mode().Name; got != "zellij" {
+		t.Fatalf("tab should reach zellij, got %q", got)
+	}
+
+	m = inspected(m, "box", "zellij")
+	if got := m.mode().Name; got != "zellij" {
+		t.Errorf("zellij is still there, want it selected, got %q", got)
+	}
+}
+
+func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
+	m := key(focusedOnTwoMultiplexers(), "tab")
+
+	m = inspected(m, "box", "tmux")
+	if got := m.mode().Name; got != "tmux" {
+		t.Errorf("zellij is gone, want the first mode, got %q", got)
+	}
+}
+
 func TestModeCycling(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
@@ -437,19 +469,19 @@ func TestModeResetsWhenCursorMoves(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
-	if m.modeIdx == 0 {
+	if m.modeName == "" {
 		t.Fatal("tab should leave the row off-default")
 	}
 
 	m = key(m, "down")
-	if m.modeIdx != 0 {
-		t.Errorf("moving the cursor must reset the mode, got index %d", m.modeIdx)
+	if m.modeName != "" {
+		t.Errorf("moving the cursor must reset the mode, got %q", m.modeName)
 	}
 
 	m = key(m, "tab")
 	m = key(m, "up")
-	if m.modeIdx != 0 {
-		t.Errorf("moving back must also reset, got index %d", m.modeIdx)
+	if m.modeName != "" {
+		t.Errorf("moving back must also reset, got %q", m.modeName)
 	}
 }
 
@@ -891,7 +923,7 @@ func TestSpillResetsTheMode(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
-	if m.modeIdx == 0 {
+	if m.modeName == "" {
 		t.Fatal("tab should leave the row off-default")
 	}
 
@@ -899,8 +931,8 @@ func TestSpillResetsTheMode(t *testing.T) {
 	if got := m.selected().name(); got != "host" {
 		t.Fatalf("up should spill to host, got %q", got)
 	}
-	if m.modeIdx != 0 {
-		t.Errorf("landing on another pane must reset the mode, got index %d", m.modeIdx)
+	if m.modeName != "" {
+		t.Errorf("landing on another pane must reset the mode, got %q", m.modeName)
 	}
 }
 
