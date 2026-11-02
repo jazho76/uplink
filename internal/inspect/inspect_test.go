@@ -27,6 +27,7 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	os.Setenv("SHELL", filepath.Join(dir, "no-login-shell"))
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -332,6 +333,69 @@ func TestBannerCannotOverrideTheKernel(t *testing.T) {
 	snapshot := Parse("os Linux and friends\nos Darwin\n", Request{BuiltinStats: true})
 	if snapshot.OS != "Darwin" {
 		t.Errorf("the script's line comes last and wins, got %q", snapshot.OS)
+	}
+}
+
+func loginShellPrinting(t *testing.T, output string) {
+	t.Helper()
+	shell := filepath.Join(t.TempDir(), "login-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\ncat <<'EOF'\n"+output+"\nEOF\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+}
+
+func toolOnlyOnTheLoginPath(t *testing.T) string {
+	t.Helper()
+	const tool = "uplink-login-tool"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, tool), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withMultiplexers(t, fakeMultiplexer{tool: tool, script: "echo found"})
+	return dir
+}
+
+func TestRunFindsToolsOnTheLoginPath(t *testing.T) {
+	dir := toolOnlyOnTheLoginPath(t)
+	for name, output := range map[string]string{
+		"only the path":  dir,
+		"after a banner": "Welcome to the machine\n" + dir,
+	} {
+		t.Run(name, func(t *testing.T) {
+			loginShellPrinting(t, output)
+
+			snapshot := inspectLocally(t)
+			if !slices.Contains(snapshot.Tools, "uplink-login-tool") {
+				t.Errorf("want the tool reported, got %q", snapshot.Tools)
+			}
+			want := []multiplexer.Session{{Tool: "uplink-login-tool", Name: "found"}}
+			if !reflect.DeepEqual(snapshot.Sessions, want) {
+				t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
+			}
+		})
+	}
+}
+
+func TestRunIgnoresAGarbageLoginPath(t *testing.T) {
+	toolOnlyOnTheLoginPath(t)
+	loginShellPrinting(t, "not a path")
+
+	if snapshot := inspectLocally(t); slices.Contains(snapshot.Tools, "uplink-login-tool") {
+		t.Errorf("want the tool missing, got %q", snapshot.Tools)
+	}
+}
+
+func TestLoginPathCannotHideWhatIsAlreadyFound(t *testing.T) {
+	pathWith(t, map[string]string{"tmux": tmuxStub})
+	shadow := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shadow, "tmux"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	loginShellPrinting(t, shadow)
+
+	if snapshot := inspectLocally(t); len(snapshot.Sessions) != 1 {
+		t.Errorf("want the tmux already on PATH used, got %+v", snapshot.Sessions)
 	}
 }
 

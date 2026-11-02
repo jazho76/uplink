@@ -411,7 +411,8 @@ func TestDefaultTmuxModeFallsBackToTheShell(t *testing.T) {
 			if err := os.Symlink(sh, filepath.Join(dir, "sh")); err != nil {
 				t.Fatal(err)
 			}
-			stubs := map[string]string{"user-shell": `echo "user shell"`}
+			stubs := map[string]string{"user-shell": `[ "$1" = -lc ] && exec sh -c "$2"
+echo "user shell"`}
 			maps.Copy(stubs, c.tools)
 			for stub, body := range stubs {
 				if err := os.WriteFile(filepath.Join(dir, stub), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
@@ -431,6 +432,49 @@ func TestDefaultTmuxModeFallsBackToTheShell(t *testing.T) {
 				t.Errorf("got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestDefaultTmuxModeFindsToolsOnTheLoginPath(t *testing.T) {
+	loginDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(loginDir, "tmux"), []byte("#!/bin/sh\necho \"tmux $*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sh, filepath.Join(dir, "sh")); err != nil {
+		t.Fatal(err)
+	}
+	userShell := filepath.Join(dir, "user-shell")
+	body := "#!/bin/sh\nPATH=\"" + loginDir + ":$PATH\"\nexport PATH\n[ \"$1\" = -lc ] && exec sh -c \"$2\"\necho \"user shell\"\n"
+	if err := os.WriteFile(userShell, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("SHELL", userShell)
+
+	argv := modeNamed(t, find(t, mustLoad(t, "targets:\n  - name: box\n"), "box"), "tmux").Argv
+	out, err := exec.Command(argv[0], argv[1:]...).Output()
+	if err != nil {
+		t.Fatalf("%q: %v", argv, err)
+	}
+	if got, want := strings.TrimSpace(string(out)), "tmux new-session -A -s 0"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestShellModeStartsWithoutSHELLSet(t *testing.T) {
+	t.Setenv("SHELL", "")
+	t.Setenv("HOME", t.TempDir())
+
+	argv := modeNamed(t, find(t, mustLoad(t, "targets:\n  - name: box\n"), "box"), "shell").Argv
+	command := exec.Command(argv[0], argv[1:]...)
+	command.Stdin = strings.NewReader("exit 0\n")
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Errorf("%q: %v\n%s", argv, err, out)
 	}
 }
 

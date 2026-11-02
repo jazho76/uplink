@@ -23,7 +23,7 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         preset: linux, macos, or container. Left out means the built-in
 #         metrics for the target's OS; [] means none.
 # modes   ways to enter; the first is the default. A mode without run opens
-#         the user's shell. Left out means default_mode, then any other
+#         the user's login shell. Left out means default_mode, then any other
 #         multiplexer, then shell, each only when the target has it. Every
 #         session returns to the dashboard.
 #

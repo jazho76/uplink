@@ -110,7 +110,9 @@ else
     exit $status
   ' sh "$@"; }
   limit=limited
-fi`, int(metricTimeout.Seconds()))
+fi
+login_path=$($limit "${SHELL:-/bin/sh}" -lc 'printenv PATH' </dev/null 2>/dev/null | tail -n 1)
+case "$login_path" in /*) PATH="$PATH:$login_path" ;; esac`, int(metricTimeout.Seconds()))
 }
 
 func Script(metrics []Metric) string {

@@ -11,6 +11,11 @@ import (
 	"github.com/jazho76/uplink/internal/run"
 )
 
+func TestMain(m *testing.M) {
+	os.Setenv("SHELL", "/nonexistent/login-shell")
+	os.Exit(m.Run())
+}
+
 func runLocally(t *testing.T, metrics []Metric) []Reading {
 	t.Helper()
 	out, err := run.NonInteractive(10*time.Second, Preamble()+"\n"+Script(metrics), "sh")
@@ -119,6 +124,27 @@ func assertMetricsIsolated(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second {
 		t.Errorf("a hanging metric held the probe for %s", elapsed)
+	}
+}
+
+func TestHangingLoginProfileOnlyCostsTheLimit(t *testing.T) {
+	previous := metricTimeout
+	metricTimeout = time.Second
+	t.Cleanup(func() { metricTimeout = previous })
+
+	shell := filepath.Join(t.TempDir(), "login-shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SHELL", shell)
+
+	start := time.Now()
+	readings := runLocally(t, []Metric{{Type: TypeGauge, Label: "after", Value: "echo 1", Max: "2"}})
+	if r := readings[0]; !r.OK || r.Value != 1 {
+		t.Errorf("metrics should survive a hanging profile, got %+v", r)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("a hanging profile held the probe for %s", elapsed)
 	}
 }
 

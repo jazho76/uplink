@@ -36,13 +36,17 @@ func defaultModeChoices() []string {
 	return append(choices, shellMode)
 }
 
+func inLoginShell(command string) string {
+	return `exec ` + userShell + ` -lc '` + command + `'`
+}
+
 func automaticModes(defaultMode string) []ModeSpec {
 	modes := make([]ModeSpec, 0, len(multiplexer.All)+1)
 	for _, m := range multiplexer.All {
 		modes = append(modes, ModeSpec{
 			Name:     m.Tool(),
 			Requires: m.Tool(),
-			Run:      "command -v " + m.Tool() + " >/dev/null && exec " + m.Attach() + "; " + loginShell,
+			Run:      inLoginShell("command -v " + m.Tool() + " >/dev/null && exec " + m.Attach() + "; " + loginShell),
 		})
 	}
 	modes = append(modes, ModeSpec{Name: shellMode})

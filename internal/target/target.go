@@ -10,7 +10,8 @@ import (
 const (
 	ConfigSource = "config"
 	DefaultGroup = "ungrouped"
-	loginShell   = `exec "${SHELL:-/bin/sh}"`
+	userShell    = `"${SHELL:-/bin/sh}"`
+	loginShell   = `exec ` + userShell + ` -l`
 
 	KindContainer = "container"
 )
