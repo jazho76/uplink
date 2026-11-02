@@ -76,14 +76,14 @@ func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
 	assertMetricsIsolated(t)
 }
 
-func TestMetricsAreIsolatedWithoutTimeoutInstalled(t *testing.T) {
+func TestMetricsAreIsolatedWithoutTimeoutOnMacOSShell(t *testing.T) {
 	dir := t.TempDir()
-	for _, tool := range []string{"sh", "head", "sleep"} {
+	for name, tool := range map[string]string{"sh": "bash", "head": "head", "sleep": "sleep"} {
 		path, err := exec.LookPath(tool)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(path, filepath.Join(dir, tool)); err != nil {
+		if err := os.Symlink(path, filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
