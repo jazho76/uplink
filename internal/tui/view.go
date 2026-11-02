@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/inspect"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -107,6 +108,11 @@ func (m model) previewBody(width, height int) string {
 		b.WriteString(m.renderLive(it.id(), width))
 	}
 
+	if sessions := m.renderSessions(it.id(), width); sessions != "" {
+		b.WriteString("\n" + rule("tmux", width))
+		b.WriteString(sessions)
+	}
+
 	if logs := m.logsFor(it); logs != "" {
 		used := strings.Count(b.String(), "\n")
 		fit := height - used - 2
@@ -162,6 +168,30 @@ func (m model) renderLive(id target.ID, width int) string {
 	}
 
 	return renderFields(fields, width)
+}
+
+func (m model) renderSessions(id target.ID, width int) string {
+	e := m.live[id]
+	if !e.inspectOK || len(e.snapshot.Sessions) == 0 {
+		return ""
+	}
+	fields := make([]field, len(e.snapshot.Sessions))
+	for i, s := range e.snapshot.Sessions {
+		fields[i] = field{clip(s.Name, width/2), sessionDetails(s)}
+	}
+	return renderFields(fields, width)
+}
+
+func sessionDetails(s inspect.Session) string {
+	noun := "windows"
+	if s.Windows == 1 {
+		noun = "window"
+	}
+	details := valueStyle.Render(fmt.Sprintf("%d %s", s.Windows, noun))
+	if s.Attached {
+		details += strings.Repeat(" ", fieldGap) + modeMarker.Render("attached")
+	}
+	return details
 }
 
 type gaugeRow struct {

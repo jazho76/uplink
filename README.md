@@ -104,9 +104,15 @@ terminal emulator, bind your preferred shortcut to:
 
 The left side lists targets in their groups, in the order
 they first appear. The right side shows the selected target's status and launch
-mode, its declared stats, and recent logs; `uplink config check` shows the exact
-command behind each mode. This machine is listed by default, with stats for its
-OS, in a compact `local` pane at the top; see [Discovery](#discovery).
+mode, its declared stats, its running tmux sessions, and recent logs; `uplink
+config check` shows the exact command behind each mode. This machine is listed
+by default, with stats for its OS, in a compact `local` pane at the top; see
+[Discovery](#discovery).
+
+The tmux section lists the target's default tmux server, as seen by the same
+non-login shell as the stats probe, and is hidden when there is nothing to show.
+Sessions on another server, such as one started with `-L` or under `sudo`, are
+not listed.
 
 A target's status is checked while it is selected, and in the background for
 targets with `watch: true`; others show as unknown until you visit them. When a
