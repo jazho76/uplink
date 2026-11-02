@@ -334,7 +334,15 @@ func (m model) modeTag(it item) string {
 	if n < 2 {
 		return ""
 	}
-	return modeMarker.Render(m.mode().Name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIndex()+1, n))
+	name := m.mode().Name
+	if m.modeUnconfirmed(it.target) {
+		name += "?"
+	}
+	return modeMarker.Render(name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIndex()+1, n))
+}
+
+func (m model) modeUnconfirmed(t target.Target) bool {
+	return m.mode().Requires != "" && !m.live[t.ID].inspected && m.statusOf(t) == statusDown
 }
 
 type field struct{ key, value string }

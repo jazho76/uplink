@@ -37,7 +37,7 @@ func TestSessionsSitBetweenLiveAndLogs(t *testing.T) {
 	got := preview(m)
 	live, sessions, logs := strings.Index(got, "live ─"), strings.Index(got, sessionsRule), strings.Index(got, "logs ─")
 	if live < 0 || sessions < live || logs < sessions {
-		t.Errorf("want live, tmux, logs in order, got:\n%s", got)
+		t.Errorf("want live, sessions, logs in order, got:\n%s", got)
 	}
 }
 
@@ -364,6 +364,52 @@ func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 	}
 	if got := ansi.Strip(gauge(meter(0.5, 4), "1.32", gaugeGap)); got != "██░░   1.32" {
 		t.Errorf("a bar keeps its reading beside it, got %q", got)
+	}
+}
+
+func modeTagOf(m model) string { return ansi.Strip(m.modeTag(m.selected())) }
+
+func wentDown(m model, name string) model {
+	next, _ := m.Update(liveMsg{id: configID(name), up: false})
+	return next.(model)
+}
+
+func TestDownTargetDoubtsAModeItCouldNotConfirm(t *testing.T) {
+	m, _ := focusedOn("box")
+	if got := modeTagOf(m); strings.Contains(got, "?") {
+		t.Errorf("no doubt before the first check, got %q", got)
+	}
+
+	m = wentDown(m, "box")
+	if got := modeTagOf(m); !strings.Contains(got, "tmux?") {
+		t.Errorf("a down target cannot confirm tmux, got %q", got)
+	}
+	if got := modeTagOf(key(m, "tab")); !strings.Contains(got, "shell") || strings.Contains(got, "?") {
+		t.Errorf("shell requires nothing, got %q", got)
+	}
+}
+
+func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
+	m, _ := focusedOn("box")
+	next, _ := m.Update(liveMsg{id: configID("box"), up: true})
+	if got := modeTagOf(next.(model)); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
+		t.Errorf("want plain tmux while up, got %q", got)
+	}
+}
+
+func TestConfirmedModeStaysCertainOnceDown(t *testing.T) {
+	m, _ := focusedOn("box")
+	m = wentDown(inspected(m, "box", inspect.ToolTmux), "box")
+	if got := modeTagOf(m); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
+		t.Errorf("tmux was confirmed before it went down, got %q", got)
+	}
+}
+
+func TestDeclaredModeOnDownTargetShowsNoDoubt(t *testing.T) {
+	m, _ := newTestModel()
+	m = wentDown(focus(sized(m), "forge"), "forge")
+	if got := modeTagOf(m); strings.Contains(got, "?") {
+		t.Errorf("a declared mode requires nothing, got %q", got)
 	}
 }
 
