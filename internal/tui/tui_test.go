@@ -426,7 +426,7 @@ func offered(m model) []string {
 }
 
 func TestSelectedModeSurvivesTheListChanging(t *testing.T) {
-	m := key(focusedOnAutomaticModes("tmux", "shell", "zellij"), "tab")
+	m := key(focusedOnAutomaticModes("tmux", "zellij", "shell"), "tab")
 	if got := m.mode().Name; got != "shell" {
 		t.Fatalf("tab should reach shell, got %q", got)
 	}
@@ -438,14 +438,14 @@ func TestSelectedModeSurvivesTheListChanging(t *testing.T) {
 }
 
 func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
-	m := inspected(focusedOnAutomaticModes("tmux", "shell", "zellij"), "box", "zellij")
+	m := inspected(focusedOnAutomaticModes("tmux", "zellij", "shell"), "box", "tmux", "zellij")
 	m = key(m, "tab")
 	if got := m.mode().Name; got != "zellij" {
 		t.Fatalf("tab should reach zellij, got %q", got)
 	}
 
-	m = inspected(m, "box")
-	if got := m.mode().Name; got != "shell" {
+	m = inspected(m, "box", "tmux")
+	if got := m.mode().Name; got != "tmux" {
 		t.Errorf("zellij is gone, want the first mode, got %q", got)
 	}
 }
@@ -457,7 +457,7 @@ func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
 		"up, not inspected": {id: configID("box"), up: true},
 		"failed inspection": {id: configID("box"), up: true, full: true},
 	} {
-		m := focusedOnAutomaticModes("tmux", "shell", "zellij")
+		m := focusedOnAutomaticModes("tmux", "zellij", "shell")
 		if msg != nil {
 			next, _ := m.Update(*msg)
 			m = next.(model)
@@ -472,20 +472,20 @@ func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
 }
 
 func TestDiscoveryDecidesTheModes(t *testing.T) {
-	m := focusedOnAutomaticModes("tmux", "shell", "zellij")
+	m := focusedOnAutomaticModes("tmux", "zellij", "shell")
 
-	if got := offered(inspected(m, "box", "tmux", "zellij")); !slices.Equal(got, []string{"tmux", "shell", "zellij"}) {
+	if got := offered(inspected(m, "box", "tmux", "zellij")); !slices.Equal(got, []string{"tmux", "zellij", "shell"}) {
 		t.Errorf("both tools: want all three, got %q", got)
 	}
-	if got := offered(inspected(m, "box", "zellij")); !slices.Equal(got, []string{"shell", "zellij"}) {
-		t.Errorf("only zellij: want shell and zellij, got %q", got)
+	if got := offered(inspected(m, "box", "zellij")); !slices.Equal(got, []string{"zellij", "shell"}) {
+		t.Errorf("only zellij: want zellij and shell, got %q", got)
 	}
 }
 
 func TestDiscoveredModesStayOnceDown(t *testing.T) {
-	m := probed(inspected(focusedOnAutomaticModes("tmux", "shell", "zellij"), "box", "tmux", "zellij"), "box", false)
+	m := probed(inspected(focusedOnAutomaticModes("tmux", "zellij", "shell"), "box", "tmux", "zellij"), "box", false)
 
-	if got := offered(m); !slices.Equal(got, []string{"tmux", "shell", "zellij"}) {
+	if got := offered(m); !slices.Equal(got, []string{"tmux", "zellij", "shell"}) {
 		t.Errorf("want what was found, got %q", got)
 	}
 	if got := ansi.Strip(m.modeTag(m.selected())); strings.Contains(got, "?") {

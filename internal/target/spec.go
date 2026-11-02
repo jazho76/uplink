@@ -49,14 +49,10 @@ func automaticModes(defaultMode string) []ModeSpec {
 
 	first := cmp.Or(defaultMode, multiplexer.Tmux{}.Tool())
 	rank := func(mode ModeSpec) int {
-		switch mode.Name {
-		case first:
+		if mode.Name == first {
 			return 0
-		case shellMode:
-			return 1
-		default:
-			return 2
 		}
+		return 1
 	}
 	slices.SortStableFunc(modes, func(a, b ModeSpec) int { return cmp.Compare(rank(a), rank(b)) })
 	return modes
