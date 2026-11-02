@@ -41,7 +41,6 @@ type status struct {
 }
 
 type peer struct {
-	HostName     string   `json:"HostName"`
 	DNSName      string   `json:"DNSName"`
 	OS           string   `json:"OS"`
 	TailscaleIPs []string `json:"TailscaleIPs"`
@@ -109,7 +108,6 @@ func (p peer) spec(magicDNS bool) (target.Spec, bool) {
 	watch := true
 	return target.Spec{
 		Name:     key,
-		Display:  p.HostName,
 		Via:      quote("ssh", "-t", "-o", "ConnectTimeout=2", address),
 		Exec:     quote("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address),
 		Defaults: &target.Spec{Group: group, Watch: &watch},

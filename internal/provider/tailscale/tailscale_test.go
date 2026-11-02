@@ -42,7 +42,7 @@ func TestListsReachablePeersByMagicDNSName(t *testing.T) {
 	for _, peer := range resolved(t) {
 		got = append(got, peer.ID.String()+"="+peer.Name)
 	}
-	want := []string{"tailscale/anas-macbook=Ana's MacBook", "tailscale/berlin=berlin"}
+	want := []string{"tailscale/anas-macbook=anas-macbook","tailscale/berlin=berlin"}
 	if !slices.Equal(got, want) {
 		t.Errorf("want peers without phones or Mullvad nodes, sorted, got %q", got)
 	}
