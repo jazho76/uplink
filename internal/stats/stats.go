@@ -98,7 +98,7 @@ func Preamble() string {
 	return fmt.Sprintf(`if command -v timeout >/dev/null 2>&1; then
   limit='timeout %[1]d'
 else
-  limited() { (
+  limited() { sh -c '
     set -m
     "$@" &
     pid=$!
@@ -108,7 +108,7 @@ else
     status=$?
     kill $watcher 2>/dev/null
     exit $status
-  ); }
+  ' sh "$@"; }
   limit=limited
 fi`, int(metricTimeout.Seconds()))
 }
