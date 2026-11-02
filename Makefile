@@ -10,13 +10,19 @@ LDFLAGS := -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Dat
 INSTALL_DIR := $(shell go env GOBIN)
 INSTALL_DIR := $(if $(INSTALL_DIR),$(INSTALL_DIR),$(shell go env GOPATH)/bin)
 
+PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+
 .PHONY: build dist vet test tidy install uninstall clean release
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) .
 
 dist:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY)-linux-amd64 .
+	@set -e; for platform in $(PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		echo "building $$os/$$arch"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY)-$$os-$$arch .; \
+	done
 
 vet:
 	go vet ./...

@@ -2,24 +2,33 @@
 set -eu
 
 REPO="jazho76/uplink"
-ASSET="uplink-linux-amd64"
 INSTALL_DIR="${HOME}/.local/bin"
 TARGET="${INSTALL_DIR}/uplink"
 
-os="$(uname -s)"
-arch="$(uname -m)"
+kernel="$(uname -s)"
+machine="$(uname -m)"
 
-if [ "$os" != "Linux" ]; then
-  echo "uplink ships a Linux binary only (got: $os)." >&2
-  exit 1
-fi
+case "$kernel" in
+  Linux) os="linux" ;;
+  Darwin) os="darwin" ;;
+  *)
+    echo "uplink ships Linux and macOS binaries only (got: $kernel)." >&2
+    echo "Build from source instead: https://github.com/${REPO}" >&2
+    exit 1
+    ;;
+esac
 
-if [ "$arch" != "x86_64" ]; then
-  echo "uplink ships an amd64 binary only (got: $arch)." >&2
-  echo "Build from source instead: https://github.com/${REPO}" >&2
-  exit 1
-fi
+case "$machine" in
+  x86_64 | amd64) arch="amd64" ;;
+  aarch64 | arm64) arch="arm64" ;;
+  *)
+    echo "uplink ships amd64 and arm64 binaries only (got: $machine)." >&2
+    echo "Build from source instead: https://github.com/${REPO}" >&2
+    exit 1
+    ;;
+esac
 
+ASSET="uplink-${os}-${arch}"
 url="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 echo "Downloading uplink -> ${TARGET}"
@@ -40,4 +49,6 @@ case ":${PATH}:" in
 esac
 
 echo "Installed uplink. Declare your targets with: uplink config edit"
-echo "On GNOME, bind Ctrl+Alt+T to the dashboard with: uplink install-shortcut"
+if [ "$os" = "linux" ]; then
+  echo "On GNOME, bind Ctrl+Alt+T to the dashboard with: uplink install-shortcut"
+fi

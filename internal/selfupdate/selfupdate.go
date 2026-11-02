@@ -13,19 +13,25 @@ import (
 	"github.com/jazho76/uplink/internal/version"
 )
 
-const (
-	repo  = "jazho76/uplink"
-	asset = "uplink-linux-amd64"
-)
+const repo = "jazho76/uplink"
 
 var client = &http.Client{Timeout: 60 * time.Second}
+
+func assetFor(goos, goarch string) (string, error) {
+	switch goos + "/" + goarch {
+	case "linux/amd64", "linux/arm64", "darwin/amd64", "darwin/arm64":
+		return "uplink-" + goos + "-" + goarch, nil
+	}
+	return "", fmt.Errorf("no release for %s/%s; build from source", goos, goarch)
+}
 
 func Run() error {
 	if version.Version == "dev" {
 		return fmt.Errorf("not a release build; reinstall with the install.sh bootstrap instead")
 	}
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		return fmt.Errorf("self-update supports linux/amd64 only (got %s/%s); build from source", runtime.GOOS, runtime.GOARCH)
+	asset, err := assetFor(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return err
 	}
 
 	latest, err := latestTag()
@@ -46,7 +52,7 @@ func Run() error {
 	}
 
 	fmt.Printf("Updating uplink %s -> %s\n", version.Version, latest)
-	if err := replace(exe); err != nil {
+	if err := replace(exe, asset); err != nil {
 		return err
 	}
 	fmt.Printf("Updated uplink to %s\n", latest)
@@ -83,7 +89,7 @@ func latestTag() (string, error) {
 	return release.TagName, nil
 }
 
-func replace(exe string) error {
+func replace(exe, asset string) error {
 	url := fmt.Sprintf("https://github.com/%s/releases/latest/download/%s", repo, asset)
 	resp, err := client.Get(url)
 	if err != nil {
