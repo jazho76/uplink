@@ -1,58 +1,52 @@
 package inspect
 
 import (
-	"slices"
-	"strconv"
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/multiplexer"
 )
 
-const (
-	sessionTag = "session"
-	windowTag  = "window"
-)
-
-type Window struct {
-	Name  string
-	Panes int
-}
-
-type Session struct {
-	Name     string
-	Attached bool
-	Windows  []Window
-}
+const multiplexerTag = "mux"
 
 var sessionsSection = section{
 	script: func(Request) string {
-		return `$limit tmux list-sessions -F '` + sessionTag + ` #{session_id} #{session_attached} #{session_name}' </dev/null 2>/dev/null
-$limit tmux list-windows -a -F '` + windowTag + ` #{session_id} #{window_panes} #{window_name}' </dev/null 2>/dev/null`
+		blocks := make([]string, len(multiplexer.All))
+		for i, m := range multiplexer.All {
+			blocks[i] = fmt.Sprintf(`if command -v %[1]s >/dev/null 2>&1; then
+{ %[2]s
+} </dev/null 2>/dev/null | while IFS= read -r row; do printf '%%s\n' "%[3]s $row"; done
+fi`, m.Tool(), m.Script(), rowTag(m))
+		}
+		return strings.Join(blocks, "\n")
 	},
 	parse: func(_ Request, out string, snapshot *Snapshot) {
-		var ids []string
-		for _, line := range tagged(out, sessionTag) {
-			if id, attached, name, ok := parseRow(line); ok {
-				ids = append(ids, id)
-				snapshot.Sessions = append(snapshot.Sessions, Session{Name: name, Attached: attached > 0})
-			}
-		}
-		for _, line := range tagged(out, windowTag) {
-			id, panes, name, ok := parseRow(line)
-			owner := slices.Index(ids, id)
-			if !ok || owner < 0 {
-				continue
-			}
-			session := &snapshot.Sessions[owner]
-			session.Windows = append(session.Windows, Window{Name: name, Panes: panes})
+		for _, m := range multiplexer.All {
+			snapshot.Sessions = append(snapshot.Sessions, clean(m.Tool(), m.Parse(tagged(out, rowTag(m))))...)
 		}
 	},
 }
 
-func parseRow(line string) (id string, count int, text string, ok bool) {
-	id, rest, _ := strings.Cut(line, " ")
-	countField, text, _ := strings.Cut(rest, " ")
-	count, err := strconv.Atoi(countField)
-	text = ansi.Strip(text)
-	return id, count, text, err == nil && strings.HasPrefix(id, "$") && text != ""
+func rowTag(m multiplexer.Multiplexer) string {
+	return multiplexerTag + " " + m.Tool()
+}
+
+func clean(tool string, sessions []multiplexer.Session) []multiplexer.Session {
+	var kept []multiplexer.Session
+	for _, s := range sessions {
+		s.Tool, s.Name = tool, ansi.Strip(s.Name)
+		if s.Name == "" {
+			continue
+		}
+		var windows []multiplexer.Window
+		for _, w := range s.Windows {
+			if w.Name = ansi.Strip(w.Name); w.Name != "" {
+				windows = append(windows, w)
+			}
+		}
+		s.Windows = windows
+		kept = append(kept, s)
+	}
+	return kept
 }

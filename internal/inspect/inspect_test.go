@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/stats"
 )
 
@@ -21,8 +22,7 @@ list-windows) echo 'window $0 2 my editor'; echo 'window $0 1 logs' ;;
 esac`
 
 func TestParseReadsEverySection(t *testing.T) {
-	out := "0 value 42\ntool tmux\nsession $1 1 main\nsession $0 0 my long: name\n" +
-		"window $0 1 notes\nwindow $1 2 my editor\nwindow $1 1 logs\n"
+	out := "0 value 42\ntool tmux\nmux tmux session $1 1 main\nmux tmux window $1 2 my editor\n"
 	snapshot := Parse(out, Request{Metrics: []stats.Metric{uptime}})
 
 	if len(snapshot.Readings) != 1 || snapshot.Readings[0].Text != "42" {
@@ -31,33 +31,74 @@ func TestParseReadsEverySection(t *testing.T) {
 	if !slices.Equal(snapshot.Tools, []string{"tmux"}) {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
-	want := []Session{
-		{Name: "main", Attached: true, Windows: []Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}},
-		{Name: "my long: name", Windows: []Window{{Name: "notes", Panes: 1}}},
-	}
+	want := []multiplexer.Session{{Tool: "tmux", Name: "main", Attached: true, Windows: []multiplexer.Window{{Name: "my editor", Panes: 2}}}}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}
 }
 
-func TestParseStripsEscapesFromSessionNames(t *testing.T) {
-	snapshot := Parse("session $0 0 \x1b[31mred\x1b[0m\nwindow $0 1 \x1b[32mgreen\x1b[0m\n", Request{})
-	want := []Session{{Name: "red", Windows: []Window{{Name: "green", Panes: 1}}}}
-	if !reflect.DeepEqual(snapshot.Sessions, want) {
-		t.Errorf("a target must not be able to style the dashboard, got %+v", snapshot.Sessions)
+func TestBannerCannotProduceSessions(t *testing.T) {
+	snapshot := Parse("session $0 0 fake\nwindow $0 1 fake\nmux\nmux tmux\n", Request{})
+	if len(snapshot.Sessions) != 0 {
+		t.Errorf("only rows tagged by the core count, got %+v", snapshot.Sessions)
 	}
 }
 
-func TestParseSkipsWhatItCannotRead(t *testing.T) {
-	snapshot := Parse("motd banner\ntool\nsession\nsession x 0 name\nsession $0 y name\nsession $0 0\nwindow $0 1 orphan\n", Request{})
-	if len(snapshot.Sessions) != 0 || len(snapshot.Tools) != 0 {
-		t.Errorf("malformed lines should be dropped, got %+v", snapshot)
+func TestCoreStripsEscapesFromNames(t *testing.T) {
+	out := "mux tmux session $0 0 \x1b[31mred\x1b[0m\nmux tmux window $0 1 \x1b[32mgreen\x1b[0m\n" +
+		"mux tmux session $1 0 \x1b[31m\x1b[0m\nmux tmux window $0 1 \x1b[0m\n"
+	want := []multiplexer.Session{{Tool: "tmux", Name: "red", Windows: []multiplexer.Window{{Name: "green", Panes: 1}}}}
+	if got := Parse(out, Request{}).Sessions; !reflect.DeepEqual(got, want) {
+		t.Errorf("a target must not be able to style the dashboard, want %+v, got %+v", want, got)
 	}
+}
 
-	snapshot = Parse("session $0 0 main\nwindow $0 x bad\nwindow $0 1\nwindow $9 1 stranger\nwindow $0 1 good\n", Request{})
-	want := []Session{{Name: "main", Windows: []Window{{Name: "good", Panes: 1}}}}
-	if !reflect.DeepEqual(snapshot.Sessions, want) {
-		t.Errorf("want only the well-formed window, got %+v", snapshot.Sessions)
+type fakeMultiplexer struct {
+	tool   string
+	script string
+}
+
+func (f fakeMultiplexer) Tool() string   { return f.tool }
+func (f fakeMultiplexer) Attach() string { return f.tool }
+func (f fakeMultiplexer) Script() string { return f.script }
+func (f fakeMultiplexer) Parse(rows []string) []multiplexer.Session {
+	sessions := make([]multiplexer.Session, len(rows))
+	for i, row := range rows {
+		sessions[i].Name = row
+	}
+	return sessions
+}
+
+func withMultiplexers(t *testing.T, all ...multiplexer.Multiplexer) {
+	t.Helper()
+	previous := multiplexer.All
+	t.Cleanup(func() { multiplexer.All = previous })
+	multiplexer.All = all
+}
+
+func TestAbsentToolDoesNotRunItsScript(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran")
+	withMultiplexers(t, fakeMultiplexer{tool: "uplink-absent-tool", script: ": > " + marker})
+
+	if snapshot := inspectLocally(t); len(snapshot.Sessions) != 0 {
+		t.Errorf("an absent tool has no sessions, got %+v", snapshot.Sessions)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the script of an absent tool must not run")
+	}
+}
+
+func TestScriptCannotConsumeTheInspection(t *testing.T) {
+	pathWith(t, map[string]string{"greedy": "exit 0", "polite": "exit 0"})
+	withMultiplexers(t,
+		fakeMultiplexer{tool: "greedy", script: "cat >/dev/null; echo first"},
+		fakeMultiplexer{tool: "polite", script: "echo second"},
+	)
+
+	got := inspectLocally(t).Sessions
+	want := []multiplexer.Session{{Tool: "greedy", Name: "first"}, {Tool: "polite", Name: "second"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("want %+v, got %+v", want, got)
 	}
 }
 
@@ -109,7 +150,7 @@ func TestRunReportsSessions(t *testing.T) {
 	if !slices.Contains(snapshot.Tools, "tmux") {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
-	want := []Session{{Name: "work", Attached: true, Windows: []Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
+	want := []multiplexer.Session{{Tool: "tmux", Name: "work", Attached: true, Windows: []multiplexer.Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}

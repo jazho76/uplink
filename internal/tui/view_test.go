@@ -9,19 +9,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/inspect"
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
 const sessionsRule = "sessions ─"
 
-func withSessions(m model, name string, sessions ...inspect.Session) model {
+func withSessions(m model, name string, sessions ...multiplexer.Session) model {
 	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
 		snapshot: inspect.Snapshot{Tools: []string{"tmux"}, Sessions: sessions}, inspectOK: true})
 	return next.(model)
 }
 
-func focusedPreview(t *testing.T, sessions ...inspect.Session) model {
+func focusedPreview(t *testing.T, sessions ...multiplexer.Session) model {
 	t.Helper()
 	m, _ := newTestModel()
 	m = focus(sized(m), "forge")
@@ -31,7 +32,7 @@ func focusedPreview(t *testing.T, sessions ...inspect.Session) model {
 func preview(m model) string { return ansi.Strip(m.previewBody(60, 30)) }
 
 func TestSessionsSitBetweenLiveAndLogs(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "main"})
+	m := focusedPreview(t, multiplexer.Session{Name: "main"})
 	m.logPeek = peek{id: configID("forge"), text: "boot line"}
 
 	got := preview(m)
@@ -56,14 +57,14 @@ func TestSessionsShowWithoutStats(t *testing.T) {
 	if got := preview(m); strings.Contains(got, sessionsRule) {
 		t.Errorf("an uninspected target has no section, got:\n%s", got)
 	}
-	got := preview(withSessions(m, "dojo", inspect.Session{Name: "main"}))
+	got := preview(withSessions(m, "dojo", multiplexer.Session{Name: "main"}))
 	if !strings.Contains(got, sessionsRule) || !strings.Contains(got, "main") || strings.Contains(got, "live ─") {
 		t.Errorf("want sessions and no live block, got:\n%s", got)
 	}
 }
 
 func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
-	sessions := inspect.Session{Name: "main"}
+	sessions := multiplexer.Session{Name: "main"}
 	m := focusedPreview(t, sessions)
 
 	down := probed(m, "forge", false)
@@ -84,11 +85,11 @@ func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
 
 func TestSessionRowsDescribeTheSession(t *testing.T) {
 	got := preview(focusedPreview(t,
-		inspect.Session{Name: "work", Attached: true, Windows: []inspect.Window{
+		multiplexer.Session{Name: "work", Attached: true, Windows: []multiplexer.Window{
 			{Name: "editor", Panes: 1},
 			{Name: "dev server", Panes: 2},
 		}},
-		inspect.Session{Name: "my notes", Windows: []inspect.Window{{Name: "vim", Panes: 1}}},
+		multiplexer.Session{Name: "my notes", Windows: []multiplexer.Window{{Name: "vim", Panes: 1}}},
 	))
 	lines := strings.Split(got, "\n")
 	row := func(name string) string {
@@ -111,11 +112,11 @@ func TestSessionRowsDescribeTheSession(t *testing.T) {
 }
 
 func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
-	var windows []inspect.Window
+	var windows []multiplexer.Window
 	for _, name := range strings.Fields("alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike") {
-		windows = append(windows, inspect.Window{Name: name, Panes: 1})
+		windows = append(windows, multiplexer.Window{Name: name, Panes: 1})
 	}
-	got := preview(focusedPreview(t, inspect.Session{Name: "main", Attached: true, Windows: windows}))
+	got := preview(focusedPreview(t, multiplexer.Session{Name: "main", Attached: true, Windows: windows}))
 	for _, want := range []string{"main*", "alpha", "+"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %q in:\n%s", want, got)
@@ -128,7 +129,7 @@ func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
 
 func TestLongWindowNameIsClipped(t *testing.T) {
 	long := strings.Repeat("w", 100)
-	got := preview(focusedPreview(t, inspect.Session{Name: "main", Windows: []inspect.Window{{Name: long, Panes: 2}, {Name: "next", Panes: 1}}}))
+	got := preview(focusedPreview(t, multiplexer.Session{Name: "main", Windows: []multiplexer.Window{{Name: long, Panes: 2}, {Name: "next", Panes: 1}}}))
 	if strings.Contains(got, strings.Repeat("w", maxWindowName+1)) || !strings.Contains(got, "(2)") || !strings.Contains(got, "next") {
 		t.Errorf("one long name must not hide the rest:\n%s", got)
 	}
@@ -136,8 +137,8 @@ func TestLongWindowNameIsClipped(t *testing.T) {
 
 func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 	got := preview(focusedPreview(t,
-		inspect.Session{Name: strings.Repeat("x", 100), Windows: []inspect.Window{{Name: "editor", Panes: 1}}},
-		inspect.Session{Name: "main", Attached: true, Windows: []inspect.Window{{Name: "vim", Panes: 1}}},
+		multiplexer.Session{Name: strings.Repeat("x", 100), Windows: []multiplexer.Window{{Name: "editor", Panes: 1}}},
+		multiplexer.Session{Name: "main", Attached: true, Windows: []multiplexer.Window{{Name: "vim", Panes: 1}}},
 	))
 	for _, want := range []string{"editor", "vim", "main*"} {
 		if !strings.Contains(got, want) {
@@ -147,7 +148,7 @@ func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 }
 
 func TestNarrowSessionsStayInThePane(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "a session with a long name", Attached: true, Windows: []inspect.Window{
+	m := focusedPreview(t, multiplexer.Session{Name: "a session with a long name", Attached: true, Windows: []multiplexer.Window{
 		{Name: "a window with a long name", Panes: 3},
 		{Name: "another", Panes: 1},
 	}})
@@ -160,7 +161,7 @@ func TestNarrowSessionsStayInThePane(t *testing.T) {
 }
 
 func TestLogsShrinkToFitSessions(t *testing.T) {
-	m := focusedPreview(t, inspect.Session{Name: "one"}, inspect.Session{Name: "two"})
+	m := focusedPreview(t, multiplexer.Session{Name: "one"}, multiplexer.Session{Name: "two"})
 	m.logPeek = peek{id: configID("forge"), text: strings.Repeat("old line\n", 30) + "newest line"}
 
 	const height = 16
@@ -399,7 +400,7 @@ func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
 
 func TestConfirmedModeStaysCertainOnceDown(t *testing.T) {
 	m, _ := focusedOn("box")
-	m = wentDown(inspected(m, "box", inspect.ToolTmux), "box")
+	m = wentDown(inspected(m, "box", multiplexer.Tmux{}.Tool()), "box")
 	if got := modeTagOf(m); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
 		t.Errorf("tmux was confirmed before it went down, got %q", got)
 	}

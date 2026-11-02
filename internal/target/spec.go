@@ -9,11 +9,14 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/inspect"
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/stats"
 )
 
-const namePlaceholder = "{name}"
+const (
+	namePlaceholder = "{name}"
+	shellMode       = "shell"
+)
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
@@ -24,9 +27,16 @@ type ModeSpec struct {
 	Requires string `yaml:"-"`
 }
 
-var defaultModes = []ModeSpec{
-	{Name: "tmux", Requires: inspect.ToolTmux, Run: `command -v tmux >/dev/null && exec tmux new-session -A -s 0; ` + loginShell},
-	{Name: "shell"},
+func automaticModes() []ModeSpec {
+	modes := make([]ModeSpec, 0, len(multiplexer.All)+1)
+	for _, m := range multiplexer.All {
+		modes = append(modes, ModeSpec{
+			Name:     m.Tool(),
+			Requires: m.Tool(),
+			Run:      "command -v " + m.Tool() + " >/dev/null && exec " + m.Attach() + "; " + loginShell,
+		})
+	}
+	return append(modes, ModeSpec{Name: shellMode})
 }
 
 type Spec struct {
@@ -59,7 +69,7 @@ func resolve(source string, spec Spec) (Target, error) {
 		spec = spec.over(*spec.Defaults)
 	}
 	if len(spec.Modes) == 0 {
-		spec.Modes = defaultModes
+		spec.Modes = automaticModes()
 	}
 	if spec.Stats == nil && spec.Kind == KindContainer {
 		spec.Stats = []stats.Metric{{Preset: stats.PresetContainer}}

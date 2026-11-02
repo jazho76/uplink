@@ -11,7 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspect"
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -203,7 +203,7 @@ func (m model) renderSessions(id target.ID, width int) string {
 	return renderFields(fields, width)
 }
 
-func windowList(windows []inspect.Window, width int) string {
+func windowList(windows []multiplexer.Window, width int) string {
 	labels := make([]string, len(windows))
 	for i, w := range windows {
 		labels[i] = windowLabel(w, width)
@@ -221,7 +221,7 @@ func windowList(windows []inspect.Window, width int) string {
 	return ""
 }
 
-func windowLabel(w inspect.Window, width int) string {
+func windowLabel(w multiplexer.Window, width int) string {
 	suffix := ""
 	if w.Panes > 1 {
 		suffix = labelStyle.Render(fmt.Sprintf(" (%d)", w.Panes))

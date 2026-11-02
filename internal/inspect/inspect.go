@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/run"
 	"github.com/jazho76/uplink/internal/stats"
 )
@@ -18,7 +19,7 @@ type Snapshot struct {
 	OS       string
 	Readings []stats.Reading
 	Tools    []string
-	Sessions []Session
+	Sessions []multiplexer.Session
 }
 
 type section struct {
