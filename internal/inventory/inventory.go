@@ -32,7 +32,7 @@ func Load(path string, providers []Provider) ([]target.Target, error) {
 		sources = append(sources, providers[i])
 	}
 
-	targets, err := target.Merge(append(sources, doc.Config())...)
+	targets, err := target.MergeWithDefault(doc.DefaultMode, append(sources, doc.Config())...)
 	return targets, errors.Join(append(errs, err)...)
 }
 

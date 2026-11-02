@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/stats"
 )
 
@@ -740,4 +741,85 @@ func TestMalformedYAMLNamesTheFile(t *testing.T) {
 		t.Errorf("malformed yaml should name the file, got %v", err)
 	}
 	noTargets(t, targets)
+}
+
+type fakeMultiplexer struct{}
+
+func (fakeMultiplexer) Tool() string                         { return "fake" }
+func (fakeMultiplexer) Attach() string                       { return "fake attach" }
+func (fakeMultiplexer) Script() string                       { return "" }
+func (fakeMultiplexer) Parse([]string) []multiplexer.Session { return nil }
+
+func withFakeMultiplexer(t *testing.T) {
+	t.Helper()
+	previous := multiplexer.All
+	t.Cleanup(func() { multiplexer.All = previous })
+	multiplexer.All = []multiplexer.Multiplexer{multiplexer.Tmux{}, fakeMultiplexer{}}
+}
+
+func TestDefaultModeOrdersTheAutomaticModes(t *testing.T) {
+	withFakeMultiplexer(t)
+	source := fakeSource{name: "test", specs: []Spec{{Name: "box"}}}
+
+	for defaultMode, want := range map[string][]string{
+		"":      {"tmux", "shell", "fake"},
+		"tmux":  {"tmux", "shell", "fake"},
+		"fake":  {"fake", "shell", "tmux"},
+		"shell": {"shell", "tmux", "fake"},
+	} {
+		targets, err := MergeWithDefault(defaultMode, source)
+		if err != nil {
+			t.Fatalf("%q: %v", defaultMode, err)
+		}
+		if got := modeNames(targets[0]); !slices.Equal(got, want) {
+			t.Errorf("%q: want %v, got %v", defaultMode, want, got)
+		}
+	}
+}
+
+func TestDefaultModeLeavesExplicitModesAlone(t *testing.T) {
+	withFakeMultiplexer(t)
+	modes := []ModeSpec{{Name: "root"}, {Name: "tmux"}}
+	source := fakeSource{name: "test", specs: []Spec{
+		{Name: "declared", Modes: modes},
+		{Name: "inherited", Defaults: &Spec{Modes: modes}},
+	}}
+
+	targets, err := MergeWithDefault("tmux", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range targets {
+		if got := modeNames(target); !slices.Equal(got, []string{"root", "tmux"}) {
+			t.Errorf("%s: explicit modes keep their order, got %v", target.Name, got)
+		}
+	}
+}
+
+func TestUnknownDefaultModeIsReportedAndTargetsStillLoad(t *testing.T) {
+	targets, err := MergeWithDefault("zelij", fakeSource{name: "test", specs: []Spec{{Name: "box"}}})
+	if err == nil || !strings.Contains(err.Error(), `unknown mode "zelij"`) || !strings.Contains(err.Error(), "tmux, shell") {
+		t.Errorf("want the value and the choices reported, got %v", err)
+	}
+	if len(targets) != 1 || modeNames(targets[0])[0] != "tmux" {
+		t.Errorf("want the target with the implicit default, got %+v", targets)
+	}
+}
+
+func TestDefaultModeIsReadFromTheConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("default_mode: shell\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Read(path)
+	if err != nil || doc.DefaultMode != "shell" {
+		t.Errorf("want shell, got %q and %v", doc.DefaultMode, err)
+	}
+
+	if err := os.WriteFile(path, []byte("default_mode: [shell]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(path); err == nil {
+		t.Error("a list is not a mode name")
+	}
 }

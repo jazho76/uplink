@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/jazho76/uplink/internal/multiplexer"
@@ -27,7 +28,15 @@ type ModeSpec struct {
 	Requires string `yaml:"-"`
 }
 
-func automaticModes() []ModeSpec {
+func defaultModeChoices() []string {
+	choices := make([]string, 0, len(multiplexer.All)+1)
+	for _, m := range multiplexer.All {
+		choices = append(choices, m.Tool())
+	}
+	return append(choices, shellMode)
+}
+
+func automaticModes(defaultMode string) []ModeSpec {
 	modes := make([]ModeSpec, 0, len(multiplexer.All)+1)
 	for _, m := range multiplexer.All {
 		modes = append(modes, ModeSpec{
@@ -36,7 +45,21 @@ func automaticModes() []ModeSpec {
 			Run:      "command -v " + m.Tool() + " >/dev/null && exec " + m.Attach() + "; " + loginShell,
 		})
 	}
-	return append(modes, ModeSpec{Name: shellMode})
+	modes = append(modes, ModeSpec{Name: shellMode})
+
+	first := cmp.Or(defaultMode, multiplexer.Tmux{}.Tool())
+	rank := func(mode ModeSpec) int {
+		switch mode.Name {
+		case first:
+			return 0
+		case shellMode:
+			return 1
+		default:
+			return 2
+		}
+	}
+	slices.SortStableFunc(modes, func(a, b ModeSpec) int { return cmp.Compare(rank(a), rank(b)) })
+	return modes
 }
 
 type Spec struct {
@@ -58,7 +81,7 @@ type Spec struct {
 	Defaults *Spec  `yaml:"-"`
 }
 
-func resolve(source string, spec Spec) (Target, error) {
+func resolve(source string, spec Spec, defaultMode string) (Target, error) {
 	if spec.Name == "" {
 		return Target{}, errors.New("no name")
 	}
@@ -69,7 +92,7 @@ func resolve(source string, spec Spec) (Target, error) {
 		spec = spec.over(*spec.Defaults)
 	}
 	if len(spec.Modes) == 0 {
-		spec.Modes = automaticModes()
+		spec.Modes = automaticModes(defaultMode)
 	}
 	if spec.Stats == nil && spec.Kind == KindContainer {
 		spec.Stats = []stats.Metric{{Preset: stats.PresetContainer}}

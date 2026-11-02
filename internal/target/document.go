@@ -17,9 +17,10 @@ import (
 const anchorPrefix = "x-"
 
 type Document struct {
-	Targets  []Spec         `yaml:"targets"`
-	Discover []string       `yaml:"discover"`
-	Extra    map[string]any `yaml:",inline"`
+	Targets     []Spec         `yaml:"targets"`
+	Discover    []string       `yaml:"discover"`
+	DefaultMode string         `yaml:"default_mode"`
+	Extra       map[string]any `yaml:",inline"`
 }
 
 func (d Document) Config() Source { return configSource(d.Targets) }
@@ -43,7 +44,7 @@ func Read(path string) (Document, error) {
 	var errs []error
 	for _, key := range slices.Sorted(maps.Keys(doc.Extra)) {
 		if !strings.HasPrefix(key, anchorPrefix) {
-			errs = append(errs, fmt.Errorf("%s: unknown section %q; use targets, discover, or an %s key for anchors", path, key, anchorPrefix))
+			errs = append(errs, fmt.Errorf("%s: unknown section %q; use targets, discover, default_mode, or an %s key for anchors", path, key, anchorPrefix))
 		}
 	}
 	if len(errs) > 0 {

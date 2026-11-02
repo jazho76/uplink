@@ -23,8 +23,9 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         preset: linux, macos, or container. Left out means the built-in
 #         metrics for the target's OS; [] means none.
 # modes   ways to enter; the first is the default. A mode without run opens
-#         the user's shell. Left out means tmux, when the target has it, and
-#         shell. Every session returns to the dashboard.
+#         the user's shell. Left out means default_mode, then shell, then any
+#         other multiplexer, each only when the target has it. Every session
+#         returns to the dashboard.
 #
 # {name} in a command becomes the target's name. Top-level keys starting with
 # x- hold YAML anchors for values targets share.
@@ -35,6 +36,10 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # (its peers) when connected. A discover list runs exactly the providers it names; "discover: []" turns
 # discovery off.
 # discover: [local, lima]
+
+# default_mode is what targets without modes open by default: tmux, or shell.
+# Left out means tmux. If a target lacks the tool, you get its shell instead.
+# default_mode: tmux
 
 # targets:
 #   - name: box

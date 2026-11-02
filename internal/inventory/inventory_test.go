@@ -88,3 +88,43 @@ func TestDiscoverTakesProviderNamesOnly(t *testing.T) {
 		t.Errorf("a mapping entry should refuse the config, got %q and %v", ids(targets), err)
 	}
 }
+
+type bareProvider struct{}
+
+func (bareProvider) Name() string                  { return "bare" }
+func (bareProvider) Default() bool                 { return true }
+func (bareProvider) Specs() ([]target.Spec, error) { return []target.Spec{{Name: "found"}}, nil }
+
+func loadBare(t *testing.T, body string) ([]target.Target, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return Load(path, []Provider{bareProvider{}})
+}
+
+func TestDefaultModeReachesEveryTarget(t *testing.T) {
+	targets, err := loadBare(t, "default_mode: shell\ntargets:\n  - name: mine\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 2 {
+		t.Fatalf("want the discovered and the configured target, got %q", ids(targets))
+	}
+	for _, target := range targets {
+		if got := target.Modes[0].Name; got != "shell" {
+			t.Errorf("%s: want shell first, got %q", target.ID, got)
+		}
+	}
+}
+
+func TestUnknownDefaultModeIsReportedAndProvidersStillRun(t *testing.T) {
+	targets, err := loadBare(t, "default_mode: nope\n")
+	if ids(targets) != "bare/found" {
+		t.Errorf("providers still run, got %q", ids(targets))
+	}
+	if err == nil || !strings.Contains(err.Error(), `unknown mode "nope"`) {
+		t.Errorf("want the unknown mode reported, got %v", err)
+	}
+}

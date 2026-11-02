@@ -435,6 +435,25 @@ func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
 	}
 }
 
+func TestMissingDefaultFallsToShellBeforeOtherMultiplexers(t *testing.T) {
+	box := vm("box")
+	box.Modes = []target.Mode{
+		{Name: "tmux", Argv: box.Via, Requires: "tmux"},
+		{Name: "shell", Argv: box.Via},
+		{Name: "zellij", Argv: box.Via, Requires: "zellij"},
+	}
+	m, _ := newTestModel()
+	m = focus(sized(withTargets(m, box)), "box")
+
+	m = inspected(m, "box", "zellij")
+	if got := m.mode().Name; got != "shell" {
+		t.Errorf("the default is missing, want shell first, got %q", got)
+	}
+	if got := key(m, "tab").mode().Name; got != "zellij" {
+		t.Errorf("zellij is one tab away, got %q", got)
+	}
+}
+
 func TestModeCycling(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)

@@ -3,6 +3,8 @@ package target
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 type Source interface {
@@ -17,12 +19,20 @@ func (configSource) Name() string { return ConfigSource }
 func (c configSource) Specs() ([]Spec, error) { return c, nil }
 
 func Merge(sources ...Source) ([]Target, error) {
+	return MergeWithDefault("", sources...)
+}
+
+func MergeWithDefault(defaultMode string, sources ...Source) ([]Target, error) {
 	var (
 		targets []Target
 		errs    []error
 		merged  = map[string]bool{}
 		seen    = map[ID]bool{}
 	)
+	if valid := defaultModeChoices(); defaultMode != "" && !slices.Contains(valid, defaultMode) {
+		errs = append(errs, fmt.Errorf("default_mode: unknown mode %q; use one of %s", defaultMode, strings.Join(valid, ", ")))
+		defaultMode = ""
+	}
 	for _, source := range sources {
 		name := source.Name()
 		if merged[name] {
@@ -37,7 +47,7 @@ func Merge(sources ...Source) ([]Target, error) {
 			continue
 		}
 		for i, spec := range specs {
-			t, err := resolve(name, spec)
+			t, err := resolve(name, spec, defaultMode)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("target %s: %w", label(name, spec, i), err))
 				continue
