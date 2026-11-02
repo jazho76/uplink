@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"testing"
@@ -17,8 +18,12 @@ import (
 const sessionsRule = "sessions ─"
 
 func withSessions(m model, name string, sessions ...multiplexer.Session) model {
+	owned := slices.Clone(sessions)
+	for i := range owned {
+		owned[i].Tool = cmp.Or(owned[i].Tool, "tmux")
+	}
 	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
-		snapshot: inspect.Snapshot{Tools: []string{"tmux"}, Sessions: sessions}, inspectOK: true})
+		snapshot: inspect.Snapshot{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
 	return next.(model)
 }
 
@@ -60,6 +65,83 @@ func TestSessionsShowWithoutStats(t *testing.T) {
 	got := preview(withSessions(m, "dojo", multiplexer.Session{Name: "main"}))
 	if !strings.Contains(got, sessionsRule) || !strings.Contains(got, "main") || strings.Contains(got, "live ─") {
 		t.Errorf("want sessions and no live block, got:\n%s", got)
+	}
+}
+
+func TestTabToAModeWithoutSessionsHidesTheSection(t *testing.T) {
+	m, backend := newTestModel()
+	m = withSessions(focus(sized(m), "forge"), "forge", multiplexer.Session{Name: "main"})
+	inspections := backend.inspections
+
+	shell := key(m, "tab")
+	if got := preview(shell); strings.Contains(got, sessionsRule) || strings.Contains(got, "main") {
+		t.Errorf("shell attaches to no session, got:\n%s", got)
+	}
+	if got := preview(key(shell, "shift+tab")); !strings.Contains(got, "main") {
+		t.Errorf("back on tmux the sessions should return, got:\n%s", got)
+	}
+	if backend.inspections != inspections {
+		t.Errorf("tab must not inspect, ran %d more", backend.inspections-inspections)
+	}
+}
+
+func modesNamed(names ...string) []target.Mode {
+	modes := make([]target.Mode, len(names))
+	for i, name := range names {
+		modes[i] = target.Mode{Name: name, Argv: []string{"sh"}}
+	}
+	return modes
+}
+
+func focusedWithModes(names ...string) model {
+	box := vm("box")
+	box.Modes = modesNamed(names...)
+	m, _ := newTestModel()
+	return focus(sized(withTargets(m, box)), "box")
+}
+
+func TestSessionsFollowTheSelectedMode(t *testing.T) {
+	m := withSessions(focusedWithModes("tmux", "zellij"), "box",
+		multiplexer.Session{Tool: "tmux", Name: "from-tmux"},
+		multiplexer.Session{Tool: "zellij", Name: "from-zellij"},
+	)
+
+	if got := preview(m); !strings.Contains(got, "from-tmux") || strings.Contains(got, "from-zellij") {
+		t.Errorf("tmux mode should show only tmux sessions, got:\n%s", got)
+	}
+	if got := preview(key(m, "tab")); !strings.Contains(got, "from-zellij") || strings.Contains(got, "from-tmux") {
+		t.Errorf("zellij mode should show only zellij sessions, got:\n%s", got)
+	}
+}
+
+func TestDeclaredModeMatchesSessionsByName(t *testing.T) {
+	m := withSessions(focusedWithModes("tmux", "root", "shell"), "box", multiplexer.Session{Name: "main"})
+
+	if got := preview(m); !strings.Contains(got, "main") {
+		t.Errorf("a declared tmux mode previews tmux sessions, got:\n%s", got)
+	}
+	if got := preview(key(m, "tab")); strings.Contains(got, sessionsRule) {
+		t.Errorf("root runs its own server, got:\n%s", got)
+	}
+}
+
+func TestSessionsWithoutAMatchingModeShowNowhere(t *testing.T) {
+	m := withSessions(focusedWithModes("tmux", "shell"), "box", multiplexer.Session{Tool: "zellij", Name: "stranger"})
+
+	for _, mode := range []model{m, key(m, "tab")} {
+		if got := preview(mode); strings.Contains(got, sessionsRule) || strings.Contains(got, "stranger") {
+			t.Errorf("no mode attaches to these sessions, got:\n%s", got)
+		}
+	}
+}
+
+func TestHiddenSessionsGiveTheirLinesToLogs(t *testing.T) {
+	m := focusedPreview(t, multiplexer.Session{Name: "one"}, multiplexer.Session{Name: "two"})
+	m.logPeek = peek{id: configID("forge"), text: strings.TrimSuffix(strings.Repeat("log line\n", 40), "\n")}
+
+	logLines := func(m model) int { return strings.Count(ansi.Strip(m.previewBody(60, 20)), "log line") }
+	if with, without := logLines(m), logLines(key(m, "tab")); without <= with {
+		t.Errorf("want more log lines once sessions are hidden, got %d with and %d without", with, without)
 	}
 }
 

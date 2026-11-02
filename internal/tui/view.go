@@ -184,20 +184,35 @@ func (m model) renderLive(id target.ID, width int) string {
 	return renderFields(fields, width)
 }
 
-func (m model) renderSessions(id target.ID, width int) string {
+func (m model) modeSessions(id target.ID) []multiplexer.Session {
 	e := m.live[id]
-	if !e.inspectOK || len(e.snapshot.Sessions) == 0 {
+	if !e.inspectOK {
+		return nil
+	}
+	tool := m.mode().Name
+	var sessions []multiplexer.Session
+	for _, s := range e.snapshot.Sessions {
+		if s.Tool == tool {
+			sessions = append(sessions, s)
+		}
+	}
+	return sessions
+}
+
+func (m model) renderSessions(id target.ID, width int) string {
+	sessions := m.modeSessions(id)
+	if len(sessions) == 0 {
 		return ""
 	}
-	fields := make([]field, len(e.snapshot.Sessions))
-	for i, s := range e.snapshot.Sessions {
+	fields := make([]field, len(sessions))
+	for i, s := range sessions {
 		fields[i].key = clip(s.Name, width/2)
 		if s.Attached {
 			fields[i].key += modeMarker.Render("*")
 		}
 	}
 	room := width - widestKey(fields) - fieldGap
-	for i, s := range e.snapshot.Sessions {
+	for i, s := range sessions {
 		fields[i].value = windowList(s.Windows, room)
 	}
 	return renderFields(fields, width)
