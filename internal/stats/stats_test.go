@@ -1,6 +1,9 @@
 package stats
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +73,27 @@ func TestBrokenMetricsDoNotSpoilTheRest(t *testing.T) {
 }
 
 func TestMetricsAreIsolatedFromEachOther(t *testing.T) {
+	assertMetricsIsolated(t)
+}
+
+func TestMetricsAreIsolatedWithoutTimeoutInstalled(t *testing.T) {
+	dir := t.TempDir()
+	for _, tool := range []string{"sh", "head", "sleep"} {
+		path, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(path, filepath.Join(dir, tool)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir)
+
+	assertMetricsIsolated(t)
+}
+
+func assertMetricsIsolated(t *testing.T) {
+	t.Helper()
 	previous := metricTimeout
 	metricTimeout = time.Second
 	t.Cleanup(func() { metricTimeout = previous })

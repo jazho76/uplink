@@ -95,7 +95,22 @@ func quote(s string) string {
 var metricTimeout = 5 * time.Second
 
 func Preamble() string {
-	return fmt.Sprintf("limit=; command -v timeout >/dev/null 2>&1 && limit='timeout %d'", int(metricTimeout.Seconds()))
+	return fmt.Sprintf(`if command -v timeout >/dev/null 2>&1; then
+  limit='timeout %[1]d'
+else
+  limited() { (
+    set -m
+    "$@" &
+    pid=$!
+    { sleep %[1]d && kill -KILL -$pid; } >/dev/null 2>&1 </dev/null &
+    watcher=$!
+    wait $pid
+    status=$?
+    kill $watcher 2>/dev/null
+    exit $status
+  ); }
+  limit=limited
+fi`, int(metricTimeout.Seconds()))
 }
 
 func Script(metrics []Metric) string {
