@@ -2,10 +2,12 @@ package inventory
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
@@ -15,86 +17,110 @@ import (
 
 const shellMode = "shell"
 
-type Source interface {
-	Name() string
-	Targets() ([]target.Target, error)
-}
+var ErrUnavailable = errors.New("unavailable")
 
 type Provider interface {
-	Source
-	Default() bool
+	Name() string
+	Discover(ctx context.Context) ([]Discovered, error)
 }
 
-type configSource []target.Target
+type Discovered struct {
+	Target target.Target
+	Status target.Status
+}
 
-func (configSource) Name() string { return target.ConfigSource }
+type Found struct {
+	Source     string
+	Discovered []Discovered
+	Err        error
+}
 
-func (c configSource) Targets() ([]target.Target, error) { return c, nil }
-
-func Load(path string, providers []Provider) ([]target.Target, error) {
+func Load(ctx context.Context, path string, providers []Provider) ([]target.Target, error) {
 	doc, err := config.Read(path)
 	if err != nil {
 		return nil, err
 	}
-
-	var (
-		sources []Source
-		errs    []error
-	)
-	for _, name := range enabled(doc, providers) {
-		i := slices.IndexFunc(providers, func(p Provider) bool { return p.Name() == name })
-		if i < 0 {
-			errs = append(errs, fmt.Errorf("discover: unknown provider %q", name))
-			continue
-		}
-		sources = append(sources, providers[i])
-	}
+	names, explicit := enabled(doc, providers)
+	found, errs := discoverAll(ctx, names, explicit, providers)
 
 	declared, err := doc.Resolve()
 	errs = append(errs, err)
-	targets, err := Merge(doc.DefaultMode, append(sources, configSource(declared))...)
-	return targets, errors.Join(append(errs, err)...)
+	found = append(found, declaredFound(declared))
+	merged, err := Merge(doc.DefaultMode, found...)
+	return Targets(merged), errors.Join(append(errs, err)...)
 }
 
-func enabled(doc config.Document, providers []Provider) []string {
+func enabled(doc config.Document, providers []Provider) (names []string, explicit bool) {
 	if doc.Discover != nil {
-		return doc.Discover
+		return doc.Discover, true
 	}
-	var defaults []string
 	for _, p := range providers {
-		if p.Default() {
-			defaults = append(defaults, p.Name())
-		}
+		names = append(names, p.Name())
 	}
-	return defaults
+	return names, false
 }
 
-func Merge(defaultMode string, sources ...Source) ([]target.Target, error) {
+func discoverAll(ctx context.Context, names []string, explicit bool, providers []Provider) ([]Found, []error) {
+	found := make([]Found, len(names))
+	errs := make([]error, len(names))
+	var running sync.WaitGroup
+	for i, name := range names {
+		found[i].Source = name
+		at := slices.IndexFunc(providers, func(p Provider) bool { return p.Name() == name })
+		if at < 0 {
+			errs[i] = fmt.Errorf("discover: unknown provider %q", name)
+			continue
+		}
+		running.Go(func() {
+			found[i].Discovered, found[i].Err = providers[at].Discover(ctx)
+			if !explicit && errors.Is(found[i].Err, ErrUnavailable) {
+				found[i].Err = nil
+			}
+		})
+	}
+	running.Wait()
+	return found, errs
+}
+
+func declaredFound(declared []target.Target) Found {
+	found := Found{Source: target.ConfigSource, Discovered: make([]Discovered, len(declared))}
+	for i, t := range declared {
+		found.Discovered[i] = Discovered{Target: t, Status: target.StatusUnknown}
+	}
+	return found
+}
+
+func Targets(merged []Discovered) []target.Target {
+	var targets []target.Target
+	for _, d := range merged {
+		targets = append(targets, d.Target)
+	}
+	return targets
+}
+
+func Merge(defaultMode string, found ...Found) ([]Discovered, error) {
 	var (
-		targets []target.Target
+		merged  []Discovered
 		errs    []error
-		merged  = map[string]bool{}
+		sources = map[string]bool{}
 		seen    = map[target.ID]bool{}
 	)
 	if choices := modeChoices(); defaultMode != "" && !slices.Contains(choices, defaultMode) {
 		errs = append(errs, fmt.Errorf("default_mode: unknown mode %q; use one of %s", defaultMode, strings.Join(choices, ", ")))
 		defaultMode = ""
 	}
-	for _, source := range sources {
-		name := source.Name()
-		if merged[name] {
-			errs = append(errs, fmt.Errorf("duplicate source %q", name))
+	for _, source := range found {
+		if sources[source.Source] {
+			errs = append(errs, fmt.Errorf("duplicate source %q", source.Source))
 			continue
 		}
-		merged[name] = true
-
-		found, err := source.Targets()
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", name, err))
-			continue
+		sources[source.Source] = true
+		if source.Err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", source.Source, source.Err))
 		}
-		for i, t := range found {
-			t.ID.Source = name
+		for i, d := range source.Discovered {
+			t := d.Target
+			t.ID.Source = source.Source
 			if err := target.ValidateKey(t.ID.Key); err != nil {
 				errs = append(errs, fmt.Errorf("target %s: %w", label(t, i), err))
 				continue
@@ -104,10 +130,10 @@ func Merge(defaultMode string, sources ...Source) ([]target.Target, error) {
 				continue
 			}
 			seen[t.ID] = true
-			targets = append(targets, withDefaults(t, defaultMode))
+			merged = append(merged, Discovered{Target: withDefaults(t, defaultMode), Status: d.Status})
 		}
 	}
-	return targets, errors.Join(errs...)
+	return merged, errors.Join(errs...)
 }
 
 func withDefaults(t target.Target, defaultMode string) target.Target {

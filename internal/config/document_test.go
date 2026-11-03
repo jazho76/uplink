@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"context"
 	"maps"
 	"os"
 	"os/exec"
@@ -32,7 +33,7 @@ func load(t *testing.T, body string) ([]target.Target, error) {
 }
 
 func loadConfig(path string) ([]target.Target, error) {
-	return inventory.Load(path, nil)
+	return inventory.Load(context.Background(), path, nil)
 }
 
 func mustLoad(t *testing.T, body string) []target.Target {

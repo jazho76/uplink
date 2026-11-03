@@ -1,6 +1,7 @@
 package tailscale
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -13,9 +14,10 @@ import (
 
 func listing(t *testing.T, out string, err error) {
 	t.Helper()
-	previous := list
-	t.Cleanup(func() { list = previous })
-	list = func() (string, error) { return out, err }
+	previousList, previousLook := list, lookPath
+	t.Cleanup(func() { list, lookPath = previousList, previousLook })
+	list = func(context.Context) (string, error) { return out, err }
+	lookPath = func(string) (string, error) { return "/usr/bin/tool", nil }
 }
 
 func fixture(t *testing.T) string {
@@ -30,11 +32,16 @@ func fixture(t *testing.T) string {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := inventory.Merge("", Provider{})
+	merged, err := merge()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return targets
+	return inventory.Targets(merged)
+}
+
+func merge() ([]inventory.Discovered, error) {
+	found, err := Provider{}.Discover(context.Background())
+	return inventory.Merge("", inventory.Found{Source: name, Discovered: found, Err: err})
 }
 
 func TestListsReachablePeersByMagicDNSName(t *testing.T) {
@@ -94,43 +101,50 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		out string
 		err error
 	}{
-		"status fails": {err: errors.New("tailscale: exit 1")},
-		"bad json":     {out: "{not json"},
-		"stopped":      {out: `{"BackendState": "Stopped"}`},
+		"status times out": {err: context.DeadlineExceeded},
+		"bad json":         {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := inventory.Merge("", Provider{})
+		targets, err := merge()
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "tailscale: ") {
 			t.Errorf("%s: want no targets and a tailscale error, got %v and %v", name, targets, err)
 		}
 	}
 }
 
-func TestOnByDefaultOnlyWhenConnected(t *testing.T) {
-	previousLook, previousPing := lookPath, ping
-	t.Cleanup(func() { lookPath, ping = previousLook, previousPing })
-
-	found := func(string) (string, error) { return "/usr/bin/tailscale", nil }
-	missing := func(string) (string, error) { return "", errors.New("not found") }
-	state := func(s string) func() (string, error) {
-		return func() (string, error) { return `{"BackendState": "` + s + `"}`, nil }
+func TestReportsOnlineAsStatus(t *testing.T) {
+	listing(t, `{"BackendState":"Running","CurrentTailnet":{"MagicDNSEnabled":true},"Peer":{
+		"a":{"DNSName":"on.ts.net.","OS":"linux","Online":true},
+		"b":{"DNSName":"off.ts.net.","OS":"linux","Online":false,"Active":true}}}`, nil)
+	merged, err := merge()
+	if err != nil || len(merged) != 2 {
+		t.Fatalf("got %+v and %v", merged, err)
 	}
-	failing := func() (string, error) { return "", errors.New("no daemon") }
+	if merged[0].Target.ID.Key != "off" || merged[0].Status != target.StatusDown {
+		t.Errorf("only Online counts, not Active, got %+v", merged[0])
+	}
+	if merged[1].Status != target.StatusUp {
+		t.Errorf("got %+v", merged[1])
+	}
+}
 
-	for _, c := range []struct {
-		name string
-		look func(string) (string, error)
-		ping func() (string, error)
-		want bool
+func TestUnavailable(t *testing.T) {
+	for name, c := range map[string]struct {
+		out string
+		err error
 	}{
-		{"connected", found, state("Running"), true},
-		{"logged out", found, state("NeedsLogin"), false},
-		{"no daemon", found, failing, false},
-		{"no cli", missing, state("Running"), false},
+		"stopped":    {out: `{"BackendState": "Stopped"}`},
+		"logged out": {out: `{"BackendState": "NeedsLogin"}`},
+		"no daemon":  {err: errors.New("exit 1")},
 	} {
-		lookPath, ping = c.look, c.ping
-		if got := (Provider{}).Default(); got != c.want {
-			t.Errorf("%s: Default() = %v, want %v", c.name, got, c.want)
+		listing(t, c.out, c.err)
+		if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
+			t.Errorf("%s: got %v", name, err)
 		}
+	}
+	listing(t, "", nil)
+	lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
+		t.Errorf("no cli: got %v", err)
 	}
 }

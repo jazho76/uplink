@@ -1,8 +1,10 @@
 package local
 
 import (
+	"context"
 	"os"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -18,15 +20,16 @@ type Provider struct{}
 
 func (Provider) Name() string { return name }
 
-func (Provider) Default() bool { return true }
-
-func (Provider) Targets() ([]target.Target, error) {
+func (Provider) Discover(context.Context) ([]inventory.Discovered, error) {
 	display, _ := hostname()
-	return []target.Target{{
-		ID:    target.ID{Key: key},
-		Name:  display,
-		Group: group,
-		Logs:  target.LogSource{Journal: true},
-		Stats: target.StatsPolicy{Builtin: true},
+	return []inventory.Discovered{{
+		Status: target.StatusUp,
+		Target: target.Target{
+			ID:    target.ID{Key: key},
+			Name:  display,
+			Group: group,
+			Logs:  target.LogSource{Journal: true},
+			Stats: target.StatsPolicy{Builtin: true},
+		},
 	}}, nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inspection/stats"
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -24,48 +25,48 @@ const (
 
 var (
 	lookPath = exec.LookPath
-	ping     = func() error {
-		_, err := shell.NonInteractive(context.Background(), pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
+	ping     = func(ctx context.Context) error {
+		_, err := shell.NonInteractive(ctx, pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
 		return err
 	}
-	list = func() (string, error) {
-		return shell.NonInteractive(context.Background(), listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
+	list = func(ctx context.Context) (string, error) {
+		return shell.NonInteractive(ctx, listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
 	}
 )
 
 type container struct {
 	Names string `json:"Names"`
+	State string `json:"State"`
 }
 
 type Provider struct{}
 
 func (Provider) Name() string { return name }
 
-func (Provider) Default() bool {
+func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	if _, err := lookPath("docker"); err != nil {
-		return false
+		return nil, inventory.ErrUnavailable
 	}
-	return ping() == nil
-}
-
-func (Provider) Targets() ([]target.Target, error) {
-	out, err := list()
+	out, err := list(ctx)
+	if err != nil {
+		if pingErr := ping(ctx); pingErr != nil && !shell.Interrupted(pingErr) {
+			return nil, inventory.ErrUnavailable
+		}
+		return nil, err
+	}
+	containers, err := parse(out)
 	if err != nil {
 		return nil, err
 	}
-	names, err := parse(out)
-	if err != nil {
-		return nil, err
+	found := make([]inventory.Discovered, len(containers))
+	for i, c := range containers {
+		found[i] = inventory.Discovered{Target: containerTarget(c.name()), Status: c.status()}
 	}
-	targets := make([]target.Target, len(names))
-	for i, n := range names {
-		targets[i] = containerTarget(n)
-	}
-	return targets, nil
+	return found, nil
 }
 
-func parse(out string) ([]string, error) {
-	var names []string
+func parse(out string) ([]container, error) {
+	var containers []container
 	decoder := json.NewDecoder(strings.NewReader(out))
 	for {
 		var c container
@@ -76,11 +77,26 @@ func parse(out string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		first, _, _ := strings.Cut(c.Names, ",")
-		names = append(names, first)
+		containers = append(containers, c)
 	}
-	slices.Sort(names)
-	return names, nil
+	slices.SortFunc(containers, func(a, b container) int { return strings.Compare(a.name(), b.name()) })
+	return containers, nil
+}
+
+func (c container) name() string {
+	first, _, _ := strings.Cut(c.Names, ",")
+	return first
+}
+
+func (c container) status() target.Status {
+	switch c.State {
+	case "running":
+		return target.StatusUp
+	case "exited", "created", "dead":
+		return target.StatusDown
+	default:
+		return target.StatusUnknown
+	}
 }
 
 func containerTarget(container string) target.Target {

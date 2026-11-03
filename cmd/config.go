@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -55,7 +56,7 @@ func checkConfig() error {
 	}
 	fmt.Printf("config %s (%s)\n", path, state)
 
-	resolved, problems := inventory.Load(path, providers)
+	resolved, problems := inventory.Load(context.Background(), path, providers)
 	for _, t := range resolved {
 		fmt.Println()
 		header := t.ID.String()

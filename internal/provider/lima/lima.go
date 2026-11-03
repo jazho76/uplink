@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -22,13 +23,14 @@ const (
 
 var (
 	lookPath = exec.LookPath
-	list     = func() (string, error) {
-		return shell.NonInteractive(context.Background(), listTimeout, "", "limactl", "list", "--json")
+	list     = func(ctx context.Context) (string, error) {
+		return shell.NonInteractive(ctx, listTimeout, "", "limactl", "list", "--json")
 	}
 )
 
 type instance struct {
 	Name          string `json:"name"`
+	Status        string `json:"status"`
 	Hostname      string `json:"hostname"`
 	Dir           string `json:"dir"`
 	SSHConfigFile string `json:"sshConfigFile"`
@@ -38,13 +40,11 @@ type Provider struct{}
 
 func (Provider) Name() string { return name }
 
-func (Provider) Default() bool {
-	_, err := lookPath("limactl")
-	return err == nil
-}
-
-func (Provider) Targets() ([]target.Target, error) {
-	out, err := list()
+func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
+	if _, err := lookPath("limactl"); err != nil {
+		return nil, inventory.ErrUnavailable
+	}
+	out, err := list(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +52,22 @@ func (Provider) Targets() ([]target.Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]target.Target, len(instances))
+	found := make([]inventory.Discovered, len(instances))
 	for i, vm := range instances {
-		targets[i] = vm.target()
+		found[i] = inventory.Discovered{Target: vm.target(), Status: vm.status()}
 	}
-	return targets, nil
+	return found, nil
+}
+
+func (vm instance) status() target.Status {
+	switch vm.Status {
+	case "Running":
+		return target.StatusUp
+	case "Stopped":
+		return target.StatusDown
+	default:
+		return target.StatusUnknown
+	}
 }
 
 func parse(out string) ([]instance, error) {

@@ -1,6 +1,7 @@
 package lima
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -13,9 +14,10 @@ import (
 
 func listing(t *testing.T, out string, err error) {
 	t.Helper()
-	previous := list
-	t.Cleanup(func() { list = previous })
-	list = func() (string, error) { return out, err }
+	previousList, previousLook := list, lookPath
+	t.Cleanup(func() { list, lookPath = previousList, previousLook })
+	list = func(context.Context) (string, error) { return out, err }
+	lookPath = func(string) (string, error) { return "/usr/bin/tool", nil }
 }
 
 func fixture(t *testing.T) {
@@ -29,11 +31,16 @@ func fixture(t *testing.T) {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := inventory.Merge("", Provider{})
+	merged, err := merge()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return targets
+	return inventory.Targets(merged)
+}
+
+func merge() ([]inventory.Discovered, error) {
+	found, err := Provider{}.Discover(context.Background())
+	return inventory.Merge("", inventory.Found{Source: name, Discovered: found, Err: err})
 }
 
 func TestListsEveryInstanceByName(t *testing.T) {
@@ -89,23 +96,31 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"bad json":      {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := inventory.Merge("", Provider{})
+		targets, err := merge()
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "lima: ") {
 			t.Errorf("%s: want no targets and a lima error, got %v and %v", name, targets, err)
 		}
 	}
 }
 
-func TestOnByDefaultWhenInstalled(t *testing.T) {
-	previous := lookPath
-	t.Cleanup(func() { lookPath = previous })
-
-	lookPath = func(string) (string, error) { return "/usr/bin/limactl", nil }
-	if !(Provider{}).Default() {
-		t.Errorf("an installed limactl turns lima on")
+func TestReportsStatus(t *testing.T) {
+	for state, want := range map[string]target.Status{
+		"Running": target.StatusUp,
+		"Stopped": target.StatusDown,
+		"Broken":  target.StatusUnknown,
+	} {
+		listing(t, `{"name":"dev","status":"`+state+`"}`, nil)
+		merged, err := merge()
+		if err != nil || len(merged) != 1 || merged[0].Status != want {
+			t.Errorf("%s: want %s, got %+v and %v", state, want, merged, err)
+		}
 	}
+}
+
+func TestUnavailableWithoutLimactl(t *testing.T) {
+	listing(t, "", nil)
 	lookPath = func(string) (string, error) { return "", errors.New("not found") }
-	if (Provider{}).Default() {
-		t.Errorf("a missing limactl leaves lima off")
+	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
+		t.Errorf("got %v", err)
 	}
 }

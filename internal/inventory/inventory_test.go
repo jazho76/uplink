@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,22 +14,24 @@ import (
 )
 
 type fakeProvider struct {
-	name string
-	on   bool
+	name      string
+	available bool
 }
 
-func (f fakeProvider) Name() string  { return f.name }
-func (f fakeProvider) Default() bool { return f.on }
-func (f fakeProvider) Targets() ([]target.Target, error) {
-	return []target.Target{{
+func (f fakeProvider) Name() string { return f.name }
+func (f fakeProvider) Discover(context.Context) ([]Discovered, error) {
+	if !f.available {
+		return nil, ErrUnavailable
+	}
+	return []Discovered{{Status: target.StatusUp, Target: target.Target{
 		ID:    target.ID{Key: "box"},
 		Name:  f.name + "-box",
 		Group: f.name,
 		Modes: []target.Mode{{Name: "shell"}},
-	}}, nil
+	}}}, nil
 }
 
-var providers = []Provider{fakeProvider{name: "near", on: true}, fakeProvider{name: "far"}}
+var providers = []Provider{fakeProvider{name: "near", available: true}, fakeProvider{name: "far"}, fakeProvider{name: "other", available: true}}
 
 func load(t *testing.T, body string) ([]target.Target, error) {
 	t.Helper()
@@ -38,7 +41,7 @@ func load(t *testing.T, body string) ([]target.Target, error) {
 			t.Fatal(err)
 		}
 	}
-	return Load(path, providers)
+	return Load(context.Background(), path, providers)
 }
 
 func ids(targets []target.Target) string {
@@ -49,23 +52,33 @@ func ids(targets []target.Target) string {
 	return strings.Join(out, " ")
 }
 
-func TestDefaultProvidersRunWithoutADiscoverSection(t *testing.T) {
+func TestEveryProviderRunsWithoutADiscoverSection(t *testing.T) {
 	for name, body := range map[string]string{"missing file": "", "no section": "targets: []\n"} {
 		targets, err := load(t, body)
-		if err != nil || ids(targets) != "near/box" {
-			t.Errorf("%s: want only the default provider, got %q and %v", name, ids(targets), err)
+		if err != nil || ids(targets) != "near/box other/box" {
+			t.Errorf("%s: unavailable providers stay silent, got %q and %v", name, ids(targets), err)
 		}
 	}
 }
 
 func TestDiscoverListsExactlyWhatRuns(t *testing.T) {
-	targets, err := load(t, "discover: [far]\n")
-	if err != nil || ids(targets) != "far/box" {
-		t.Errorf("want only far, got %q and %v", ids(targets), err)
+	targets, err := load(t, "discover: [other]\n")
+	if err != nil || ids(targets) != "other/box" {
+		t.Errorf("want only other, got %q and %v", ids(targets), err)
 	}
 	targets, err = load(t, "discover: []\n")
 	if err != nil || len(targets) != 0 {
 		t.Errorf("an empty list turns discovery off, got %q and %v", ids(targets), err)
+	}
+}
+
+func TestListedProviderThatIsUnavailableIsReported(t *testing.T) {
+	targets, err := load(t, "discover: [far, near]\n")
+	if ids(targets) != "near/box" {
+		t.Errorf("others still run, got %q", ids(targets))
+	}
+	if err == nil || !strings.Contains(err.Error(), "far: unavailable") {
+		t.Errorf("you asked for it by name, so it is reported, got %v", err)
 	}
 }
 
@@ -81,7 +94,7 @@ func TestUnknownProviderIsReported(t *testing.T) {
 
 func TestDiscoveredTargetsComeFirst(t *testing.T) {
 	targets, err := load(t, "targets:\n  - { name: box, modes: [{ name: shell }] }\n")
-	if err != nil || ids(targets) != "near/box box" {
+	if err != nil || ids(targets) != "near/box other/box box" {
 		t.Errorf("want discovered then config, got %q and %v", ids(targets), err)
 	}
 }
@@ -95,10 +108,9 @@ func TestDiscoverTakesProviderNamesOnly(t *testing.T) {
 
 type bareProvider struct{}
 
-func (bareProvider) Name() string  { return "bare" }
-func (bareProvider) Default() bool { return true }
-func (bareProvider) Targets() ([]target.Target, error) {
-	return []target.Target{{ID: target.ID{Key: "found"}}}, nil
+func (bareProvider) Name() string { return "bare" }
+func (bareProvider) Discover(context.Context) ([]Discovered, error) {
+	return []Discovered{{Target: target.Target{ID: target.ID{Key: "found"}}}}, nil
 }
 
 func loadBare(t *testing.T, body string) ([]target.Target, error) {
@@ -107,7 +119,7 @@ func loadBare(t *testing.T, body string) ([]target.Target, error) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return Load(path, []Provider{bareProvider{}})
+	return Load(context.Background(), path, []Provider{bareProvider{}})
 }
 
 func TestDefaultModeReachesEveryTarget(t *testing.T) {
@@ -135,14 +147,22 @@ func TestUnknownDefaultModeIsReportedAndProvidersStillRun(t *testing.T) {
 	}
 }
 
-type fakeSource struct {
-	name    string
-	targets []target.Target
-	err     error
+func from(name string, targets ...target.Target) Found {
+	found := Found{Source: name}
+	for _, t := range targets {
+		found.Discovered = append(found.Discovered, Discovered{Target: t, Status: target.StatusUp})
+	}
+	return found
 }
 
-func (f fakeSource) Name() string                      { return f.name }
-func (f fakeSource) Targets() ([]target.Target, error) { return f.targets, f.err }
+func merged(t *testing.T, defaultMode string, found ...Found) []target.Target {
+	t.Helper()
+	all, err := Merge(defaultMode, found...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Targets(all)
+}
 
 var shellOnly = []target.Mode{{Name: "shell"}}
 
@@ -157,26 +177,24 @@ func modeNames(t target.Target) []string {
 }
 
 func TestSourcesMergeInOrderWithDistinctIDs(t *testing.T) {
-	config := fakeSource{name: target.ConfigSource, targets: []target.Target{keyed("box")}}
-	lima := fakeSource{name: "lima", targets: []target.Target{keyed("box"), keyed("dev")}}
-
-	targets, err := Merge("", config, lima)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := ids(targets); got != "box lima/box lima/dev" {
+	got := ids(merged(t, "", from(target.ConfigSource, keyed("box")), from("lima", keyed("box"), keyed("dev"))))
+	if got != "box lima/box lima/dev" {
 		t.Errorf("want config first, then lima in its order, got %q", got)
 	}
 }
 
-func TestMergeFillsWhatSourcesLeaveOut(t *testing.T) {
-	targets, err := Merge("", fakeSource{name: "lima", targets: []target.Target{
-		{ID: target.ID{Key: "dev"}, Name: "Dev box", Group: "work"},
-		{ID: target.ID{Key: "bare"}},
-	}})
-	if err != nil {
-		t.Fatal(err)
+func TestMergeKeepsStatus(t *testing.T) {
+	all, err := Merge("", Found{Source: "lima", Discovered: []Discovered{{Target: keyed("dev"), Status: target.StatusDown}}})
+	if err != nil || all[0].Status != target.StatusDown {
+		t.Errorf("got %+v and %v", all, err)
 	}
+}
+
+func TestMergeFillsWhatSourcesLeaveOut(t *testing.T) {
+	targets := merged(t, "", from("lima",
+		target.Target{ID: target.ID{Key: "dev"}, Name: "Dev box", Group: "work"},
+		target.Target{ID: target.ID{Key: "bare"}},
+	))
 	if got := targets[0]; got.Name != "Dev box" || got.ID.Key != "dev" || got.Group != "work" {
 		t.Errorf("a source's own values stay, got %+v", got)
 	}
@@ -186,12 +204,9 @@ func TestMergeFillsWhatSourcesLeaveOut(t *testing.T) {
 }
 
 func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
-	config := fakeSource{name: target.ConfigSource, targets: []target.Target{keyed("host")}}
-	lima := fakeSource{name: "lima", err: errors.New("limactl not found")}
-
-	targets, err := Merge("", config, lima)
-	if len(targets) != 1 || targets[0].Name != "host" {
-		t.Errorf("config targets should survive, got %v", targets)
+	all, err := Merge("", from(target.ConfigSource, keyed("host")), Found{Source: "lima", Err: errors.New("limactl not found")})
+	if len(all) != 1 || all[0].Target.Name != "host" {
+		t.Errorf("config targets should survive, got %v", all)
 	}
 	if err == nil || err.Error() != "lima: limactl not found" {
 		t.Errorf("want the failure prefixed with its source, got %v", err)
@@ -199,12 +214,9 @@ func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
 }
 
 func TestDuplicateSourcesAndBrokenTargetsAreReported(t *testing.T) {
-	first := fakeSource{name: "lima", targets: []target.Target{keyed("bad name"), {Modes: shellOnly}}}
-	second := fakeSource{name: "lima", targets: []target.Target{keyed("y")}}
-
-	targets, err := Merge("", first, second)
-	if len(targets) != 0 {
-		t.Errorf("want no targets, got %v", targets)
+	all, err := Merge("", from("lima", keyed("bad name"), target.Target{Modes: shellOnly}), from("lima", keyed("y")))
+	if len(all) != 0 {
+		t.Errorf("want no targets, got %v", all)
 	}
 	for _, want := range []string{`target "lima/bad name": name may only hold`, "target lima #2: no name", `duplicate source "lima"`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
@@ -227,42 +239,30 @@ func withFakeMultiplexer(t *testing.T) {
 	multiplexer.All = []multiplexer.Multiplexer{multiplexer.Tmux{}, fakeMultiplexer{}}
 }
 
+func bareBox() Found { return from("test", target.Target{ID: target.ID{Key: "box"}}) }
+
 func TestDefaultModeOrdersTheAutomaticModes(t *testing.T) {
 	withFakeMultiplexer(t)
-	source := fakeSource{name: "test", targets: []target.Target{{ID: target.ID{Key: "box"}}}}
-
 	for defaultMode, want := range map[string][]string{
 		"":      {"tmux", "fake", "shell"},
 		"tmux":  {"tmux", "fake", "shell"},
 		"fake":  {"fake", "tmux", "shell"},
 		"shell": {"shell", "tmux", "fake"},
 	} {
-		targets, err := Merge(defaultMode, source)
-		if err != nil {
-			t.Fatalf("%q: %v", defaultMode, err)
-		}
-		if got := modeNames(targets[0]); !slices.Equal(got, want) {
+		if got := modeNames(merged(t, defaultMode, bareBox())[0]); !slices.Equal(got, want) {
 			t.Errorf("%q: want %v, got %v", defaultMode, want, got)
 		}
 	}
 }
 
 func TestZellijCanBeTheDefaultMode(t *testing.T) {
-	targets, err := Merge("zellij", fakeSource{name: "test", targets: []target.Target{{ID: target.ID{Key: "box"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := modeNames(targets[0]); !slices.Equal(got, []string{"zellij", "tmux", "shell"}) {
+	if got := modeNames(merged(t, "zellij", bareBox())[0]); !slices.Equal(got, []string{"zellij", "tmux", "shell"}) {
 		t.Errorf("want zellij, tmux, shell, got %v", got)
 	}
 }
 
 func TestAutomaticModesNameTheirMultiplexer(t *testing.T) {
-	targets, err := Merge("", fakeSource{name: "test", targets: []target.Target{{ID: target.ID{Key: "box"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, mode := range targets[0].Modes {
+	for _, mode := range merged(t, "", bareBox())[0].Modes {
 		want := mode.Name
 		if mode.Name == shellMode {
 			want = ""
@@ -276,22 +276,17 @@ func TestAutomaticModesNameTheirMultiplexer(t *testing.T) {
 func TestDefaultModeLeavesExplicitModesAlone(t *testing.T) {
 	withFakeMultiplexer(t)
 	declared := target.Target{ID: target.ID{Key: "declared"}, Modes: []target.Mode{{Name: "root"}, {Name: "tmux"}}}
-
-	targets, err := Merge("tmux", fakeSource{name: "test", targets: []target.Target{declared}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := modeNames(targets[0]); !slices.Equal(got, []string{"root", "tmux"}) {
+	if got := modeNames(merged(t, "tmux", from("test", declared))[0]); !slices.Equal(got, []string{"root", "tmux"}) {
 		t.Errorf("explicit modes keep their order, got %v", got)
 	}
 }
 
 func TestUnknownDefaultModeIsReportedAndTargetsStillLoad(t *testing.T) {
-	targets, err := Merge("zelij", fakeSource{name: "test", targets: []target.Target{{ID: target.ID{Key: "box"}}}})
+	all, err := Merge("zelij", bareBox())
 	if err == nil || !strings.Contains(err.Error(), `unknown mode "zelij"`) || !strings.Contains(err.Error(), "tmux, zellij, shell") {
 		t.Errorf("want the value and the choices reported, got %v", err)
 	}
-	if len(targets) != 1 || modeNames(targets[0])[0] != "tmux" {
-		t.Errorf("want the target with the implicit default, got %+v", targets)
+	if len(all) != 1 || modeNames(all[0].Target)[0] != "tmux" {
+		t.Errorf("want the target with the implicit default, got %+v", all)
 	}
 }

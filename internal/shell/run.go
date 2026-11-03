@@ -33,10 +33,18 @@ func NonInteractive(ctx context.Context, limit time.Duration, stdin, bin string,
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
-	if err != nil {
+	switch {
+	case err == nil:
+		return strings.TrimSpace(string(out)), nil
+	case ctx.Err() != nil:
+		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w: %w", line(bin, args), ctx.Err(), err)
+	default:
 		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w", line(bin, args), err)
 	}
-	return strings.TrimSpace(string(out)), nil
+}
+
+func Interrupted(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 func StderrTail(err error) string {

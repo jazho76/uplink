@@ -29,3 +29,18 @@ func TestNonInteractiveTimeoutKillsTheWholeGroup(t *testing.T) {
 		t.Errorf("child %d outlived the timeout", pid)
 	}
 }
+
+func TestTimeoutIsVisibleAndAFailureIsNot(t *testing.T) {
+	_, err := NonInteractive(context.Background(), 50*time.Millisecond, "", "sleep", "5")
+	if !Interrupted(err) {
+		t.Errorf("a command past its limit should read as interrupted, got %v", err)
+	}
+	if _, err := NonInteractive(context.Background(), time.Second, "", "false"); err == nil || Interrupted(err) {
+		t.Errorf("a command that fails by itself is not interrupted, got %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := NonInteractive(ctx, time.Second, "", "sleep", "5"); !Interrupted(err) {
+		t.Errorf("a cancelled command should read as interrupted, got %v", err)
+	}
+}

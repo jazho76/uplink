@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
@@ -14,9 +15,10 @@ import (
 
 func listing(t *testing.T, out string, err error) {
 	t.Helper()
-	previous := list
-	t.Cleanup(func() { list = previous })
-	list = func() (string, error) { return out, err }
+	previousList, previousLook := list, lookPath
+	t.Cleanup(func() { list, lookPath = previousList, previousLook })
+	list = func(context.Context) (string, error) { return out, err }
+	lookPath = func(string) (string, error) { return "/usr/bin/tool", nil }
 }
 
 func fixture(t *testing.T) {
@@ -28,13 +30,25 @@ func fixture(t *testing.T) {
 	listing(t, string(out), nil)
 }
 
+func withPing(t *testing.T, err error) {
+	t.Helper()
+	previous := ping
+	t.Cleanup(func() { ping = previous })
+	ping = func(context.Context) error { return err }
+}
+
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := inventory.Merge("", Provider{})
+	merged, err := merge()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return targets
+	return inventory.Targets(merged)
+}
+
+func merge() ([]inventory.Discovered, error) {
+	found, err := Provider{}.Discover(context.Background())
+	return inventory.Merge("", inventory.Found{Source: name, Discovered: found, Err: err})
 }
 
 func TestListsEveryContainerByFirstName(t *testing.T) {
@@ -79,6 +93,7 @@ func TestContainerDefaults(t *testing.T) {
 }
 
 func TestFailuresBelongToTheSource(t *testing.T) {
+	withPing(t, nil)
 	for name, c := range map[string]struct {
 		out string
 		err error
@@ -87,35 +102,9 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"bad json":        {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := inventory.Merge("", Provider{})
+		targets, err := merge()
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "docker: ") {
 			t.Errorf("%s: want no targets and a docker error, got %v and %v", name, targets, err)
-		}
-	}
-}
-
-func TestOnByDefaultOnlyWithARunningDaemon(t *testing.T) {
-	previousLook, previousPing := lookPath, ping
-	t.Cleanup(func() { lookPath, ping = previousLook, previousPing })
-
-	found := func(string) (string, error) { return "/usr/bin/docker", nil }
-	missing := func(string) (string, error) { return "", errors.New("not found") }
-	up := func() error { return nil }
-	down := func() error { return errors.New("cannot connect") }
-
-	for _, c := range []struct {
-		name string
-		look func(string) (string, error)
-		ping func() error
-		want bool
-	}{
-		{"cli and daemon", found, up, true},
-		{"daemon down", found, down, false},
-		{"no cli", missing, up, false},
-	} {
-		lookPath, ping = c.look, c.ping
-		if got := (Provider{}).Default(); got != c.want {
-			t.Errorf("%s: Default() = %v, want %v", c.name, got, c.want)
 		}
 	}
 }
@@ -127,4 +116,37 @@ func containerPreset(t *testing.T) []target.Metric {
 		t.Fatal("the container preset should exist")
 	}
 	return metrics
+}
+
+func TestReportsStatusFromState(t *testing.T) {
+	for state, want := range map[string]target.Status{
+		"running":    target.StatusUp,
+		"exited":     target.StatusDown,
+		"created":    target.StatusDown,
+		"dead":       target.StatusDown,
+		"paused":     target.StatusUnknown,
+		"restarting": target.StatusUnknown,
+	} {
+		listing(t, `{"Names":"web","State":"`+state+`"}`, nil)
+		merged, err := merge()
+		if err != nil || len(merged) != 1 || merged[0].Status != want {
+			t.Errorf("%s: want %s, got %+v and %v", state, want, merged, err)
+		}
+	}
+}
+
+func TestUnavailableWithoutTheCLIOrDaemon(t *testing.T) {
+	listing(t, "", errors.New("cannot connect"))
+	withPing(t, errors.New("cannot connect"))
+	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
+		t.Errorf("a stopped daemon is unavailable, got %v", err)
+	}
+	withPing(t, context.DeadlineExceeded)
+	if _, err := (Provider{}).Discover(context.Background()); errors.Is(err, inventory.ErrUnavailable) {
+		t.Errorf("a slow daemon is a failure, so containers do not vanish, got %v", err)
+	}
+	lookPath = func(string) (string, error) { return "", errors.New("not found") }
+	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
+		t.Errorf("a missing cli is unavailable, got %v", err)
+	}
 }

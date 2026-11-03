@@ -1,10 +1,12 @@
 package local
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 func on(t *testing.T, host string) {
@@ -22,11 +24,15 @@ func on(t *testing.T, host string) {
 
 func TestDescribesThisMachine(t *testing.T) {
 	on(t, "fedora")
-	targets, err := inventory.Merge("", Provider{})
-	if err != nil || len(targets) != 1 {
-		t.Fatalf("want one target, got %v and %v", targets, err)
+	found, err := Provider{}.Discover(context.Background())
+	if err != nil || len(found) != 1 || found[0].Status != target.StatusUp {
+		t.Fatalf("want one live target, got %v and %v", found, err)
 	}
-	got := targets[0]
+	merged, err := inventory.Merge("", inventory.Found{Source: name, Discovered: found})
+	if err != nil || len(merged) != 1 {
+		t.Fatalf("got %v and %v", merged, err)
+	}
+	got := merged[0].Target
 	if got.ID.Key != "localhost" || got.Name != "fedora" || got.Group != "local" {
 		t.Errorf("want key localhost shown as fedora in the local group, got %+v", got)
 	}
@@ -40,8 +46,9 @@ func TestDescribesThisMachine(t *testing.T) {
 
 func TestUnknownHostnameShowsTheKey(t *testing.T) {
 	on(t, "")
-	targets, err := inventory.Merge("", Provider{})
-	if err != nil || len(targets) != 1 || targets[0].Name != "localhost" {
-		t.Errorf("want a target named localhost, got %v and %v", targets, err)
+	found, _ := Provider{}.Discover(context.Background())
+	merged, err := inventory.Merge("", inventory.Found{Source: name, Discovered: found})
+	if err != nil || len(merged) != 1 || merged[0].Target.Name != "localhost" {
+		t.Errorf("want a target named localhost, got %v and %v", merged, err)
 	}
 }

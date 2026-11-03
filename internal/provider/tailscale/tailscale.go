@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -17,17 +18,13 @@ const (
 	name        = "tailscale"
 	group       = "machines"
 	running     = "Running"
-	pingTimeout = 2 * time.Second
 	listTimeout = 5 * time.Second
 )
 
 var (
 	lookPath = exec.LookPath
-	ping     = func() (string, error) {
-		return shell.NonInteractive(context.Background(), pingTimeout, "", "tailscale", "status", "--json", "--peers=false")
-	}
-	list = func() (string, error) {
-		return shell.NonInteractive(context.Background(), listTimeout, "", "tailscale", "status", "--json")
+	list     = func(ctx context.Context) (string, error) {
+		return shell.NonInteractive(ctx, listTimeout, "", "tailscale", "status", "--json")
 	}
 )
 
@@ -44,6 +41,7 @@ type status struct {
 type peer struct {
 	DNSName      string   `json:"DNSName"`
 	OS           string   `json:"OS"`
+	Online       bool     `json:"Online"`
 	TailscaleIPs []string `json:"TailscaleIPs"`
 	Location     any      `json:"Location"`
 }
@@ -52,43 +50,44 @@ type Provider struct{}
 
 func (Provider) Name() string { return name }
 
-func (Provider) Default() bool {
+func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	if _, err := lookPath("tailscale"); err != nil {
-		return false
+		return nil, inventory.ErrUnavailable
 	}
-	out, err := ping()
+	out, err := list(ctx)
 	if err != nil {
-		return false
-	}
-	var s status
-	return json.Unmarshal([]byte(out), &s) == nil && s.BackendState == running
-}
-
-func (Provider) Targets() ([]target.Target, error) {
-	out, err := list()
-	if err != nil {
-		return nil, err
+		if shell.Interrupted(err) {
+			return nil, err
+		}
+		return nil, inventory.ErrUnavailable
 	}
 	return parse(out)
 }
 
-func parse(out string) ([]target.Target, error) {
+func parse(out string) ([]inventory.Discovered, error) {
 	var s status
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		return nil, err
 	}
 	if s.BackendState != running {
-		return nil, fmt.Errorf("not running (state %q)", s.BackendState)
+		return nil, fmt.Errorf("%w: state %q", inventory.ErrUnavailable, s.BackendState)
 	}
 	magicDNS := s.CurrentTailnet != nil && s.CurrentTailnet.MagicDNSEnabled
-	var targets []target.Target
+	var found []inventory.Discovered
 	for _, p := range s.Peer {
 		if t, ok := p.target(magicDNS); ok {
-			targets = append(targets, t)
+			found = append(found, inventory.Discovered{Target: t, Status: p.status()})
 		}
 	}
-	slices.SortFunc(targets, func(a, b target.Target) int { return strings.Compare(a.ID.Key, b.ID.Key) })
-	return targets, nil
+	slices.SortFunc(found, func(a, b inventory.Discovered) int { return strings.Compare(a.Target.ID.Key, b.Target.ID.Key) })
+	return found, nil
+}
+
+func (p peer) status() target.Status {
+	if p.Online {
+		return target.StatusUp
+	}
+	return target.StatusDown
 }
 
 func (p peer) target(magicDNS bool) (target.Target, bool) {
