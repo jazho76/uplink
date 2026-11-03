@@ -22,8 +22,8 @@ func Stream(bin string, args ...string) error {
 	return nil
 }
 
-func NonInteractive(limit time.Duration, stdin, bin string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), limit)
+func NonInteractive(ctx context.Context, limit time.Duration, stdin, bin string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, bin, args...)

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -24,11 +25,11 @@ const (
 var (
 	lookPath = exec.LookPath
 	ping     = func() error {
-		_, err := shell.NonInteractive(pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
+		_, err := shell.NonInteractive(context.Background(), pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
 		return err
 	}
 	list = func() (string, error) {
-		return shell.NonInteractive(listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
+		return shell.NonInteractive(context.Background(), listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
 	}
 )
 

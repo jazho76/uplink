@@ -1,6 +1,7 @@
 package inspection
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -18,11 +19,11 @@ type section struct {
 
 var sections = []section{osSection, statsSection, toolsSection, sessionsSection}
 
-func Run(limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
+func Run(ctx context.Context, limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
 	if len(argv) == 0 {
 		return target.Environment{}, errors.New("inspection: no command to run")
 	}
-	out, err := shell.NonInteractive(limit, script(policy), argv[0], argv[1:]...)
+	out, err := shell.NonInteractive(ctx, limit, script(policy), argv[0], argv[1:]...)
 	if err != nil {
 		return target.Environment{}, err
 	}

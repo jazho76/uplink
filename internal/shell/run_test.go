@@ -1,6 +1,7 @@
 package shell
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 
 func TestNonInteractiveTimeoutKillsTheWholeGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
-	_, err := NonInteractive(200*time.Millisecond, "", "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; wait")
+	_, err := NonInteractive(context.Background(), 200*time.Millisecond, "", "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; wait")
 	if err == nil {
 		t.Fatal("a command past its limit must fail")
 	}

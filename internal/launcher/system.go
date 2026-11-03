@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -22,54 +23,58 @@ const (
 )
 
 type Backend interface {
-	Inspect(target.Target) (target.Environment, error)
-	Status(target.Target) error
-	Up(target.Target) error
-	Down(target.Target) error
-	Logs(t target.Target, lines int) string
+	Inspect(context.Context, target.Target) (target.Environment, error)
+	Status(context.Context, target.Target) error
+	Up(context.Context, target.Target) error
+	Down(context.Context, target.Target) error
+	Logs(ctx context.Context, t target.Target, lines int) string
 }
 
 type System struct{}
 
-func (System) Inspect(t target.Target) (target.Environment, error) {
-	return inspection.Run(probeCeiling, t.Stats, t.Reach.Probe("sh"))
+func (System) Inspect(ctx context.Context, t target.Target) (target.Environment, error) {
+	return inspection.Run(ctx, probeCeiling, t.Stats, t.Reach.Probe("sh"))
 }
 
-func (System) Status(t target.Target) error {
+func (System) Status(ctx context.Context, t target.Target) error {
 	if t.Check != "" {
-		return hook(checkTimeout, t.Check)
+		return hook(ctx, checkTimeout, t.Check)
 	}
 	argv := t.Reach.Probe("true")
-	_, err := shell.NonInteractive(probeCeiling, "", argv[0], argv[1:]...)
+	_, err := shell.NonInteractive(ctx, probeCeiling, "", argv[0], argv[1:]...)
 	return err
 }
 
-func (System) Up(t target.Target) error { return hook(powerTimeout, t.StartCommand()) }
+func (System) Up(ctx context.Context, t target.Target) error {
+	return hook(ctx, powerTimeout, t.StartCommand())
+}
 
-func (System) Down(t target.Target) error { return hook(powerTimeout, t.StopCommand()) }
+func (System) Down(ctx context.Context, t target.Target) error {
+	return hook(ctx, powerTimeout, t.StopCommand())
+}
 
-func hook(limit time.Duration, command string) error {
+func hook(ctx context.Context, limit time.Duration, command string) error {
 	if command == "" {
 		return errors.New("no hook configured")
 	}
-	_, err := shell.NonInteractive(limit, "", "sh", "-c", command)
+	_, err := shell.NonInteractive(ctx, limit, "", "sh", "-c", command)
 	if reason := shell.StderrTail(err); reason != "" {
 		return errors.New(reason)
 	}
 	return err
 }
 
-func (System) Logs(t target.Target, lines int) string {
+func (System) Logs(ctx context.Context, t target.Target, lines int) string {
 	var (
 		out string
 		err error
 	)
 	switch {
 	case t.Logs.Command != "":
-		out, err = shell.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs.Command)
+		out, err = shell.NonInteractive(ctx, logsTimeout, "", "sh", "-c", t.Logs.Command)
 	case t.Logs.Journal:
 		argv := t.Reach.Probe(journalCommand)
-		out, err = shell.NonInteractive(journalTimeout, "", argv[0], argv[1:]...)
+		out, err = shell.NonInteractive(ctx, journalTimeout, "", argv[0], argv[1:]...)
 	default:
 		return ""
 	}

@@ -1,6 +1,7 @@
 package tailscale
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -23,10 +24,10 @@ const (
 var (
 	lookPath = exec.LookPath
 	ping     = func() (string, error) {
-		return shell.NonInteractive(pingTimeout, "", "tailscale", "status", "--json", "--peers=false")
+		return shell.NonInteractive(context.Background(), pingTimeout, "", "tailscale", "status", "--json", "--peers=false")
 	}
 	list = func() (string, error) {
-		return shell.NonInteractive(listTimeout, "", "tailscale", "status", "--json")
+		return shell.NonInteractive(context.Background(), listTimeout, "", "tailscale", "status", "--json")
 	}
 )
 

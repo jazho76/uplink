@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"slices"
@@ -25,7 +26,7 @@ type fakeBackend struct {
 	logCalls    int
 }
 
-func (f *fakeBackend) Inspect(t target.Target) (target.Environment, error) {
+func (f *fakeBackend) Inspect(_ context.Context, t target.Target) (target.Environment, error) {
 	f.inspections++
 	if f.down[t.Name] {
 		return target.Environment{}, errBoom{}
@@ -61,7 +62,7 @@ func linuxReadings(load, cores, used, total float64, uptime time.Duration) []tar
 	}
 }
 
-func (f *fakeBackend) Status(t target.Target) error {
+func (f *fakeBackend) Status(_ context.Context, t target.Target) error {
 	f.statuses++
 	if f.down[t.Name] {
 		return errBoom{}
@@ -69,7 +70,7 @@ func (f *fakeBackend) Status(t target.Target) error {
 	return nil
 }
 
-func (f *fakeBackend) Up(t target.Target) error {
+func (f *fakeBackend) Up(_ context.Context, t target.Target) error {
 	f.hooks = append(f.hooks, "up "+t.Name)
 	if t.Name == "jammed" {
 		return errBoom{}
@@ -78,7 +79,7 @@ func (f *fakeBackend) Up(t target.Target) error {
 	return nil
 }
 
-func (f *fakeBackend) Down(t target.Target) error {
+func (f *fakeBackend) Down(_ context.Context, t target.Target) error {
 	f.hooks = append(f.hooks, "down "+t.Name)
 	if t.Name == "stuck" {
 		return errBoom{}
@@ -87,7 +88,7 @@ func (f *fakeBackend) Down(t target.Target) error {
 	return nil
 }
 
-func (f *fakeBackend) Logs(t target.Target, _ int) string {
+func (f *fakeBackend) Logs(_ context.Context, t target.Target, _ int) string {
 	f.logCalls++
 	return f.logs[t.Name]
 }

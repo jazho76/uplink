@@ -1,6 +1,7 @@
 package lima
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,7 +23,7 @@ const (
 var (
 	lookPath = exec.LookPath
 	list     = func() (string, error) {
-		return shell.NonInteractive(listTimeout, "", "limactl", "list", "--json")
+		return shell.NonInteractive(context.Background(), listTimeout, "", "limactl", "list", "--json")
 	}
 )
 

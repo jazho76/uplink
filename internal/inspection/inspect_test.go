@@ -1,6 +1,7 @@
 package inspection
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -150,7 +151,7 @@ func pathWith(t *testing.T, stubs map[string]string) {
 
 func inspectLocally(t *testing.T) target.Environment {
 	t.Helper()
-	snapshot, err := Run(10*time.Second, target.StatsPolicy{Metrics: []target.Metric{uptime}}, []string{"sh"})
+	snapshot, err := Run(context.Background(), 10*time.Second, target.StatsPolicy{Metrics: []target.Metric{uptime}}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -261,7 +262,7 @@ func TestRunSurvivesAMissingTmux(t *testing.T) {
 func builtinLabels(t *testing.T, kernel string) target.Environment {
 	t.Helper()
 	pathWith(t, map[string]string{"uname": "echo " + kernel, "tmux": tmuxStub})
-	snapshot, err := Run(30*time.Second, target.StatsPolicy{Builtin: true}, []string{"sh"})
+	snapshot, err := Run(context.Background(), 30*time.Second, target.StatsPolicy{Builtin: true}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -400,7 +401,7 @@ func TestLoginPathCannotHideWhatIsAlreadyFound(t *testing.T) {
 }
 
 func TestRunNeedsACommand(t *testing.T) {
-	if _, err := Run(time.Second, target.StatsPolicy{}, nil); err == nil {
+	if _, err := Run(context.Background(), time.Second, target.StatsPolicy{}, nil); err == nil {
 		t.Error("no argv cannot run")
 	}
 }

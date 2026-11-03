@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"slices"
@@ -295,9 +296,9 @@ func logTickCmd(round int) tea.Cmd {
 func checkCmd(backend launcher.Backend, t target.Target, full bool, epoch int) tea.Cmd {
 	return func() tea.Msg {
 		msg := liveMsg{id: t.ID, epoch: epoch, full: full}
-		msg.up = backend.Status(t) == nil
+		msg.up = backend.Status(context.Background(), t) == nil
 		if msg.up && full {
-			snapshot, err := backend.Inspect(t)
+			snapshot, err := backend.Inspect(context.Background(), t)
 			msg.snapshot, msg.inspectOK = snapshot, err == nil
 		}
 		return msg
@@ -376,7 +377,7 @@ type hook struct {
 	command string
 	settled status
 	verb    string
-	run     func(target.Target) error
+	run     func(context.Context, target.Target) error
 }
 
 func (m model) hookFor(t target.Target, action status) hook {
@@ -401,7 +402,7 @@ func (m model) runHook(action status) (tea.Model, tea.Cmd) {
 	m.live[t.ID] = e
 	m.notice = ""
 	run := m.hookFor(t, action).run
-	return m, func() tea.Msg { return hookDoneMsg{id: t.ID, action: action, err: run(t)} }
+	return m, func() tea.Msg { return hookDoneMsg{id: t.ID, action: action, err: run(context.Background(), t)} }
 }
 
 func (m model) targetByID(id target.ID) (target.Target, bool) {
@@ -445,14 +446,14 @@ func (m model) hasLogs(t target.Target) bool {
 
 func peekLogsCmd(backend launcher.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
-		return logPeekMsg{id: t.ID, text: backend.Logs(t, maxLogPeek)}
+		return logPeekMsg{id: t.ID, text: backend.Logs(context.Background(), t, maxLogPeek)}
 	}
 }
 
 func (m model) viewLogsCmd() tea.Cmd {
 	backend, t, round := m.backend, m.logTarget, m.logRound
 	return func() tea.Msg {
-		return logViewMsg{round: round, text: backend.Logs(t, logScreenLines)}
+		return logViewMsg{round: round, text: backend.Logs(context.Background(), t, logScreenLines)}
 	}
 }
 
