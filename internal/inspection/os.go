@@ -5,6 +5,7 @@ import "github.com/jazho76/uplink/internal/target"
 const osTag = "os"
 
 var osSection = section{
+	name: "os",
 	script: func(target.StatsPolicy) string {
 		return `os=$(uname -s 2>/dev/null); echo "` + osTag + ` $os"`
 	},

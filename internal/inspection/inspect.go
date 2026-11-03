@@ -3,6 +3,7 @@ package inspection
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -10,30 +11,47 @@ import (
 	"github.com/jazho76/uplink/internal/target"
 )
 
-const commandTimeout = 5 * time.Second
+const (
+	commandTimeout = 5 * time.Second
+	endTag         = "section"
+)
 
 type section struct {
-	script func(target.StatsPolicy) string
-	parse  func(policy target.StatsPolicy, out string, environment *target.Environment)
+	name    string
+	missing func(*target.MissingSections)
+	script  func(target.StatsPolicy) string
+	parse   func(policy target.StatsPolicy, out string, environment *target.Environment)
 }
 
-var sections = []section{osSection, statsSection, toolsSection, sessionsSection}
+var sections = []section{osSection, toolsSection, sessionsSection, statsSection}
 
 func Run(ctx context.Context, limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
 	if len(argv) == 0 {
 		return target.Environment{}, errors.New("inspection: no command to run")
 	}
 	out, err := shell.NonInteractive(ctx, limit, script(policy), argv[0], argv[1:]...)
-	if err != nil {
+	if err != nil && !anySectionEnded(out) {
 		return target.Environment{}, err
 	}
 	return Parse(out, policy), nil
 }
 
+func anySectionEnded(out string) bool {
+	return slices.ContainsFunc(sections, func(s section) bool { return s.ended(out) })
+}
+
+func (s section) ended(out string) bool {
+	return slices.Contains(strings.Split(strings.ReplaceAll(out, "\r", ""), "\n"), s.endLine())
+}
+
+func (s section) endLine() string {
+	return endTag + " " + s.name + " end"
+}
+
 func script(policy target.StatsPolicy) string {
 	lines := []string{shell.Preamble(commandTimeout)}
 	for _, s := range sections {
-		lines = append(lines, s.script(policy))
+		lines = append(lines, s.script(policy), "echo "+shell.SingleQuote(s.endLine()))
 	}
 	return strings.Join(append(lines, "true"), "\n")
 }
@@ -42,7 +60,12 @@ func Parse(out string, policy target.StatsPolicy) target.Environment {
 	out = strings.ReplaceAll(out, "\r", "")
 	var environment target.Environment
 	for _, s := range sections {
-		s.parse(policy, out, &environment)
+		switch {
+		case s.ended(out):
+			s.parse(policy, out, &environment)
+		case s.missing != nil:
+			s.missing(&environment.Missing)
+		}
 	}
 	return environment
 }

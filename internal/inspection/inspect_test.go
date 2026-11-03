@@ -34,13 +34,15 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+const allEnded = "section os end\nsection tools end\nsection sessions end\nsection stats end\n"
+
 const tmuxStub = `case "$1" in
 list-sessions) echo 'session $0 1 work' ;;
 list-windows) echo 'window $0 2 my editor'; echo 'window $0 1 logs' ;;
 esac`
 
 func TestParseReadsEverySection(t *testing.T) {
-	out := "0 value 42\ntool tmux\nmux tmux session $1 1 main\nmux tmux window $1 2 my editor\n"
+	out := "0 value 42\ntool tmux\nmux tmux session $1 1 main\nmux tmux window $1 2 my editor\n" + allEnded
 	snapshot := Parse(out, target.StatsPolicy{Metrics: []target.Metric{uptime}})
 
 	if len(snapshot.Readings) != 1 || snapshot.Readings[0].Text != "42" {
@@ -56,7 +58,7 @@ func TestParseReadsEverySection(t *testing.T) {
 }
 
 func TestBannerCannotProduceSessions(t *testing.T) {
-	snapshot := Parse("session $0 0 fake\nwindow $0 1 fake\nmux\nmux tmux\n", target.StatsPolicy{})
+	snapshot := Parse("session $0 0 fake\nwindow $0 1 fake\nmux\nmux tmux\n"+allEnded, target.StatsPolicy{})
 	if len(snapshot.Sessions) != 0 {
 		t.Errorf("only rows tagged by the core count, got %+v", snapshot.Sessions)
 	}
@@ -64,7 +66,7 @@ func TestBannerCannotProduceSessions(t *testing.T) {
 
 func TestCoreStripsEscapesFromNames(t *testing.T) {
 	out := "mux tmux session $0 0 \x1b[31mred\x1b[0m\nmux tmux window $0 1 \x1b[32mgreen\x1b[0m\n" +
-		"mux tmux session $1 0 \x1b[31m\x1b[0m\nmux tmux window $0 1 \x1b[0m\n"
+		"mux tmux session $1 0 \x1b[31m\x1b[0m\nmux tmux window $0 1 \x1b[0m\n" + allEnded
 	want := []target.Session{{Tool: "tmux", Name: "red", Windows: []target.Window{{Name: "green", Panes: 1}}}}
 	if got := Parse(out, target.StatsPolicy{}).Sessions; !reflect.DeepEqual(got, want) {
 		t.Errorf("a target must not be able to style the dashboard, want %+v, got %+v", want, got)
@@ -131,6 +133,7 @@ func TestFailingSectionDoesNotFailTheInspection(t *testing.T) {
 	previous := sections
 	t.Cleanup(func() { sections = previous })
 	sections = append(slices.Clone(previous), section{
+		name:   "failing",
 		script: func(target.StatsPolicy) string { return "false" },
 		parse:  func(target.StatsPolicy, string, *target.Environment) {},
 	})
@@ -331,7 +334,7 @@ func TestDeclaredStatsIgnoreTheKernel(t *testing.T) {
 }
 
 func TestBannerCannotOverrideTheKernel(t *testing.T) {
-	snapshot := Parse("os Linux and friends\nos Darwin\n", target.StatsPolicy{Builtin: true})
+	snapshot := Parse("os Linux and friends\nos Darwin\n"+allEnded, target.StatsPolicy{Builtin: true})
 	if snapshot.OS != "Darwin" {
 		t.Errorf("the script's line comes last and wins, got %q", snapshot.OS)
 	}
@@ -407,15 +410,62 @@ func TestRunNeedsACommand(t *testing.T) {
 }
 
 func TestOnlyKnownToolsAreReported(t *testing.T) {
-	got := Parse("tool tmux\ntool \x1b[31mevil\ntool journalctl\n", target.StatsPolicy{}).Tools
+	got := Parse("tool tmux\ntool \x1b[31mevil\ntool journalctl\n"+allEnded, target.StatsPolicy{}).Tools
 	if want := []string{"tmux", target.ToolJournal}; !slices.Equal(got, want) {
 		t.Errorf("want %q, got %q", want, got)
 	}
 }
 
 func TestCarriageReturnsDoNotConfuseParsing(t *testing.T) {
-	got := Parse("tool tmux\r\nos Linux\r\n", target.StatsPolicy{})
+	got := Parse("tool tmux\r\nos Linux\r\nsection os end\r\nsection tools end\r\n", target.StatsPolicy{})
 	if got.OS != "Linux" || !slices.Equal(got.Tools, []string{"tmux"}) {
 		t.Errorf("a pty adds carriage returns, got %+v", got)
+	}
+}
+
+func TestSectionsWithoutAnEndAreMissing(t *testing.T) {
+	got := Parse("os Linux\nsection os end\ntool zellij\nsection tools end\nmux tmux session $0 0 half\n", target.StatsPolicy{Metrics: []target.Metric{uptime}})
+	if got.Missing.Tools {
+		t.Errorf("tools finished, got %+v", got.Missing)
+	}
+	if !got.Missing.Sessions || !got.Missing.Stats {
+		t.Errorf("sessions and stats did not, got %+v", got.Missing)
+	}
+	if len(got.Sessions) != 0 || len(got.Readings) != 0 {
+		t.Errorf("an unfinished section reports nothing, got %+v", got)
+	}
+	if !slices.Equal(got.Tools, []string{"zellij"}) {
+		t.Errorf("got %q", got.Tools)
+	}
+}
+
+func TestMarkerMustBeAWholeLine(t *testing.T) {
+	got := Parse("0 value section stats end\n", target.StatsPolicy{Metrics: []target.Metric{uptime}})
+	if !got.Missing.Stats {
+		t.Errorf("a metric printing the marker must not end the section, got %+v", got.Missing)
+	}
+}
+
+func TestSlowStatsKeepEverythingElse(t *testing.T) {
+	pathWith(t, map[string]string{"tmux": tmuxStub})
+	slow := []target.Metric{}
+	for range 4 {
+		slow = append(slow, target.Metric{Type: target.TypeText, Label: "slow", Value: "sleep 30"})
+	}
+	got, err := Run(context.Background(), 2*time.Second, target.StatsPolicy{Metrics: slow}, []string{"sh"})
+	if err != nil {
+		t.Fatalf("what finished is an answer, got %v", err)
+	}
+	if !got.Missing.Stats || len(got.Readings) != 0 {
+		t.Errorf("stats did not finish, got %+v", got)
+	}
+	if got.Missing.Tools || got.Missing.Sessions || !slices.Contains(got.Tools, "tmux") || len(got.Sessions) != 1 {
+		t.Errorf("tools and sessions finished first, got %+v", got)
+	}
+}
+
+func TestNothingFinishedIsAnError(t *testing.T) {
+	if _, err := Run(context.Background(), time.Second, target.StatsPolicy{}, []string{"sh", "-c", "echo banner; exit 255"}); err == nil {
+		t.Error("nothing came back, so it failed")
 	}
 }

@@ -29,6 +29,8 @@ const (
 var (
 	errDown  = errors.New("target is not up")
 	errStale = errors.New("stats changed")
+
+	errIncomplete = errors.New("inspection did not finish")
 )
 
 type Operation string
@@ -647,12 +649,20 @@ func (s *State) inspected(now time.Time, e Inspected) {
 		if e.Err != nil {
 			current.failInspection(e.Err, now)
 		} else {
-			current.Stats.Observe(e.Env.Readings, now)
-			current.Tools.Observe(e.Env.Tools, now)
-			current.Sessions.Observe(e.Env.Sessions, now)
+			record(&current.Stats, e.Env.Readings, e.Env.Missing.Stats, now)
+			record(&current.Tools, e.Env.Tools, e.Env.Missing.Tools, now)
+			record(&current.Sessions, e.Env.Sessions, e.Env.Missing.Sessions, now)
 		}
 	}
 	s.entries[e.ID] = current
+}
+
+func record[T any](fact *target.Fact[T], value T, missing bool, now time.Time) {
+	if missing {
+		fact.Fail(errIncomplete, now)
+		return
+	}
+	fact.Observe(value, now)
 }
 
 func (s *State) discover(now time.Time, name string) Effect {

@@ -566,3 +566,15 @@ func TestNaNFromATargetShowsAQuestionMark(t *testing.T) {
 		t.Error("the dashboard must survive it")
 	}
 }
+
+func TestMissingStatsShowUnavailableNotNothing(t *testing.T) {
+	box := vm("box")
+	box.Stats = target.StatsPolicy{Builtin: true}
+	m, _ := newTestModel()
+	m = focus(sized(withTargets(m, box)), "box")
+	m = reported(m, configID("box"), target.Environment{Readings: []target.Reading{reading(linuxMetrics[0], 1, 4)}})
+	m = reported(m, configID("box"), target.Environment{Missing: target.MissingSections{Stats: true}})
+	if got := preview(m); !strings.Contains(got, liveRule) || !strings.Contains(got, "unavailable") {
+		t.Errorf("the block stays and says so, got:\n%s", got)
+	}
+}

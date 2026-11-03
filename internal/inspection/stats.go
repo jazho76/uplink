@@ -10,6 +10,8 @@ import (
 var builtinKernels = []string{"Linux", "Darwin"}
 
 var statsSection = section{
+	name:    "stats",
+	missing: func(missing *target.MissingSections) { missing.Stats = true },
 	script: func(policy target.StatsPolicy) string {
 		if policy.Builtin {
 			return builtinStatsScript()

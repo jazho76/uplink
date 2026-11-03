@@ -7,6 +7,13 @@ type Environment struct {
 	Readings []Reading
 	Tools    []string
 	Sessions []Session
+	Missing  MissingSections
+}
+
+type MissingSections struct {
+	Stats    bool
+	Tools    bool
+	Sessions bool
 }
 
 type Session struct {

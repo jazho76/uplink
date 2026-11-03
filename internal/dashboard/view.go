@@ -148,8 +148,8 @@ func (m model) showsLive(t target.Target) bool {
 		return len(t.Stats.Metrics) > 0
 	}
 	stats := m.state.Observation(t.ID).Stats
-	if m.state.Observation(t.ID).Tools.Known {
-		return len(stats.Value) > 0
+	if stats.Known {
+		return len(stats.Value) > 0 || stats.Err != nil
 	}
 	return stats.At.IsZero()
 }

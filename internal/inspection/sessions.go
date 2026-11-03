@@ -12,6 +12,8 @@ import (
 const multiplexerTag = "mux"
 
 var sessionsSection = section{
+	name:    "sessions",
+	missing: func(missing *target.MissingSections) { missing.Sessions = true },
 	script: func(target.StatsPolicy) string {
 		blocks := make([]string, len(multiplexer.All))
 		for i, m := range multiplexer.All {

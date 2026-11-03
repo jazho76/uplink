@@ -794,3 +794,36 @@ func TestNoticeIsOneCleanLine(t *testing.T) {
 		t.Errorf("problems are cleaned too, got %q", errs)
 	}
 }
+
+func TestMissingSectionsKeepWhatWasKnown(t *testing.T) {
+	vm := box("vm")
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{
+		Readings: []target.Reading{{}},
+		Tools:    []string{"tmux"},
+		Sessions: []target.Session{{Name: "s"}},
+	}})
+	later := clock.Add(time.Minute)
+	state, _ = state.Apply(later, Inspected{ID: vm.ID, Env: target.Environment{
+		Tools:    []string{"zellij"},
+		Sessions: []target.Session{{Name: "new"}},
+		Missing:  target.MissingSections{Stats: true},
+	}})
+	got := state.Observation(vm.ID)
+	if got.Stats.Current() || !got.Stats.Known || len(got.Stats.Value) != 1 || got.Stats.At != later {
+		t.Errorf("stats keep their last value, marked not current, got %+v", got.Stats)
+	}
+	if !got.Tools.Current() || got.Tools.Value[0] != "zellij" || got.Sessions.Value[0].Name != "new" {
+		t.Errorf("finished sections land, got %+v", got)
+	}
+}
+
+func TestToolsThatNeverFinishedStayUnknown(t *testing.T) {
+	vm := box("vm")
+	vm.Modes = []target.Mode{{Name: "tmux", Argv: []string{"sh"}, Requires: "tmux"}, {Name: "shell", Argv: []string{"sh"}}}
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{Missing: target.MissingSections{Tools: true}}})
+	if got := state.Mode().Name; got != "tmux" {
+		t.Errorf("not finishing is not the same as tmux being missing, got %q", got)
+	}
+}

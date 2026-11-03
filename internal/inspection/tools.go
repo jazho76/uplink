@@ -15,6 +15,8 @@ func tools() []string {
 }
 
 var toolsSection = section{
+	name:    "tools",
+	missing: func(missing *target.MissingSections) { missing.Tools = true },
 	script: func(target.StatsPolicy) string {
 		return `for tool in ` + strings.Join(tools(), " ") + `; do command -v "$tool" >/dev/null 2>&1 && echo "` + toolTag + ` $tool"; done`
 	},
