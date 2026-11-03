@@ -1,9 +1,11 @@
 package target
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIDsPrintQualifiedOutsideConfig(t *testing.T) {
@@ -49,10 +51,10 @@ func TestAvailableModesFollowInspection(t *testing.T) {
 		}
 		return strings.Join(out, " ")
 	}
-	if got := names(AvailableModes(box, false, nil)); got != "tmux shell" {
+	if got := names(AvailableModes(box, Fact[[]string]{})); got != "tmux shell" {
 		t.Errorf("before inspection the default is assumed, got %q", got)
 	}
-	if got := names(AvailableModes(box, true, []string{"zellij"})); got != "zellij shell" {
+	if got := names(AvailableModes(box, Fact[[]string]{Value: []string{"zellij"}, Known: true})); got != "zellij shell" {
 		t.Errorf("after inspection only what exists, got %q", got)
 	}
 }
@@ -100,5 +102,22 @@ func TestMetricValidate(t *testing.T) {
 		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%+v: want %q, got %v", m, want, err)
 		}
+	}
+}
+
+func TestFactKeepsItsValueThroughFailure(t *testing.T) {
+	var fact Fact[string]
+	at := time.Unix(100, 0)
+	if fact.Current() {
+		t.Error("an unobserved fact is not current")
+	}
+	fact.Observe("v", at)
+	if !fact.Current() || fact.Value != "v" || fact.At != at {
+		t.Errorf("got %+v", fact)
+	}
+	later := at.Add(time.Second)
+	fact.Fail(errors.New("boom"), later)
+	if fact.Current() || !fact.Known || fact.Value != "v" || fact.At != later {
+		t.Errorf("a failure keeps the last value and is not current, got %+v", fact)
 	}
 }

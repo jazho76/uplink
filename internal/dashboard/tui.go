@@ -189,7 +189,7 @@ func (m model) selected() item {
 
 func (m model) modes(t target.Target) []target.Mode {
 	e := m.live[t.ID]
-	return target.AvailableModes(t, e.inspected, e.snapshot.Tools)
+	return target.AvailableModes(t, target.Fact[[]string]{Value: e.snapshot.Tools, Known: e.inspected})
 }
 
 func (m model) modeIndex() int {

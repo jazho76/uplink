@@ -109,11 +109,11 @@ type Mode struct {
 	Requires    string
 }
 
-func AvailableModes(t Target, inspected bool, tools []string) []Mode {
+func AvailableModes(t Target, tools Fact[[]string]) []Mode {
 	var modes []Mode
 	for i, mode := range t.Modes {
-		found := inspected && slices.Contains(tools, mode.Requires)
-		assumedDefault := !inspected && i == 0
+		found := tools.Known && slices.Contains(tools.Value, mode.Requires)
+		assumedDefault := !tools.Known && i == 0
 		if mode.Requires == "" || found || assumedDefault {
 			modes = append(modes, mode)
 		}
