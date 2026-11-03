@@ -43,7 +43,7 @@ func (s *State) peekSelected() []Effect {
 }
 
 func (s State) HasLogs(t target.Target) bool {
-	logs := s.resolved(t).Logs
+	logs := s.derived(t).Logs
 	return logs.Command != "" && (logs.Where == target.InHost || s.Observation(t.ID).Status == target.StatusUp)
 }
 

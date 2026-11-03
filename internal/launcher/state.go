@@ -146,11 +146,11 @@ func (s State) targetByID(id target.ID) (target.Target, bool) {
 	if !ok {
 		return target.Target{}, false
 	}
-	return s.resolved(t), true
+	return s.derived(t), true
 }
 
-func (s State) resolved(t target.Target) target.Target {
-	return t.Resolve(s.entries[t.ID].Profile.Value)
+func (s State) derived(t target.Target) target.Target {
+	return t.Derived(s.entries[t.ID].Profile.Value)
 }
 
 func (s State) selectedTarget() (target.Target, bool) {

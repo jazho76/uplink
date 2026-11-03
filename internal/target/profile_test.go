@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestResolveFillsOnlyDetectedMetrics(t *testing.T) {
+func TestDerivedFillsOnlyDetectedMetrics(t *testing.T) {
 	declared := []Metric{{Type: TypeText, Label: "mine", Value: "x"}}
 	linux := Profile{OS: "Linux"}
 	for name, c := range map[string]struct {
@@ -20,7 +20,7 @@ func TestResolveFillsOnlyDetectedMetrics(t *testing.T) {
 		"declared stays":  {declared, linux, declared},
 		"stats off stays": {[]Metric{}, linux, []Metric{}},
 	} {
-		got := Target{Metrics: c.metrics}.Resolve(c.profile)
+		got := Target{Metrics: c.metrics}.Derived(c.profile)
 		if !slices.Equal(got.Metrics, c.want) {
 			t.Errorf("%s: want %+v, got %+v", name, c.want, got.Metrics)
 		}
@@ -28,7 +28,7 @@ func TestResolveFillsOnlyDetectedMetrics(t *testing.T) {
 			t.Errorf("%s: a known OS settles it, got nil", name)
 		}
 	}
-	if got := (Target{}).Resolve(Profile{}); !got.DetectsMetrics() {
+	if got := (Target{}).Derived(Profile{}); !got.DetectsMetrics() {
 		t.Errorf("no profile yet stays undetected, got %+v", got.Metrics)
 	}
 }

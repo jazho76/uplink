@@ -2,7 +2,7 @@ package target
 
 import "testing"
 
-func TestResolveFillsOnlyDetectedLogs(t *testing.T) {
+func TestDerivedFillsOnlyDetectedLogs(t *testing.T) {
 	journal := Profile{LogSystem: LogSystemJournal}
 	unified := Profile{LogSystem: LogSystemUnified}
 	for name, c := range map[string]struct {
@@ -19,15 +19,15 @@ func TestResolveFillsOnlyDetectedLogs(t *testing.T) {
 		"no logs":          {LogSource{}, journal, ""},
 	} {
 		declared := Target{Logs: c.logs}
-		resolved := declared.Resolve(c.profile)
-		if resolved.Logs.Command != c.want || resolved.Logs.Where != c.logs.Where {
-			t.Errorf("%s: want %q, got %+v", name, c.want, resolved.Logs)
+		derived := declared.Derived(c.profile)
+		if derived.Logs.Command != c.want || derived.Logs.Where != c.logs.Where {
+			t.Errorf("%s: want %q, got %+v", name, c.want, derived.Logs)
 		}
 		if declared.Logs != c.logs {
 			t.Errorf("%s: the declaration must not change, got %+v", name, declared.Logs)
 		}
-		if again := resolved.Resolve(unified); again.Logs != resolved.Logs && c.want != "" {
-			t.Errorf("%s: resolving twice should change nothing, got %+v", name, again.Logs)
+		if again := derived.Derived(unified); again.Logs != derived.Logs && c.want != "" {
+			t.Errorf("%s: deriving twice should change nothing, got %+v", name, again.Logs)
 		}
 	}
 }

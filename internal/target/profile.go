@@ -7,7 +7,7 @@ type Profile struct {
 	LogSystem LogSystem
 }
 
-func (t Target) Resolve(p Profile) Target {
+func (t Target) Derived(p Profile) Target {
 	if t.Logs.Detected() {
 		t.Logs.Command = logReaders[p.LogSystem]
 	}
