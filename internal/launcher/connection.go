@@ -1,9 +1,7 @@
 package launcher
 
 import (
-	"errors"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"github.com/jazho76/uplink/internal/target"
@@ -104,13 +102,12 @@ func (s *State) connectionEnded(now time.Time, e ConnectionEnded) []Effect {
 }
 
 func connectionNotice(e ConnectionEnded) string {
-	var exitErr *exec.ExitError
 	switch {
-	case e.Err == nil:
-		return ""
-	case errors.As(e.Err, &exitErr):
-		return fmt.Sprintf("%s: session ended with exit %d", e.Name, exitErr.ExitCode())
-	default:
+	case e.Err != nil:
 		return fmt.Sprintf("%s: %v", e.Name, e.Err)
+	case e.ExitCode != 0:
+		return fmt.Sprintf("%s: session ended with exit %d", e.Name, e.ExitCode)
+	default:
+		return ""
 	}
 }

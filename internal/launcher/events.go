@@ -24,8 +24,9 @@ type (
 	ConnectRequested    struct{}
 	ConnectionCancelled struct{}
 	ConnectionEnded     struct {
-		Name string
-		Err  error
+		Name     string
+		ExitCode int
+		Err      error
 	}
 
 	LogsOpened struct{}

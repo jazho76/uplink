@@ -2,7 +2,6 @@ package launcher
 
 import (
 	"errors"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -72,14 +71,16 @@ func TestConnectionWalksItsPhases(t *testing.T) {
 }
 
 func TestConnectionEndReportsWithoutBlame(t *testing.T) {
-	exitErr := exec.Command("sh", "-c", "exit 3").Run()
-	for err, want := range map[error]string{
-		nil:                     "",
-		exitErr:                 "forge: session ended with exit 3",
-		errors.New("not found"): "forge: not found",
+	for _, c := range []struct {
+		ended ConnectionEnded
+		want  string
+	}{
+		{ConnectionEnded{Name: "forge"}, ""},
+		{ConnectionEnded{Name: "forge", ExitCode: 3}, "forge: session ended with exit 3"},
+		{ConnectionEnded{Name: "forge", Err: errors.New("not found")}, "forge: not found"},
 	} {
-		if got := connectionNotice(ConnectionEnded{Name: "forge", Err: err}); got != want {
-			t.Errorf("connectionNotice(%v) = %q, want %q", err, got, want)
+		if got := connectionNotice(c.ended); got != c.want {
+			t.Errorf("connectionNotice(%+v) = %q, want %q", c.ended, got, c.want)
 		}
 	}
 }

@@ -105,7 +105,7 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 		err  error
 		want string
 	}{{nil, ""}, {exitErr, "forge: session ended with exit 255"}} {
-		next, cmd := m.Update(launcher.ConnectionEnded{Name: "forge", Err: c.err})
+		next, cmd := m.Update(connectionEnded("forge", c.err))
 		m = next.(model)
 		if cmd != nil {
 			if _, quit := cmd().(tea.QuitMsg); quit {

@@ -114,6 +114,14 @@ func (m model) updateLogs(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func connectionEnded(name string, err error) launcher.ConnectionEnded {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return launcher.ConnectionEnded{Name: name, ExitCode: exitErr.ExitCode()}
+	}
+	return launcher.ConnectionEnded{Name: name, Err: err}
+}
+
 func configEdited(err error) tea.Msg {
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) {

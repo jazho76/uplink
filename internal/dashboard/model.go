@@ -205,7 +205,7 @@ func (m model) command(effect launcher.Effect) tea.Cmd {
 	switch e := effect.(type) {
 	case launcher.Connect:
 		return m.exec(exec.Command(e.Argv[0], e.Argv[1:]...), func(err error) tea.Msg {
-			return launcher.ConnectionEnded{Name: e.Name, Err: err}
+			return connectionEnded(e.Name, err)
 		})
 	case launcher.ScheduleLogTick:
 		return tea.Tick(launcher.LogInterval, func(time.Time) tea.Msg { return launcher.LogTicked{Round: e.Round} })
