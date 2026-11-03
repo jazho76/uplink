@@ -67,6 +67,7 @@ type State struct {
 	selected          target.ID
 	modeName          string
 	notice            string
+	problems          error
 	connectAfterStart target.ID
 	reloadGeneration  int
 	peek              logPeek
@@ -77,14 +78,14 @@ type State struct {
 }
 
 func New(targets []target.Target, problems error) State {
-	return State{targets: targets, entries: map[target.ID]entry{}, notice: problemsNotice(problems)}
+	return State{targets: targets, entries: map[target.ID]entry{}, problems: problems}
 }
 
 func (s State) Targets() []target.Target { return s.targets }
 
 func (s State) Selection() target.ID { return s.selected }
 
-func (s State) Notice() string { return s.notice }
+func (s State) Notice() string { return cmp.Or(s.notice, problemsNotice(s.problems)) }
 
 func (s State) Observation(id target.ID) Observation {
 	observation := s.entries[id].Observation
@@ -446,7 +447,7 @@ func (s *State) reloaded(now time.Time, e Reloaded) []Effect {
 	}
 	s.targets, s.selected, s.modeName = e.Targets, e.Selected, ""
 	s.markStale(s.selected)
-	s.notice = cmp.Or(e.Notice, problemsNotice(e.Problems))
+	s.notice, s.problems = e.Notice, e.Problems
 	return append(s.refreshSelected(now), s.checkWatched(now)...)
 }
 

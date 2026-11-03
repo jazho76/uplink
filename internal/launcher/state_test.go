@@ -336,3 +336,19 @@ func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
 		t.Errorf("a reload must not leave the selection on readings from the old config, got %+v", effects)
 	}
 }
+
+func TestProblemsSurviveNoticesComingAndGoing(t *testing.T) {
+	vm := box("vm")
+	state := New([]target.Target{vm}, errors.New("target \"x\": broken")).Select(vm.ID)
+	if got := state.Notice(); got != `config: target "x": broken` {
+		t.Fatalf("a problem shows when nothing else does, got %q", got)
+	}
+	state, _ = state.Apply(clock, NoticeSet{Text: "hello"})
+	if got := state.Notice(); got != "hello" {
+		t.Errorf("a notice goes first, got %q", got)
+	}
+	state, _ = state.Apply(clock, ConnectionEnded{})
+	if got := state.Notice(); got != `config: target "x": broken` {
+		t.Errorf("clearing a notice must not lose the problem, got %q", got)
+	}
+}
