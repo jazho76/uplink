@@ -185,14 +185,18 @@ func TestFailedStartDoesNotConnect(t *testing.T) {
 	}
 }
 
-func TestFinishedStartForgetsThePendingConnection(t *testing.T) {
+func TestConnectionWalksItsPhases(t *testing.T) {
 	vm := box("vm")
 	vm.Power = &target.Power{Up: "start"}
 	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
 	state, _ = state.Apply(clock, ConnectRequested{})
 	state, _ = state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
-	if state.connectAfterStart != (target.ID{}) {
-		t.Errorf("got %q", state.connectAfterStart)
+	if got := state.Connection().Phase; got != PhaseEntering {
+		t.Errorf("a finished start enters, got %q", got)
+	}
+	state, _ = state.Apply(clock, ConnectionEnded{})
+	if got := state.Connection(); got != (Connection{}) {
+		t.Errorf("returning clears the slot, got %+v", got)
 	}
 	_, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
 	for _, effect := range effects {
@@ -600,5 +604,44 @@ func TestFailedDiscoveryExplainsTheUnknown(t *testing.T) {
 	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Err: errors.New("limactl broke")})
 	if got := state.Observation(vm.ID); got.Status != target.StatusUnknown || got.Reason != "limactl broke" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+func TestEnteringIgnoresCancelsAndASecondEnter(t *testing.T) {
+	vm, other := box("vm"), box("other")
+	state, effects := selected(vm, other).Apply(clock, ConnectRequested{})
+	if countEffects[Connect](effects) != 1 || state.Connection().Phase != PhaseEntering {
+		t.Fatalf("got %+v and %+v", effects, state.Connection())
+	}
+	if _, effects := state.Apply(clock, ConnectRequested{}); countEffects[Connect](effects) != 0 {
+		t.Errorf("a queued second enter must not start a second session, got %+v", effects)
+	}
+	moved, _ := state.Apply(clock, Selected{ID: other.ID})
+	if got := moved.Connection().Phase; got != PhaseEntering {
+		t.Errorf("a session already handed over cannot be cancelled, got %q", got)
+	}
+}
+
+func TestMovingAwayCancelsAStart(t *testing.T) {
+	vm, other := box("vm"), box("other")
+	vm.Power = &target.Power{Up: "start"}
+	state, _ := selected(vm, other).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
+	state, _ = state.Apply(clock, ConnectRequested{})
+	state, _ = state.Apply(clock, Selected{ID: other.ID})
+	if got := state.Connection(); got != (Connection{}) {
+		t.Fatalf("got %+v", got)
+	}
+	_, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
+	if countEffects[Connect](effects) != 0 {
+		t.Errorf("a start finishing elsewhere connects nothing, got %+v", effects)
+	}
+}
+
+func TestNothingToRunClearsTheSlot(t *testing.T) {
+	vm := box("vm")
+	vm.Modes = nil
+	state, effects := selected(vm).Apply(clock, ConnectRequested{})
+	if len(effects) != 0 || state.Connection() != (Connection{}) {
+		t.Errorf("got %+v and %+v", effects, state.Connection())
 	}
 }

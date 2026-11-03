@@ -37,6 +37,19 @@ const (
 	OperationStopping Operation = "stopping"
 )
 
+type ConnectionPhase string
+
+const (
+	PhaseNone     ConnectionPhase = ""
+	PhaseStarting ConnectionPhase = "starting"
+	PhaseEntering ConnectionPhase = "entering"
+)
+
+type Connection struct {
+	Target target.ID
+	Phase  ConnectionPhase
+}
+
 type Observation struct {
 	Status    target.Status
 	Reason    string
@@ -71,22 +84,22 @@ type discovery struct {
 }
 
 type State struct {
-	targets           []target.Target
-	entries           map[target.ID]entry
-	inventory         inventory.Inventory
-	discoveries       map[string]discovery
-	loading           bool
-	selected          target.ID
-	modeName          string
-	notice            string
-	problems          error
-	connectAfterStart target.ID
-	generation        int
-	peek              logPeek
-	logOpen           bool
-	logRound          int
-	logTarget         target.Target
-	logText           string
+	targets     []target.Target
+	entries     map[target.ID]entry
+	inventory   inventory.Inventory
+	discoveries map[string]discovery
+	loading     bool
+	selected    target.ID
+	modeName    string
+	notice      string
+	problems    error
+	connection  Connection
+	generation  int
+	peek        logPeek
+	logOpen     bool
+	logRound    int
+	logTarget   target.Target
+	logText     string
 }
 
 func New(targets []target.Target, problems error) State {
@@ -96,6 +109,8 @@ func New(targets []target.Target, problems error) State {
 func (s State) Targets() []target.Target { return s.targets }
 
 func (s State) Selection() target.ID { return s.selected }
+
+func (s State) Connection() Connection { return s.connection }
 
 func (s State) Notice() string { return cmp.Or(s.notice, problemsNotice(s.problems)) }
 
@@ -143,6 +158,9 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 		return append(effects, s.dueDiscoveries(now)...)
 
 	case Selected:
+		if s.connection.Target != e.ID {
+			s.cancelConnection()
+		}
 		s.selected, s.modeName = e.ID, ""
 		return s.refreshSelected(now)
 
@@ -159,6 +177,9 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 		return s.requestConnection()
 
 	case ConnectionEnded:
+		if s.connection.Phase == PhaseEntering {
+			s.connection = Connection{}
+		}
 		s.notice = connectionNotice(e)
 		s.markStale(s.selected)
 		return append(s.rediscover(now, s.selected.Source), s.refreshSelected(now)...)
@@ -405,10 +426,10 @@ func (s *State) requestPower(operation Operation) []Effect {
 }
 
 func (s *State) powerDone(now time.Time, e PowerDone) []Effect {
-	connect := e.Operation == OperationStarting && e.Err == nil &&
-		s.connectAfterStart == e.ID && s.selected == e.ID
-	if s.connectAfterStart == e.ID {
-		s.connectAfterStart = target.ID{}
+	started := s.connection == Connection{Target: e.ID, Phase: PhaseStarting}
+	connect := started && e.Operation == OperationStarting && e.Err == nil
+	if started {
+		s.connection = Connection{}
 	}
 	current := s.entries[e.ID]
 	current.Operation = OperationNone
@@ -420,7 +441,7 @@ func (s *State) powerDone(now time.Time, e PowerDone) []Effect {
 	}
 	effects := s.recheck(now, e.ID)
 	if connect {
-		effects = append(effects, s.connection()...)
+		effects = append(effects, s.enter(e.ID)...)
 	}
 	return effects
 }
@@ -434,7 +455,7 @@ func verb(operation Operation) string {
 
 func (s *State) requestConnection() []Effect {
 	t, ok := s.selectedTarget()
-	if !ok {
+	if !ok || s.connection.Phase != PhaseNone {
 		return nil
 	}
 	observation := s.Observation(t.ID)
@@ -442,19 +463,27 @@ func (s *State) requestConnection() []Effect {
 	case observation.Operation != OperationNone:
 		return nil
 	case observation.Status == target.StatusDown && t.StartCommand() != "":
-		s.connectAfterStart = t.ID
+		s.connection = Connection{Target: t.ID, Phase: PhaseStarting}
 		return s.requestPower(OperationStarting)
 	}
-	return s.connection()
+	return s.enter(t.ID)
 }
 
-func (s State) connection() []Effect {
+func (s *State) enter(id target.ID) []Effect {
 	mode := s.Mode()
-	t, ok := s.selectedTarget()
+	t, ok := s.targetByID(id)
 	if !ok || len(mode.Argv) == 0 {
+		s.connection = Connection{}
 		return nil
 	}
+	s.connection = Connection{Target: id, Phase: PhaseEntering}
 	return []Effect{Connect{Name: t.Name, Argv: mode.Argv}}
+}
+
+func (s *State) cancelConnection() {
+	if s.connection.Phase != PhaseEntering {
+		s.connection = Connection{}
+	}
 }
 
 func connectionNotice(e ConnectionEnded) string {

@@ -818,7 +818,8 @@ func TestEnterRunsTheSelectedMode(t *testing.T) {
 	m = focus(sized(m), "forge").withSelectionRefreshed()
 
 	m = key(m, "enter")
-	m = key(key(m, "tab"), "enter")
+	next, _ := m.Update(launcher.ConnectionEnded{})
+	m = key(key(next.(model), "tab"), "enter")
 	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-forge tmux, ssh lima-forge" {
 		t.Errorf("enter runs the selected mode's argv, ran %q", got)
 	}
@@ -848,7 +849,10 @@ func TestMovingAwayCancelsTheConnect(t *testing.T) {
 	m = downed(sized(withTargets(m, startable("nakama"), vm("plain"))), backend, "nakama")
 
 	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = focus(next.(model), "plain")
+	m = key(next.(model), "down")
+	if got := m.selected().name(); got != "plain" {
+		t.Fatalf("want plain selected, got %q", got)
+	}
 	m = finishHook(m, start)
 	if len(backend.sessions) != 0 {
 		t.Errorf("a start finishing elsewhere connects nothing, ran %v", backend.sessions)
