@@ -407,30 +407,6 @@ func TestNoLogsOffersNothing(t *testing.T) {
 	}
 }
 
-func TestOnlyOneLogPeekRunsAtATime(t *testing.T) {
-	m, _ := newTestModel()
-	m = focus(sized(m), "forge")
-	if peekCmd(&m) == nil {
-		t.Fatal("the first peek should go out")
-	}
-	if peekCmd(&m) != nil {
-		t.Error("a slow host must not stack up peeks")
-	}
-
-	next, _ := m.Update(launcher.LogsPeeked{ID: configID("forge")})
-	m = next.(model)
-	if peekCmd(&m) == nil {
-		t.Error("the next peek may go out once the last one lands")
-	}
-
-	m = focus(m, "tokyo")
-	next, _ = m.Update(launcher.LogsPeeked{ID: configID("forge")})
-	m = focus(next.(model), "forge")
-	if peekCmd(&m) == nil {
-		t.Error("a result landing after moving away still frees its target")
-	}
-}
-
 func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 	gauges := []gaugeRow{{label: "memory", fraction: 0.5, reading: "7.6/31GiB"}}
 

@@ -198,36 +198,6 @@ func peekCmd(m *model) tea.Cmd {
 	return m.perform(only[launcher.PeekLogs](effects))
 }
 
-func peekIfStaleCmd(m *model) tea.Cmd {
-	state, effects := m.state.Apply(time.Now(), launcher.Selected{ID: m.selected().id()})
-	m.state = state
-	return m.perform(only[launcher.PeekLogs](effects))
-}
-
-func watchCmd(m *model) tea.Cmd {
-	state, effects := m.state.Apply(time.Now(), launcher.Ticked{})
-	m.state = state
-	var watched []launcher.Effect
-	for _, effect := range only[launcher.Check](effects) {
-		if !effect.(launcher.Check).Full {
-			watched = append(watched, effect)
-		}
-	}
-	return m.perform(watched)
-}
-
-func probeIfStale(m *model, now time.Time) bool {
-	state, effects := m.state.Apply(now, launcher.Selected{ID: m.selected().id()})
-	m.state = state
-	return len(only[launcher.Check](effects)) > 0
-}
-
-func probeOnTick(m *model) bool {
-	state, effects := m.state.Apply(time.Now(), launcher.Ticked{})
-	m.state = state
-	return len(only[launcher.Check](effects)) > 0
-}
-
 func probing(m model) bool {
 	_, effects := m.state.Apply(time.Now(), launcher.Ticked{})
 	return len(only[launcher.Check](effects)) == 0
@@ -285,9 +255,6 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m = focus(m, "dojo")
 	if strings.Contains(m.renderFooter(), "logs") || strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
 		t.Errorf("a target without logs or stats offers neither")
-	}
-	if !probeIfStale(&m, time.Now()) {
-		t.Errorf("a target without stats is still checked for reachability")
 	}
 }
 
@@ -738,25 +705,6 @@ func TestGroupsBecomePanesInConfigOrder(t *testing.T) {
 	}
 }
 
-func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
-	m, backend := newTestModel()
-	watched := vm("nakama")
-	watched.Watch = true
-	m = withTargets(m, watched, remote("dojo"))
-	backend.down["nakama"] = true
-
-	m = runCmd(m, watchCmd)
-	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
-		t.Errorf("a watched target resolves without being selected, got %q", got)
-	}
-	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusUnknown {
-		t.Errorf("an unwatched target waits for selection, got %q", got)
-	}
-	if watchCmd(&m) != nil {
-		t.Errorf("a fresh check should not repeat before the watch interval")
-	}
-}
-
 func TestStartAndStopRunTheHooks(t *testing.T) {
 	m, backend := newTestModel()
 	box := vm("nakama")
@@ -957,45 +905,11 @@ func TestFailedHookReportsAndRechecks(t *testing.T) {
 	}
 }
 
-func TestEveryStatusIsProbed(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-	m = probed(m, "tokyo", false)
-
-	m = focus(m, "forge")
-	if !probeIfStale(&m, time.Now()) {
-		t.Error("an unknown target must be probed, or its status can never resolve")
-	}
-
-	m = focus(m, "tokyo")
-	if !probeIfStale(&m, time.Now().Add(launcher.LiveInterval)) {
-		t.Error("a down target must be probed again, or it can never come back up")
-	}
-}
-
-func TestSlowProbesNeverStack(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-	m = focus(m, "forge")
-
-	if !probeIfStale(&m, time.Now()) {
-		t.Fatal("the first probe should go out")
-	}
-	if probeIfStale(&m, time.Now()) {
-		t.Error("a probe still running must not be joined by another")
-	}
-
-	m = probed(m, "forge", true)
-	if !probeIfStale(&m, time.Now().Add(launcher.LiveInterval)) {
-		t.Error("once the result lands and goes stale, the next probe may go out")
-	}
-}
-
 func TestPendingProbeShowsNoReadings(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(m, "forge")
-	probeIfStale(&m, time.Now())
+	m.send(launcher.Selected{ID: configID("forge")})
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if strings.Contains(preview, "0.00") || !strings.Contains(preview, "…") {
@@ -1664,19 +1578,6 @@ func TestLogPeekBelongsToItsTarget(t *testing.T) {
 	}
 }
 
-func TestLogPeekIsThrottled(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-
-	if cmd := peekIfStaleCmd(&m); cmd == nil {
-		t.Fatalf("the first peek should fetch")
-	}
-	m = withLogs(m, m.selected().id(), "journal line")
-	if cmd := peekIfStaleCmd(&m); cmd != nil {
-		t.Errorf("a fresh peek should not refetch on every poll")
-	}
-}
-
 func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(withTargets(m))
@@ -1715,45 +1616,6 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	}
 	if strings.Contains(preview, "load") || strings.Contains(preview, "memory") {
 		t.Errorf("only declared metrics are shown:\n%s", preview)
-	}
-}
-
-func TestTickRefreshesLogsInPlace(t *testing.T) {
-	m, backend := newTestModel()
-	m = sized(m)
-	m = runCmd(m, peekIfStaleCmd)
-	if got := m.state.Logs(m.selected().target); got != "journal line" {
-		t.Fatalf("the first peek should land, got %q", got)
-	}
-
-	backend.logs["host"] = "journal line\nnew line"
-	if peekIfStaleCmd(&m) != nil {
-		t.Fatalf("a selection change right after a peek should not refetch")
-	}
-	m = runCmd(m, peekCmd)
-	if got := m.state.Logs(m.selected().target); !strings.HasSuffix(got, "new line") {
-		t.Errorf("the tick should refresh the tail while staying on a target, got %q", got)
-	}
-
-	m = key(m, "ctrl+l")
-	if peekCmd(&m) != nil {
-		t.Errorf("the full log screen polls on its own, the preview should not")
-	}
-}
-
-func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-	m = probed(focus(m, "forge"), "forge", true)
-
-	if probeIfStale(&m, time.Now()) {
-		t.Fatalf("a selection change right after a probe should not refetch")
-	}
-	if !probeOnTick(&m) {
-		t.Errorf("the tick should probe even when the last result just landed")
-	}
-	if probeOnTick(&m) {
-		t.Errorf("a probe still in flight must not be joined by another")
 	}
 }
 
@@ -1823,19 +1685,6 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	next, _ = reload(m, "config edit: no such file")
 	if got := next.(model).state.Notice(); got != "config edit: no such file" {
 		t.Errorf("a failure to open the editor wins over the reload summary, got %q", got)
-	}
-}
-
-func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
-	m, _ := newTestModel()
-	m = sized(m)
-	m = probed(focus(m, "forge"), "forge", true)
-	m.runner.Load = func() ([]target.Target, error) { return m.state.Targets(), nil }
-
-	next, _ := reload(m, "")
-	m = next.(model)
-	if !probing(m) {
-		t.Errorf("a reload must not leave the selection on readings from the old config")
 	}
 }
 

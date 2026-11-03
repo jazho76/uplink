@@ -204,3 +204,135 @@ func TestProblemsNoticeSummarizes(t *testing.T) {
 		}
 	}
 }
+
+func countEffects[E Effect](effects []Effect) int {
+	count := 0
+	for _, effect := range effects {
+		if _, ok := effect.(E); ok {
+			count++
+		}
+	}
+	return count
+}
+
+func withLogs(t target.Target) target.Target {
+	t.Logs.Command = "tail"
+	return t
+}
+
+func TestEveryStatusIsCheckedAgain(t *testing.T) {
+	vm, other := box("vm"), box("other")
+	state := selected(vm, other)
+
+	_, effects := state.Apply(clock, Selected{ID: other.ID})
+	if countEffects[Check](effects) != 1 {
+		t.Error("an unknown target must be checked, or its status can never resolve")
+	}
+
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Full: true})
+	_, effects = state.Apply(clock.Add(LiveInterval), Selected{ID: vm.ID})
+	if countEffects[Check](effects) != 1 {
+		t.Error("a down target must be checked again, or it can never come back up")
+	}
+}
+
+func TestChecksNeverStack(t *testing.T) {
+	vm := box("vm")
+	state, effects := selected(vm).Apply(clock, Selected{ID: vm.ID})
+	if countEffects[Check](effects) != 1 {
+		t.Fatal("the first check should go out")
+	}
+	if _, effects := state.Apply(clock, Selected{ID: vm.ID}); countEffects[Check](effects) != 0 {
+		t.Error("a selection change must not join a running check")
+	}
+	state, effects = state.Apply(clock, Ticked{})
+	if countEffects[Check](effects) != 0 {
+		t.Error("a tick must not join a running check")
+	}
+
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	if _, effects := state.Apply(clock.Add(time.Second), Selected{ID: vm.ID}); countEffects[Check](effects) != 0 {
+		t.Error("a selection change right after a check should not repeat it")
+	}
+	if _, effects := state.Apply(clock.Add(LiveInterval), Selected{ID: vm.ID}); countEffects[Check](effects) != 1 {
+		t.Error("once the result goes stale, the next check may go out")
+	}
+	if _, effects := state.Apply(clock.Add(time.Second), Ticked{}); countEffects[Check](effects) != 1 {
+		t.Error("the tick checks on its own cadence, even right after a result")
+	}
+}
+
+func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
+	vm, watched, unwatched := box("vm"), box("watched"), box("unwatched")
+	watched.Watch = true
+	state, effects := selected(vm, watched, unwatched).Apply(clock, Started{})
+
+	var background []target.ID
+	for _, effect := range effects {
+		if check := effect.(Check); !check.Full {
+			background = append(background, check.Target.ID)
+		}
+	}
+	if len(background) != 1 || background[0] != watched.ID {
+		t.Fatalf("only the watched target is checked in the background, got %v", background)
+	}
+
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Checked{ID: watched.ID})
+	if got := state.Observation(watched.ID).Status; got != target.StatusDown {
+		t.Errorf("a watched target resolves without being selected, got %q", got)
+	}
+	if _, effects := state.Apply(clock.Add(time.Second), Ticked{}); countEffects[Check](effects) != 1 {
+		t.Errorf("a fresh watched check should not repeat before its interval, got %+v", effects)
+	}
+	if _, effects := state.Apply(clock.Add(watchInterval), Ticked{}); countEffects[Check](effects) != 2 {
+		t.Errorf("it repeats after its interval, got %+v", effects)
+	}
+}
+
+func TestLogPeeksNeverStackAndAreThrottled(t *testing.T) {
+	vm, other := withLogs(box("vm")), withLogs(box("other"))
+	state, effects := selected(vm, other).Apply(clock, Ticked{})
+	if countEffects[PeekLogs](effects) != 1 {
+		t.Fatal("the first peek should go out")
+	}
+	if _, effects := state.Apply(clock, Ticked{}); countEffects[PeekLogs](effects) != 0 {
+		t.Error("a slow host must not stack up peeks")
+	}
+
+	state, _ = state.Apply(clock, LogsPeeked{ID: vm.ID, Text: "line"})
+	if _, effects := state.Apply(clock.Add(time.Second), Selected{ID: vm.ID}); countEffects[PeekLogs](effects) != 0 {
+		t.Error("a selection change right after a peek should not refetch")
+	}
+	if _, effects := state.Apply(clock.Add(time.Second), Ticked{}); countEffects[PeekLogs](effects) != 1 {
+		t.Error("the tick refreshes the tail while staying on a target")
+	}
+
+	moved, effects := state.Apply(clock, Selected{ID: other.ID})
+	if countEffects[PeekLogs](effects) != 1 {
+		t.Fatal("moving to another target peeks it")
+	}
+	moved, _ = moved.Apply(clock, Ticked{})
+	dropped, _ := moved.Apply(clock, LogsPeeked{ID: vm.ID, Text: "late"})
+	if got := dropped.Logs(vm); got != "line" {
+		t.Errorf("a tail for another target must not replace the slot, got %q", got)
+	}
+}
+
+func TestOpenLogScreenStopsPreviewPeeks(t *testing.T) {
+	vm := withLogs(box("vm"))
+	state, _ := selected(vm).Apply(clock, LogsOpened{})
+	if _, effects := state.Apply(clock, Ticked{}); countEffects[PeekLogs](effects) != 0 {
+		t.Error("the full log screen polls on its own, the preview should not")
+	}
+}
+
+func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
+	vm := box("vm")
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, ReloadRequested{})
+	_, effects := state.Apply(clock, Reloaded{Generation: 1, Targets: []target.Target{vm}, Selected: vm.ID})
+	if countEffects[Check](effects) != 1 {
+		t.Errorf("a reload must not leave the selection on readings from the old config, got %+v", effects)
+	}
+}
