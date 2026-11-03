@@ -11,8 +11,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspection/multiplexer"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -146,8 +144,8 @@ func (m model) logsFor(it item) string {
 }
 
 func (m model) showsLive(t target.Target) bool {
-	if !t.BuiltinStats {
-		return len(t.Stats) > 0
+	if !t.Stats.Builtin {
+		return len(t.Stats.Metrics) > 0
 	}
 	e := m.live[t.ID]
 	if e.inspected {
@@ -181,7 +179,7 @@ func (m model) renderLive(id target.ID, width int) string {
 		switch {
 		case r.Metric.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
-		case r.Metric.Type == stats.TypeText:
+		case r.Metric.Type == target.TypeText:
 			fields = append(fields, field{r.Metric.Label, valueStyle.Render(cmp.Or(textOf(r), "?"))})
 		}
 	}
@@ -189,13 +187,16 @@ func (m model) renderLive(id target.ID, width int) string {
 	return renderFields(fields, width)
 }
 
-func (m model) modeSessions(id target.ID) []multiplexer.Session {
+func (m model) modeSessions(id target.ID) []target.Session {
 	e := m.live[id]
 	if !e.inspectOK {
 		return nil
 	}
-	tool := m.mode().Name
-	var sessions []multiplexer.Session
+	tool := m.mode().Multiplexer
+	if tool == "" {
+		return nil
+	}
+	var sessions []target.Session
 	for _, s := range e.snapshot.Sessions {
 		if s.Tool == tool {
 			sessions = append(sessions, s)
@@ -227,7 +228,7 @@ func sessionMargin(attached bool) string {
 	return "  "
 }
 
-func windowList(windows []multiplexer.Window, width int) string {
+func windowList(windows []target.Window, width int) string {
 	labels := make([]string, len(windows))
 	for i, w := range windows {
 		labels[i] = windowLabel(w, width)
@@ -245,7 +246,7 @@ func windowList(windows []multiplexer.Window, width int) string {
 	return ""
 }
 
-func windowLabel(w multiplexer.Window, width int) string {
+func windowLabel(w target.Window, width int) string {
 	suffix := ""
 	if w.Panes > 1 {
 		suffix = labelStyle.Render(fmt.Sprintf(" (%d)", w.Panes))
@@ -261,18 +262,18 @@ type gaugeRow struct {
 	missing  bool
 }
 
-func gaugeOf(r stats.Reading) gaugeRow {
+func gaugeOf(r target.Reading) gaugeRow {
 	switch {
 	case !r.OK:
 		return gaugeRow{label: r.Metric.Label, reading: "?", missing: true}
-	case r.Metric.Unit == stats.UnitBytes:
+	case r.Metric.Unit == target.UnitBytes:
 		return gaugeRow{label: r.Metric.Label, fraction: r.Fraction(), reading: amount(uint64(r.Value), uint64(r.Max))}
 	default:
 		return gaugeRow{label: r.Metric.Label, fraction: r.Fraction(), reading: inUnit(r, r.Value) + " / " + inUnit(r, r.Max)}
 	}
 }
 
-func textOf(r stats.Reading) string {
+func textOf(r target.Reading) string {
 	switch {
 	case r.Metric.Unit == "":
 		return r.Text
@@ -283,11 +284,11 @@ func textOf(r stats.Reading) string {
 	}
 }
 
-func inUnit(r stats.Reading, v float64) string {
+func inUnit(r target.Reading, v float64) string {
 	switch r.Metric.Unit {
-	case stats.UnitBytes:
+	case target.UnitBytes:
 		return formatBytes(uint64(v))
-	case stats.UnitSeconds:
+	case target.UnitSeconds:
 		return formatDuration(time.Duration(v * float64(time.Second)))
 	default:
 		return number(v)

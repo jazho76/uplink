@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -28,7 +29,7 @@ func fixture(t *testing.T) {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := target.Merge(Provider{})
+	targets, err := inventory.Merge("", Provider{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,17 +52,17 @@ func TestInstanceFacts(t *testing.T) {
 	dev := resolved(t)[1]
 
 	config := "/home/me/lima vms/dev/ssh.config"
-	if want := []string{"ssh", "-t", "-F", config, "lima-dev"}; !slices.Equal(dev.Via, want) {
-		t.Errorf("via: got %q, want %q", dev.Via, want)
+	if want := []string{"ssh", "-t", "-F", config, "lima-dev"}; !slices.Equal(dev.Reach.Interactive, want) {
+		t.Errorf("via: got %q, want %q", dev.Reach.Interactive, want)
 	}
-	if want := []string{"ssh", "-F", config, "lima-dev"}; !slices.Equal(dev.Exec, want) {
-		t.Errorf("exec: got %q, want %q", dev.Exec, want)
+	if want := []string{"ssh", "-F", config, "lima-dev"}; !slices.Equal(dev.Reach.Background, want) {
+		t.Errorf("exec: got %q, want %q", dev.Reach.Background, want)
 	}
 	for _, c := range []struct{ field, got, want string }{
-		{"status", dev.Status, `limactl list --format '{{.Status}}' dev | grep -qx Running`},
-		{"up", dev.Up, "limactl start dev"},
-		{"down", dev.Down, "limactl stop dev"},
-		{"logs", dev.Logs, `tail -n 500 '/home/me/lima vms/dev/serial.log'`},
+		{"status", dev.Check, `limactl list --format '{{.Status}}' dev | grep -qx Running`},
+		{"up", dev.StartCommand(), "limactl start dev"},
+		{"down", dev.StopCommand(), "limactl stop dev"},
+		{"logs", dev.Logs.Command, `tail -n 500 '/home/me/lima vms/dev/serial.log'`},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
@@ -74,8 +75,8 @@ func TestInstanceDefaults(t *testing.T) {
 	targets := resolved(t)
 	dev := targets[1]
 
-	if dev.Group != "vms" || !dev.Watch || !dev.BuiltinStats {
-		t.Errorf("want a watched vms target with built-in stats, got %q %v %v", dev.Group, dev.Watch, dev.BuiltinStats)
+	if dev.Group != "vms" || !dev.Watch || !dev.Stats.Builtin {
+		t.Errorf("want a watched vms target with built-in stats, got %q %v %v", dev.Group, dev.Watch, dev.Stats.Builtin)
 	}
 }
 
@@ -88,7 +89,7 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"bad json":      {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := target.Merge(Provider{})
+		targets, err := inventory.Merge("", Provider{})
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "lima: ") {
 			t.Errorf("%s: want no targets and a lima error, got %v and %v", name, targets, err)
 		}

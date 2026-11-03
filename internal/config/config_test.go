@@ -4,8 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/jazho76/uplink/internal/target"
 )
 
 func TestPathHonorsXDGConfigHome(t *testing.T) {
@@ -29,11 +27,11 @@ func TestTemplateLoadsCleanly(t *testing.T) {
 	if err := os.WriteFile(path, []byte(template), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	doc, err := target.Read(path)
+	doc, err := Read(path)
 	if err != nil {
 		t.Fatalf("the template should read cleanly: %v", err)
 	}
-	if _, err := target.Merge(doc.Config()); err != nil {
+	if _, err := doc.Resolve(); err != nil {
 		t.Errorf("the template's targets should resolve: %v", err)
 	}
 }

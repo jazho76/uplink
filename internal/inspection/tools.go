@@ -4,27 +4,20 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/target"
 )
 
-const (
-	ToolJournal = "journalctl"
-
-	toolTag = "tool"
-)
+const toolTag = "tool"
 
 func tools() []string {
-	names := make([]string, 0, len(multiplexer.All)+1)
-	for _, m := range multiplexer.All {
-		names = append(names, m.Tool())
-	}
-	return append(names, ToolJournal)
+	return append(multiplexer.Tools(), target.ToolJournal)
 }
 
 var toolsSection = section{
-	script: func(Request) string {
+	script: func(target.StatsPolicy) string {
 		return `for tool in ` + strings.Join(tools(), " ") + `; do command -v "$tool" >/dev/null 2>&1 && echo "` + toolTag + ` $tool"; done`
 	},
-	parse: func(_ Request, out string, snapshot *Snapshot) {
-		snapshot.Tools = tagged(out, toolTag)
+	parse: func(_ target.StatsPolicy, out string, environment *target.Environment) {
+		environment.Tools = tagged(out, toolTag)
 	},
 }

@@ -11,7 +11,7 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         out to run on this machine.
 # exec    via for background probes, where no terminal is attached; defaults
 #         to via. Needed by tools that refuse -t without a terminal (docker).
-# status  host-side check, exit 0 means up; defaults to running true via exec.
+# check   host-side check, exit 0 means up; defaults to running true via exec.
 # up      host-side start, run by ctrl+s and before entering a down target.
 # down    host-side stop, run by ctrl+x.
 # logs    host-side command whose output fills the log view (ctrl+l). Left
@@ -23,9 +23,10 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         preset: linux, macos, or container. Left out means the built-in
 #         metrics for the target's OS; [] means none.
 # modes   ways to enter; the first is the default. A mode without run opens
-#         the user's login shell. Left out means default_mode, then any other
-#         multiplexer, then shell, each only when the target has it. Every
-#         session returns to the dashboard.
+#         the user's login shell. multiplexer names the tool whose sessions the
+#         preview shows; without it a mode shows none. Left out means
+#         default_mode, then any other multiplexer, then shell, each only when
+#         the target has it. Every connection returns to the dashboard.
 #
 # {name} in a command becomes the target's name. Top-level keys starting with
 # x- hold YAML anchors for values targets share.
@@ -48,6 +49,6 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #     via: ssh -t me@box.example
 #     stats: [linux]
 #     modes:
-#       - { name: tmux, run: tmux new-session -A -s 0 }
+#       - { name: tmux, multiplexer: tmux, run: tmux new-session -A -s 0 }
 #       - { name: shell }
 `

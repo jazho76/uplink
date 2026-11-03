@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
-	"github.com/jazho76/uplink/internal/inspection/stats"
+	"github.com/jazho76/uplink/internal/target"
 )
 
-var uptime = stats.Metric{Type: stats.TypeText, Label: "up", Value: "echo 42"}
+var uptime = target.Metric{Type: target.TypeText, Label: "up", Value: "echo 42"}
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "uplink-inspect")
@@ -40,7 +40,7 @@ esac`
 
 func TestParseReadsEverySection(t *testing.T) {
 	out := "0 value 42\ntool tmux\nmux tmux session $1 1 main\nmux tmux window $1 2 my editor\n"
-	snapshot := Parse(out, Request{Metrics: []stats.Metric{uptime}})
+	snapshot := Parse(out, target.StatsPolicy{Metrics: []target.Metric{uptime}})
 
 	if len(snapshot.Readings) != 1 || snapshot.Readings[0].Text != "42" {
 		t.Errorf("want the metric read alongside the rest, got %+v", snapshot.Readings)
@@ -48,14 +48,14 @@ func TestParseReadsEverySection(t *testing.T) {
 	if !slices.Equal(snapshot.Tools, []string{"tmux"}) {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
-	want := []multiplexer.Session{{Tool: "tmux", Name: "main", Attached: true, Windows: []multiplexer.Window{{Name: "my editor", Panes: 2}}}}
+	want := []target.Session{{Tool: "tmux", Name: "main", Attached: true, Windows: []target.Window{{Name: "my editor", Panes: 2}}}}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}
 }
 
 func TestBannerCannotProduceSessions(t *testing.T) {
-	snapshot := Parse("session $0 0 fake\nwindow $0 1 fake\nmux\nmux tmux\n", Request{})
+	snapshot := Parse("session $0 0 fake\nwindow $0 1 fake\nmux\nmux tmux\n", target.StatsPolicy{})
 	if len(snapshot.Sessions) != 0 {
 		t.Errorf("only rows tagged by the core count, got %+v", snapshot.Sessions)
 	}
@@ -64,8 +64,8 @@ func TestBannerCannotProduceSessions(t *testing.T) {
 func TestCoreStripsEscapesFromNames(t *testing.T) {
 	out := "mux tmux session $0 0 \x1b[31mred\x1b[0m\nmux tmux window $0 1 \x1b[32mgreen\x1b[0m\n" +
 		"mux tmux session $1 0 \x1b[31m\x1b[0m\nmux tmux window $0 1 \x1b[0m\n"
-	want := []multiplexer.Session{{Tool: "tmux", Name: "red", Windows: []multiplexer.Window{{Name: "green", Panes: 1}}}}
-	if got := Parse(out, Request{}).Sessions; !reflect.DeepEqual(got, want) {
+	want := []target.Session{{Tool: "tmux", Name: "red", Windows: []target.Window{{Name: "green", Panes: 1}}}}
+	if got := Parse(out, target.StatsPolicy{}).Sessions; !reflect.DeepEqual(got, want) {
 		t.Errorf("a target must not be able to style the dashboard, want %+v, got %+v", want, got)
 	}
 }
@@ -78,8 +78,8 @@ type fakeMultiplexer struct {
 func (f fakeMultiplexer) Tool() string   { return f.tool }
 func (f fakeMultiplexer) Attach() string { return f.tool }
 func (f fakeMultiplexer) Script() string { return f.script }
-func (f fakeMultiplexer) Parse(rows []string) []multiplexer.Session {
-	sessions := make([]multiplexer.Session, len(rows))
+func (f fakeMultiplexer) Parse(rows []string) []target.Session {
+	sessions := make([]target.Session, len(rows))
 	for i, row := range rows {
 		sessions[i].Name = row
 	}
@@ -113,7 +113,7 @@ func TestScriptCannotConsumeTheInspection(t *testing.T) {
 	)
 
 	got := inspectLocally(t).Sessions
-	want := []multiplexer.Session{{Tool: "greedy", Name: "first"}, {Tool: "polite", Name: "second"}}
+	want := []target.Session{{Tool: "greedy", Name: "first"}, {Tool: "polite", Name: "second"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("want %+v, got %+v", want, got)
 	}
@@ -130,8 +130,8 @@ func TestFailingSectionDoesNotFailTheInspection(t *testing.T) {
 	previous := sections
 	t.Cleanup(func() { sections = previous })
 	sections = append(slices.Clone(previous), section{
-		script: func(Request) string { return "false" },
-		parse:  func(Request, string, *Snapshot) {},
+		script: func(target.StatsPolicy) string { return "false" },
+		parse:  func(target.StatsPolicy, string, *target.Environment) {},
 	})
 
 	inspectLocally(t)
@@ -148,9 +148,9 @@ func pathWith(t *testing.T, stubs map[string]string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func inspectLocally(t *testing.T) Snapshot {
+func inspectLocally(t *testing.T) target.Environment {
 	t.Helper()
-	snapshot, err := Run(10*time.Second, Request{Metrics: []stats.Metric{uptime}}, []string{"sh"})
+	snapshot, err := Run(10*time.Second, target.StatsPolicy{Metrics: []target.Metric{uptime}}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRunReportsSessions(t *testing.T) {
 	if !slices.Contains(snapshot.Tools, "tmux") {
 		t.Errorf("want tmux reported, got %q", snapshot.Tools)
 	}
-	want := []multiplexer.Session{{Tool: "tmux", Name: "work", Attached: true, Windows: []multiplexer.Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
+	want := []target.Session{{Tool: "tmux", Name: "work", Attached: true, Windows: []target.Window{{Name: "my editor", Panes: 2}, {Name: "logs", Panes: 1}}}}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 	}
@@ -187,9 +187,9 @@ func TestRunReportsZellijSessions(t *testing.T) {
 	if !slices.Contains(snapshot.Tools, "zellij") {
 		t.Errorf("want zellij reported, got %q", snapshot.Tools)
 	}
-	want := []multiplexer.Session{
-		{Tool: "zellij", Name: "alpha", Attached: true, Windows: []multiplexer.Window{{Name: "tab of alpha", Panes: 1}}},
-		{Tool: "zellij", Name: "my beta", Windows: []multiplexer.Window{{Name: "tab of my beta", Panes: 1}}},
+	want := []target.Session{
+		{Tool: "zellij", Name: "alpha", Attached: true, Windows: []target.Window{{Name: "tab of alpha", Panes: 1}}},
+		{Tool: "zellij", Name: "my beta", Windows: []target.Window{{Name: "tab of my beta", Panes: 1}}},
 	}
 	if !reflect.DeepEqual(snapshot.Sessions, want) {
 		t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
@@ -221,8 +221,8 @@ func TestRunReportsEachToolsOwnSessions(t *testing.T) {
 }
 
 func TestRunReportsTheJournal(t *testing.T) {
-	pathWith(t, map[string]string{ToolJournal: "exit 0"})
-	if snapshot := inspectLocally(t); !slices.Contains(snapshot.Tools, ToolJournal) {
+	pathWith(t, map[string]string{target.ToolJournal: "exit 0"})
+	if snapshot := inspectLocally(t); !slices.Contains(snapshot.Tools, target.ToolJournal) {
 		t.Errorf("want journalctl reported, got %q", snapshot.Tools)
 	}
 }
@@ -258,10 +258,10 @@ func TestRunSurvivesAMissingTmux(t *testing.T) {
 	}
 }
 
-func builtinLabels(t *testing.T, kernel string) Snapshot {
+func builtinLabels(t *testing.T, kernel string) target.Environment {
 	t.Helper()
 	pathWith(t, map[string]string{"uname": "echo " + kernel, "tmux": tmuxStub})
-	snapshot, err := Run(30*time.Second, Request{BuiltinStats: true}, []string{"sh"})
+	snapshot, err := Run(30*time.Second, target.StatsPolicy{Builtin: true}, []string{"sh"})
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -271,7 +271,7 @@ func builtinLabels(t *testing.T, kernel string) Snapshot {
 	return snapshot
 }
 
-func labels(readings []stats.Reading) []string {
+func labels(readings []target.Reading) []string {
 	names := make([]string, len(readings))
 	for i, r := range readings {
 		names[i] = r.Metric.Label
@@ -279,7 +279,7 @@ func labels(readings []stats.Reading) []string {
 	return names
 }
 
-func metricLabels(metrics []stats.Metric) []string {
+func metricLabels(metrics []target.Metric) []string {
 	names := make([]string, len(metrics))
 	for i, m := range metrics {
 		names[i] = m.Label
@@ -330,7 +330,7 @@ func TestDeclaredStatsIgnoreTheKernel(t *testing.T) {
 }
 
 func TestBannerCannotOverrideTheKernel(t *testing.T) {
-	snapshot := Parse("os Linux and friends\nos Darwin\n", Request{BuiltinStats: true})
+	snapshot := Parse("os Linux and friends\nos Darwin\n", target.StatsPolicy{Builtin: true})
 	if snapshot.OS != "Darwin" {
 		t.Errorf("the script's line comes last and wins, got %q", snapshot.OS)
 	}
@@ -369,7 +369,7 @@ func TestRunFindsToolsOnTheLoginPath(t *testing.T) {
 			if !slices.Contains(snapshot.Tools, "uplink-login-tool") {
 				t.Errorf("want the tool reported, got %q", snapshot.Tools)
 			}
-			want := []multiplexer.Session{{Tool: "uplink-login-tool", Name: "found"}}
+			want := []target.Session{{Tool: "uplink-login-tool", Name: "found"}}
 			if !reflect.DeepEqual(snapshot.Sessions, want) {
 				t.Errorf("want %+v, got %+v", want, snapshot.Sessions)
 			}
@@ -400,7 +400,7 @@ func TestLoginPathCannotHideWhatIsAlreadyFound(t *testing.T) {
 }
 
 func TestRunNeedsACommand(t *testing.T) {
-	if _, err := Run(time.Second, Request{}, nil); err == nil {
+	if _, err := Run(time.Second, target.StatsPolicy{}, nil); err == nil {
 		t.Error("no argv cannot run")
 	}
 }

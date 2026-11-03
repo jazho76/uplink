@@ -1,4 +1,4 @@
-package target
+package config
 
 import (
 	"bytes"
@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/jazho76/uplink/internal/target"
 	"gopkg.in/yaml.v3"
 )
 
@@ -22,8 +23,6 @@ type Document struct {
 	DefaultMode string         `yaml:"default_mode"`
 	Extra       map[string]any `yaml:",inline"`
 }
-
-func (d Document) Config() Source { return configSource(d.Targets) }
 
 func Read(path string) (Document, error) {
 	var doc Document
@@ -63,4 +62,27 @@ func decodeError(path string, err error) error {
 		errs[i] = fmt.Errorf("%s: %s", path, message)
 	}
 	return errors.Join(errs...)
+}
+
+func (d Document) Resolve() ([]target.Target, error) {
+	var (
+		targets []target.Target
+		errs    []error
+	)
+	for i, spec := range d.Targets {
+		t, err := spec.resolve()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("target %s: %w", label(spec, i), err))
+			continue
+		}
+		targets = append(targets, t)
+	}
+	return targets, errors.Join(errs...)
+}
+
+func label(spec Spec, index int) string {
+	if spec.Name == "" {
+		return fmt.Sprintf("#%d", index+1)
+	}
+	return fmt.Sprintf("%q", spec.Name)
 }

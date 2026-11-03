@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -46,7 +47,7 @@ func (Provider) Default() bool {
 	return ping() == nil
 }
 
-func (Provider) Specs() ([]target.Spec, error) {
+func (Provider) Targets() ([]target.Target, error) {
 	out, err := list()
 	if err != nil {
 		return nil, err
@@ -55,11 +56,11 @@ func (Provider) Specs() ([]target.Spec, error) {
 	if err != nil {
 		return nil, err
 	}
-	specs := make([]target.Spec, len(names))
+	targets := make([]target.Target, len(names))
 	for i, n := range names {
-		specs[i] = spec(n)
+		targets[i] = containerTarget(n)
 	}
-	return specs, nil
+	return targets, nil
 }
 
 func parse(out string) ([]string, error) {
@@ -81,27 +82,26 @@ func parse(out string) ([]string, error) {
 	return names, nil
 }
 
-func spec(container string) target.Spec {
-	quote := func(args ...string) string { return target.Quote(args) }
-	watch := true
-	return target.Spec{
-		Name:   container,
-		Kind:   target.KindContainer,
-		Via:    quote("docker", "exec", "-it", container, "sh", "-c"),
-		Exec:   quote("docker", "exec", "-i", container, "sh", "-c"),
-		Status: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
-		Up:     quote("docker", "start", container),
-		Down:   quote("docker", "stop", container),
-		Logs:   new(events(container)),
-		Defaults: &target.Spec{
-			Group: group,
-			Watch: &watch,
+func containerTarget(container string) target.Target {
+	quote := func(args ...string) string { return shell.Quote(args) }
+	metrics, _ := stats.Preset(stats.PresetContainer)
+	return target.Target{
+		ID:    target.ID{Key: container},
+		Group: group,
+		Reach: target.Reach{
+			Interactive: []string{"docker", "exec", "-it", container, "sh", "-c"},
+			Background:  []string{"docker", "exec", "-i", container, "sh", "-c"},
 		},
+		Check: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
+		Power: &target.Power{Up: quote("docker", "start", container), Down: quote("docker", "stop", container)},
+		Logs:  target.LogSource{Command: events(container)},
+		Watch: true,
+		Stats: target.StatsPolicy{Metrics: metrics},
 	}
 }
 
 func events(container string) string {
-	return `docker events --since 24h --until "$(date +%s)" ` + target.Quote([]string{"--filter", "container=" + container}) +
+	return `docker events --since 24h --until "$(date +%s)" ` + shell.Quote([]string{"--filter", "container=" + container}) +
 		` --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}'` +
 		` | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$'` +
 		` | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`

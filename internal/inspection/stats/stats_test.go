@@ -4,21 +4,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/target"
 )
+
+var metricTimeout = 5 * time.Second
 
 func TestMain(m *testing.M) {
 	os.Setenv("SHELL", "/nonexistent/login-shell")
 	os.Exit(m.Run())
 }
 
-func runLocally(t *testing.T, metrics []Metric) []Reading {
+func runLocally(t *testing.T, metrics []target.Metric) []target.Reading {
 	t.Helper()
-	out, err := shell.NonInteractive(10*time.Second, Preamble()+"\n"+Script(metrics), "sh")
+	out, err := shell.NonInteractive(10*time.Second, shell.Preamble(metricTimeout)+"\n"+Script(metrics), "sh")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}
@@ -30,9 +32,9 @@ func runLocally(t *testing.T, metrics []Metric) []Reading {
 }
 
 func TestUnitTextReadsANumber(t *testing.T) {
-	readings := runLocally(t, []Metric{
-		{Type: TypeText, Label: "up", Value: "echo 3600", Unit: UnitSeconds},
-		{Type: TypeText, Label: "up", Value: "echo soon", Unit: UnitSeconds},
+	readings := runLocally(t, []target.Metric{
+		{Type: target.TypeText, Label: "up", Value: "echo 3600", Unit: target.UnitSeconds},
+		{Type: target.TypeText, Label: "up", Value: "echo soon", Unit: target.UnitSeconds},
 	})
 	if r := readings[0]; !r.OK || r.Value != 3600 {
 		t.Errorf("text with a unit should read its output as a number, got %+v", r)
@@ -43,10 +45,10 @@ func TestUnitTextReadsANumber(t *testing.T) {
 }
 
 func TestCustomMetrics(t *testing.T) {
-	readings := runLocally(t, []Metric{
-		{Type: TypeGauge, Label: "fixed", Value: "echo 37", Max: "100"},
-		{Type: TypeGauge, Label: "computed", Value: "echo 3", Max: "echo 4"},
-		{Type: TypeText, Label: "note", Value: `printf 'it'\''s \\n fine\nsecond line\n'`},
+	readings := runLocally(t, []target.Metric{
+		{Type: target.TypeGauge, Label: "fixed", Value: "echo 37", Max: "100"},
+		{Type: target.TypeGauge, Label: "computed", Value: "echo 3", Max: "echo 4"},
+		{Type: target.TypeText, Label: "note", Value: `printf 'it'\''s \\n fine\nsecond line\n'`},
 	})
 	if r := readings[0]; !r.OK || r.Value != 37 || r.Max != 100 || r.Fraction() != 0.37 {
 		t.Errorf("a numeric max is a constant, got %+v", r)
@@ -60,12 +62,12 @@ func TestCustomMetrics(t *testing.T) {
 }
 
 func TestBrokenMetricsDoNotSpoilTheRest(t *testing.T) {
-	readings := runLocally(t, []Metric{
-		{Type: TypeGauge, Label: "fails", Value: "exit 1", Max: "10"},
-		{Type: TypeText, Label: "greedy", Value: "cat"},
-		{Type: TypeGauge, Label: "words", Value: "echo many", Max: "10"},
-		{Type: TypeText, Label: "up", Value: "exit 1", Unit: UnitSeconds},
-		{Type: TypeText, Label: "after", Value: "echo still here"},
+	readings := runLocally(t, []target.Metric{
+		{Type: target.TypeGauge, Label: "fails", Value: "exit 1", Max: "10"},
+		{Type: target.TypeText, Label: "greedy", Value: "cat"},
+		{Type: target.TypeGauge, Label: "words", Value: "echo many", Max: "10"},
+		{Type: target.TypeText, Label: "up", Value: "exit 1", Unit: target.UnitSeconds},
+		{Type: target.TypeText, Label: "after", Value: "echo still here"},
 	})
 	for i, r := range readings[:4] {
 		if r.OK {
@@ -104,11 +106,11 @@ func assertMetricsIsolated(t *testing.T) {
 	t.Cleanup(func() { metricTimeout = previous })
 
 	start := time.Now()
-	readings := runLocally(t, []Metric{
-		{Type: TypeText, Label: "syntax", Value: "echo ( unbalanced"},
-		{Type: TypeText, Label: "spoof", Value: "echo first; echo '3 value 999'"},
-		{Type: TypeGauge, Label: "hang", Value: "sleep 30; echo 1", Max: "2"},
-		{Type: TypeGauge, Label: "victim", Value: "echo 1", Max: "2"},
+	readings := runLocally(t, []target.Metric{
+		{Type: target.TypeText, Label: "syntax", Value: "echo ( unbalanced"},
+		{Type: target.TypeText, Label: "spoof", Value: "echo first; echo '3 value 999'"},
+		{Type: target.TypeGauge, Label: "hang", Value: "sleep 30; echo 1", Max: "2"},
+		{Type: target.TypeGauge, Label: "victim", Value: "echo 1", Max: "2"},
 	})
 	if readings[0].OK {
 		t.Errorf("a syntax error is the metric's own problem, got %+v", readings[0])
@@ -139,7 +141,7 @@ func TestHangingLoginProfileOnlyCostsTheLimit(t *testing.T) {
 	t.Setenv("SHELL", shell)
 
 	start := time.Now()
-	readings := runLocally(t, []Metric{{Type: TypeGauge, Label: "after", Value: "echo 1", Max: "2"}})
+	readings := runLocally(t, []target.Metric{{Type: target.TypeGauge, Label: "after", Value: "echo 1", Max: "2"}})
 	if r := readings[0]; !r.OK || r.Value != 1 {
 		t.Errorf("metrics should survive a hanging profile, got %+v", r)
 	}
@@ -149,37 +151,12 @@ func TestHangingLoginProfileOnlyCostsTheLimit(t *testing.T) {
 }
 
 func TestParseIgnoresNoise(t *testing.T) {
-	metrics := []Metric{{Type: TypeGauge, Label: "load", Value: "x", Max: "x"}, {Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds}}
+	metrics := []target.Metric{{Type: target.TypeGauge, Label: "load", Value: "x", Max: "x"}, {Type: target.TypeText, Label: "up", Value: "x", Unit: target.UnitSeconds}}
 	readings := Parse("motd banner\n0 value 0.5\n7 value 1\nx max 2\n0 max 4\n1 value nope\n", metrics)
 	if r := readings[0]; !r.OK || r.Value != 0.5 || r.Max != 4 {
 		t.Errorf("load = %+v", r)
 	}
 	if readings[1].OK {
 		t.Errorf("an unparsable value is missing, got %+v", readings[1])
-	}
-}
-
-func TestValidate(t *testing.T) {
-	for _, m := range []Metric{
-		{Type: TypeText, Label: "up", Value: "x", Unit: UnitSeconds},
-		{Type: TypeGauge, Label: "gpu", Value: "x", Max: "100", Unit: UnitBytes},
-		{Type: TypeText, Label: "agents", Value: "x"},
-	} {
-		if err := m.Validate(); err != nil {
-			t.Errorf("%+v should be valid: %v", m, err)
-		}
-	}
-
-	for want, m := range map[string]Metric{
-		"type must be one of":                {Type: "cpu"},
-		"gauge needs a max":                  {Type: TypeGauge, Label: "gpu", Value: "x"},
-		"gauge needs a label":                {Type: TypeGauge, Value: "x", Max: "1"},
-		"text needs a value":                 {Type: TypeText, Label: "x"},
-		"text takes no max":                  {Type: TypeText, Label: "x", Value: "y", Max: "1"},
-		"unit must be one of bytes, seconds": {Type: TypeGauge, Label: "x", Value: "y", Max: "1", Unit: "percent"},
-	} {
-		if err := m.Validate(); err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("%+v: want %q, got %v", m, want, err)
-		}
 	}
 }

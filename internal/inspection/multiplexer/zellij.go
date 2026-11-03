@@ -3,6 +3,7 @@ package multiplexer
 import (
 	"cmp"
 	"encoding/json"
+	"github.com/jazho76/uplink/internal/target"
 	"slices"
 	"strings"
 )
@@ -29,15 +30,15 @@ func (Zellij) Script() string {
 done`
 }
 
-func (Zellij) Parse(rows []string) []Session {
+func (Zellij) Parse(rows []string) []target.Session {
 	var (
-		sessions []Session
+		sessions []target.Session
 		panes    [][]string
 	)
 	for _, row := range rows {
 		tag, rest, _ := strings.Cut(row, " ")
 		if tag == zellijSessionTag {
-			sessions = append(sessions, Session{Name: rest})
+			sessions = append(sessions, target.Session{Name: rest})
 			panes = append(panes, nil)
 			continue
 		}
@@ -57,7 +58,7 @@ func (Zellij) Parse(rows []string) []Session {
 	for i := range sessions {
 		sessions[i].Windows = zellijWindows(panes[i])
 	}
-	slices.SortStableFunc(sessions, func(a, b Session) int { return cmp.Compare(a.Name, b.Name) })
+	slices.SortStableFunc(sessions, func(a, b target.Session) int { return cmp.Compare(a.Name, b.Name) })
 	return sessions
 }
 
@@ -68,14 +69,14 @@ type zellijPane struct {
 	TabName     string `json:"tab_name"`
 }
 
-func zellijWindows(rows []string) []Window {
+func zellijWindows(rows []string) []target.Window {
 	var panes []zellijPane
 	if err := json.Unmarshal([]byte(strings.Join(rows, "\n")), &panes); err != nil {
 		return nil
 	}
 
 	var tabs []zellijPane
-	var windows []Window
+	var windows []target.Window
 	for _, pane := range panes {
 		if pane.IsPlugin {
 			continue
@@ -84,7 +85,7 @@ func zellijWindows(rows []string) []Window {
 		if tab < 0 {
 			tab = len(tabs)
 			tabs = append(tabs, pane)
-			windows = append(windows, Window{Name: pane.TabName})
+			windows = append(windows, target.Window{Name: pane.TabName})
 		}
 		windows[tab].Panes++
 	}
@@ -94,7 +95,7 @@ func zellijWindows(rows []string) []Window {
 		order[i] = i
 	}
 	slices.SortStableFunc(order, func(a, b int) int { return cmp.Compare(tabs[a].TabPosition, tabs[b].TabPosition) })
-	ordered := make([]Window, 0, len(order))
+	ordered := make([]target.Window, 0, len(order))
 	for _, i := range order {
 		ordered = append(ordered, windows[i])
 	}

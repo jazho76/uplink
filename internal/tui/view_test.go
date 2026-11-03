@@ -9,25 +9,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspection"
-	"github.com/jazho76/uplink/internal/inspection/multiplexer"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
 const sessionsRule = "sessions ─"
 
-func withSessions(m model, name string, sessions ...multiplexer.Session) model {
+func withSessions(m model, name string, sessions ...target.Session) model {
 	owned := slices.Clone(sessions)
 	for i := range owned {
 		owned[i].Tool = cmp.Or(owned[i].Tool, "tmux")
 	}
 	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
-		snapshot: inspection.Snapshot{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
+		snapshot: target.Environment{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
 	return next.(model)
 }
 
-func focusedPreview(t *testing.T, sessions ...multiplexer.Session) model {
+func focusedPreview(t *testing.T, sessions ...target.Session) model {
 	t.Helper()
 	m, _ := newTestModel()
 	m = focus(sized(m), "forge")
@@ -37,7 +34,7 @@ func focusedPreview(t *testing.T, sessions ...multiplexer.Session) model {
 func preview(m model) string { return ansi.Strip(m.previewBody(60, 30)) }
 
 func TestSessionsSitBetweenLiveAndLogs(t *testing.T) {
-	m := focusedPreview(t, multiplexer.Session{Name: "main"})
+	m := focusedPreview(t, target.Session{Name: "main"})
 	m.logPeek = peek{id: configID("forge"), text: "boot line"}
 
 	got := preview(m)
@@ -56,13 +53,13 @@ func TestNoSessionsMeansNoSection(t *testing.T) {
 func TestSessionsShowWithoutStats(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Stats = nil
+	quiet.Stats = target.StatsPolicy{}
 	m = focus(sized(withTargets(m, quiet)), "dojo")
 
 	if got := preview(m); strings.Contains(got, sessionsRule) {
 		t.Errorf("an uninspected target has no section, got:\n%s", got)
 	}
-	got := preview(withSessions(m, "dojo", multiplexer.Session{Name: "main"}))
+	got := preview(withSessions(m, "dojo", target.Session{Name: "main"}))
 	if !strings.Contains(got, sessionsRule) || !strings.Contains(got, "main") || strings.Contains(got, "live ─") {
 		t.Errorf("want sessions and no live block, got:\n%s", got)
 	}
@@ -70,7 +67,7 @@ func TestSessionsShowWithoutStats(t *testing.T) {
 
 func TestTabToAModeWithoutSessionsHidesTheSection(t *testing.T) {
 	m, backend := newTestModel()
-	m = withSessions(focus(sized(m), "forge"), "forge", multiplexer.Session{Name: "main"})
+	m = withSessions(focus(sized(m), "forge"), "forge", target.Session{Name: "main"})
 	inspections := backend.inspections
 
 	shell := key(m, "tab")
@@ -89,6 +86,9 @@ func modesNamed(names ...string) []target.Mode {
 	modes := make([]target.Mode, len(names))
 	for i, name := range names {
 		modes[i] = target.Mode{Name: name, Argv: []string{"sh"}}
+		if name == "tmux" || name == "zellij" {
+			modes[i].Multiplexer = name
+		}
 	}
 	return modes
 }
@@ -102,8 +102,8 @@ func focusedWithModes(names ...string) model {
 
 func TestSessionsFollowTheSelectedMode(t *testing.T) {
 	m := withSessions(focusedWithModes("tmux", "zellij"), "box",
-		multiplexer.Session{Tool: "tmux", Name: "from-tmux"},
-		multiplexer.Session{Tool: "zellij", Name: "from-zellij"},
+		target.Session{Tool: "tmux", Name: "from-tmux"},
+		target.Session{Tool: "zellij", Name: "from-zellij"},
 	)
 
 	if got := preview(m); !strings.Contains(got, "from-tmux") || strings.Contains(got, "from-zellij") {
@@ -114,8 +114,8 @@ func TestSessionsFollowTheSelectedMode(t *testing.T) {
 	}
 }
 
-func TestDeclaredModeMatchesSessionsByName(t *testing.T) {
-	m := withSessions(focusedWithModes("tmux", "root", "shell"), "box", multiplexer.Session{Name: "main"})
+func TestOnlyModesNamingAMultiplexerShowSessions(t *testing.T) {
+	m := withSessions(focusedWithModes("tmux", "root", "shell"), "box", target.Session{Name: "main"})
 
 	if got := preview(m); !strings.Contains(got, "main") {
 		t.Errorf("a declared tmux mode previews tmux sessions, got:\n%s", got)
@@ -126,7 +126,7 @@ func TestDeclaredModeMatchesSessionsByName(t *testing.T) {
 }
 
 func TestSessionsWithoutAMatchingModeShowNowhere(t *testing.T) {
-	m := withSessions(focusedWithModes("tmux", "shell"), "box", multiplexer.Session{Tool: "zellij", Name: "stranger"})
+	m := withSessions(focusedWithModes("tmux", "shell"), "box", target.Session{Tool: "zellij", Name: "stranger"})
 
 	for _, mode := range []model{m, key(m, "tab")} {
 		if got := preview(mode); strings.Contains(got, sessionsRule) || strings.Contains(got, "stranger") {
@@ -136,7 +136,7 @@ func TestSessionsWithoutAMatchingModeShowNowhere(t *testing.T) {
 }
 
 func TestHiddenSessionsGiveTheirLinesToLogs(t *testing.T) {
-	m := focusedPreview(t, multiplexer.Session{Name: "one"}, multiplexer.Session{Name: "two"})
+	m := focusedPreview(t, target.Session{Name: "one"}, target.Session{Name: "two"})
 	m.logPeek = peek{id: configID("forge"), text: strings.TrimSuffix(strings.Repeat("log line\n", 40), "\n")}
 
 	logLines := func(m model) int { return strings.Count(ansi.Strip(m.previewBody(60, 20)), "log line") }
@@ -146,7 +146,7 @@ func TestHiddenSessionsGiveTheirLinesToLogs(t *testing.T) {
 }
 
 func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
-	sessions := multiplexer.Session{Name: "main"}
+	sessions := target.Session{Name: "main"}
 	m := focusedPreview(t, sessions)
 
 	down := probed(m, "forge", false)
@@ -167,11 +167,11 @@ func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
 
 func TestSessionRowsDescribeTheSession(t *testing.T) {
 	got := preview(focusedPreview(t,
-		multiplexer.Session{Name: "work", Attached: true, Windows: []multiplexer.Window{
+		target.Session{Name: "work", Attached: true, Windows: []target.Window{
 			{Name: "editor", Panes: 1},
 			{Name: "dev server", Panes: 2},
 		}},
-		multiplexer.Session{Name: "my notes", Windows: []multiplexer.Window{{Name: "vim", Panes: 1}}},
+		target.Session{Name: "my notes", Windows: []target.Window{{Name: "vim", Panes: 1}}},
 	))
 	lines := strings.Split(got, "\n")
 	row := func(name string) string {
@@ -197,11 +197,11 @@ func TestSessionRowsDescribeTheSession(t *testing.T) {
 }
 
 func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
-	var windows []multiplexer.Window
+	var windows []target.Window
 	for _, name := range strings.Fields("alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima mike") {
-		windows = append(windows, multiplexer.Window{Name: name, Panes: 1})
+		windows = append(windows, target.Window{Name: name, Panes: 1})
 	}
-	got := preview(focusedPreview(t, multiplexer.Session{Name: "main", Attached: true, Windows: windows}))
+	got := preview(focusedPreview(t, target.Session{Name: "main", Attached: true, Windows: windows}))
 	for _, want := range []string{attachedGlyph + " main", "alpha", "+"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %q in:\n%s", want, got)
@@ -214,7 +214,7 @@ func TestWindowsThatDoNotFitAreCounted(t *testing.T) {
 
 func TestLongWindowNameIsClipped(t *testing.T) {
 	long := strings.Repeat("w", 100)
-	got := preview(focusedPreview(t, multiplexer.Session{Name: "main", Windows: []multiplexer.Window{{Name: long, Panes: 2}, {Name: "next", Panes: 1}}}))
+	got := preview(focusedPreview(t, target.Session{Name: "main", Windows: []target.Window{{Name: long, Panes: 2}, {Name: "next", Panes: 1}}}))
 	if strings.Contains(got, strings.Repeat("w", maxWindowName+1)) || !strings.Contains(got, "(2)") || !strings.Contains(got, "next") {
 		t.Errorf("one long name must not hide the rest:\n%s", got)
 	}
@@ -222,8 +222,8 @@ func TestLongWindowNameIsClipped(t *testing.T) {
 
 func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 	got := preview(focusedPreview(t,
-		multiplexer.Session{Name: strings.Repeat("x", 100), Windows: []multiplexer.Window{{Name: "editor", Panes: 1}}},
-		multiplexer.Session{Name: "main", Attached: true, Windows: []multiplexer.Window{{Name: "vim", Panes: 1}}},
+		target.Session{Name: strings.Repeat("x", 100), Windows: []target.Window{{Name: "editor", Panes: 1}}},
+		target.Session{Name: "main", Attached: true, Windows: []target.Window{{Name: "vim", Panes: 1}}},
 	))
 	for _, want := range []string{"editor", "vim", attachedGlyph + " main"} {
 		if !strings.Contains(got, want) {
@@ -233,7 +233,7 @@ func TestLongSessionNameLeavesRoomForDetails(t *testing.T) {
 }
 
 func TestNarrowSessionsStayInThePane(t *testing.T) {
-	m := focusedPreview(t, multiplexer.Session{Name: "a session with a long name", Attached: true, Windows: []multiplexer.Window{
+	m := focusedPreview(t, target.Session{Name: "a session with a long name", Attached: true, Windows: []target.Window{
 		{Name: "a window with a long name", Panes: 3},
 		{Name: "another", Panes: 1},
 	}})
@@ -246,7 +246,7 @@ func TestNarrowSessionsStayInThePane(t *testing.T) {
 }
 
 func TestLogsShrinkToFitSessions(t *testing.T) {
-	m := focusedPreview(t, multiplexer.Session{Name: "one"}, multiplexer.Session{Name: "two"})
+	m := focusedPreview(t, target.Session{Name: "one"}, target.Session{Name: "two"})
 	m.logPeek = peek{id: configID("forge"), text: strings.Repeat("old line\n", 30) + "newest line"}
 
 	const height = 16
@@ -265,13 +265,13 @@ const liveRule = "live ─"
 
 func focusedOnBuiltin() model {
 	box := remote("box")
-	box.Stats, box.BuiltinStats = nil, true
+	box.Stats = target.StatsPolicy{Builtin: true}
 	m, _ := newTestModel()
 	return focus(sized(withTargets(m, box)), "box")
 }
 
-func inspectedWith(m model, readings []stats.Reading) model {
-	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspection.Snapshot{OS: "Linux", Readings: readings}, inspectOK: true})
+func inspectedWith(m model, readings []target.Reading) model {
+	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: target.Environment{OS: "Linux", Readings: readings}, inspectOK: true})
 	return next.(model)
 }
 
@@ -318,7 +318,7 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 	m = probed(sized(m), "forge", true)
 
 	changed := vm("forge")
-	changed.Stats, changed.BuiltinStats = nil, true
+	changed.Stats = target.StatsPolicy{Builtin: true}
 	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
 
 	next, _ := m.Update(configEditedMsg{})
@@ -329,14 +329,14 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 
 func focusedOnGuestLogs() (model, *fakeBackend) {
 	box := remote("box")
-	box.Logs, box.GuestLogs = "", true
+	box.Logs = target.LogSource{Journal: true}
 	m, backend := newTestModel()
 	backend.logs["box"] = "journal line"
 	return focus(sized(withTargets(m, box)), "box"), backend
 }
 
 func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
-	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspection.Snapshot{Tools: tools}, inspectOK: true})
+	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: target.Environment{Tools: tools}, inspectOK: true})
 	return next.(model), cmd
 }
 
@@ -359,7 +359,7 @@ func TestGuestLogsWaitForTheJournalToBeReported(t *testing.T) {
 
 func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, inspection.ToolJournal)
+	m, cmd := inspectedTools(m, target.ToolJournal)
 	m = applyCmd(m, cmd)
 
 	if backend.logCalls != 1 || !strings.Contains(preview(m), "journal line") {
@@ -372,7 +372,7 @@ func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 
 func TestGuestLogsStopWhileDown(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, inspection.ToolJournal)
+	m, cmd := inspectedTools(m, target.ToolJournal)
 	m = applyCmd(m, cmd)
 
 	m = probed(m, "box", false)
@@ -396,9 +396,9 @@ func TestHostSideLogsSurviveDown(t *testing.T) {
 func TestNoLogsOffersNothing(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
 	box := m.selected().target
-	box.GuestLogs = false
+	box.Logs = target.LogSource{}
 	m = focus(withTargets(m, box), "box")
-	m, cmd := inspectedTools(m, inspection.ToolJournal)
+	m, cmd := inspectedTools(m, target.ToolJournal)
 	m = applyCmd(m, cmd)
 	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf(`logs: "" reads nothing: %d calls, footer %s`, backend.logCalls, m.renderFooter())
@@ -492,7 +492,7 @@ func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
 
 func TestConfirmedModeStaysCertainOnceDown(t *testing.T) {
 	m, _ := focusedOn("box")
-	m = wentDown(inspected(m, "box", multiplexer.Tmux{}.Tool()), "box")
+	m = wentDown(inspected(m, "box", "tmux"), "box")
 	if got := modeTagOf(m); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
 		t.Errorf("tmux was confirmed before it went down, got %q", got)
 	}
@@ -519,5 +519,24 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 		if got := amount(c.used, c.total); got != c.want {
 			t.Errorf("amount(%d, %d) = %q, want %q", c.used, c.total, got, c.want)
 		}
+	}
+}
+
+func TestSessionsFollowTheModesMultiplexerNotItsName(t *testing.T) {
+	m := focusedWithModes("placeholder")
+	box, _ := m.targetByID(configID("box"))
+	box.Modes = []target.Mode{
+		{Name: "work", Argv: []string{"sh"}, Multiplexer: "tmux"},
+		{Name: "tmux", Argv: []string{"sh"}},
+	}
+	m = focus(sized(withTargets(m, box)), "box")
+	m = withSessions(m, "box", target.Session{Name: "main"})
+
+	if got := preview(m); !strings.Contains(got, "main") {
+		t.Errorf("a mode naming tmux shows its sessions:\n%s", got)
+	}
+	m = key(m, "tab")
+	if got := preview(m); strings.Contains(got, "main") {
+		t.Errorf("a mode only called tmux shows none:\n%s", got)
 	}
 }

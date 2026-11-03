@@ -34,7 +34,7 @@ How uplink learns about a target's environment: which tools it has, its stats, a
 
 ### Mode
 
-A way into a target, such as tmux, zellij or a plain shell. Modes are discovered through inspection, and you can cycle through them in the dashboard. The config can instead declare a target's modes explicitly, as custom ways of accessing it. Declared modes replace the discovered ones, and show no sessions.
+A way into a target, such as tmux, zellij or a plain shell. Modes are discovered through inspection, and you can cycle through them in the dashboard. The config can instead declare a target's modes explicitly, as custom ways of accessing it. Declared modes replace the discovered ones, and only show sessions if they name their multiplexer.
 
 ### Default mode
 

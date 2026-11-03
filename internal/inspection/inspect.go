@@ -5,55 +5,44 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/inspection/multiplexer"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/target"
 )
 
-type Request struct {
-	Metrics      []stats.Metric
-	BuiltinStats bool
-}
-
-type Snapshot struct {
-	OS       string
-	Readings []stats.Reading
-	Tools    []string
-	Sessions []multiplexer.Session
-}
+const commandTimeout = 5 * time.Second
 
 type section struct {
-	script func(Request) string
-	parse  func(request Request, out string, snapshot *Snapshot)
+	script func(target.StatsPolicy) string
+	parse  func(policy target.StatsPolicy, out string, environment *target.Environment)
 }
 
 var sections = []section{osSection, statsSection, toolsSection, sessionsSection}
 
-func Run(limit time.Duration, request Request, argv []string) (Snapshot, error) {
+func Run(limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
 	if len(argv) == 0 {
-		return Snapshot{}, errors.New("inspect: no command to run")
+		return target.Environment{}, errors.New("inspection: no command to run")
 	}
-	out, err := shell.NonInteractive(limit, script(request), argv[0], argv[1:]...)
+	out, err := shell.NonInteractive(limit, script(policy), argv[0], argv[1:]...)
 	if err != nil {
-		return Snapshot{}, err
+		return target.Environment{}, err
 	}
-	return Parse(out, request), nil
+	return Parse(out, policy), nil
 }
 
-func script(request Request) string {
-	lines := []string{stats.Preamble()}
+func script(policy target.StatsPolicy) string {
+	lines := []string{shell.Preamble(commandTimeout)}
 	for _, s := range sections {
-		lines = append(lines, s.script(request))
+		lines = append(lines, s.script(policy))
 	}
 	return strings.Join(append(lines, "true"), "\n")
 }
 
-func Parse(out string, request Request) Snapshot {
-	var snapshot Snapshot
+func Parse(out string, policy target.StatsPolicy) target.Environment {
+	var environment target.Environment
 	for _, s := range sections {
-		s.parse(request, out, &snapshot)
+		s.parse(policy, out, &environment)
 	}
-	return snapshot
+	return environment
 }
 
 func tagged(out, tag string) []string {

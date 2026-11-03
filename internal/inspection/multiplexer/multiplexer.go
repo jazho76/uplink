@@ -1,22 +1,20 @@
 package multiplexer
 
-type Window struct {
-	Name  string
-	Panes int
-}
-
-type Session struct {
-	Tool     string
-	Name     string
-	Attached bool
-	Windows  []Window
-}
+import "github.com/jazho76/uplink/internal/target"
 
 type Multiplexer interface {
 	Tool() string
 	Attach() string
 	Script() string
-	Parse(rows []string) []Session
+	Parse(rows []string) []target.Session
 }
 
 var All = []Multiplexer{Tmux{}, Zellij{}}
+
+func Tools() []string {
+	tools := make([]string, len(All))
+	for i, m := range All {
+		tools[i] = m.Tool()
+	}
+	return tools
+}

@@ -63,7 +63,7 @@ func (Provider) Default() bool {
 	return json.Unmarshal([]byte(out), &s) == nil && s.BackendState == running
 }
 
-func (Provider) Specs() ([]target.Spec, error) {
+func (Provider) Targets() ([]target.Target, error) {
 	out, err := list()
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (Provider) Specs() ([]target.Spec, error) {
 	return parse(out)
 }
 
-func parse(out string) ([]target.Spec, error) {
+func parse(out string) ([]target.Target, error) {
 	var s status
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		return nil, err
@@ -80,36 +80,39 @@ func parse(out string) ([]target.Spec, error) {
 		return nil, fmt.Errorf("not running (state %q)", s.BackendState)
 	}
 	magicDNS := s.CurrentTailnet != nil && s.CurrentTailnet.MagicDNSEnabled
-	var specs []target.Spec
+	var targets []target.Target
 	for _, p := range s.Peer {
-		if spec, ok := p.spec(magicDNS); ok {
-			specs = append(specs, spec)
+		if t, ok := p.target(magicDNS); ok {
+			targets = append(targets, t)
 		}
 	}
-	slices.SortFunc(specs, func(a, b target.Spec) int { return strings.Compare(a.Name, b.Name) })
-	return specs, nil
+	slices.SortFunc(targets, func(a, b target.Target) int { return strings.Compare(a.ID.Key, b.ID.Key) })
+	return targets, nil
 }
 
-func (p peer) spec(magicDNS bool) (target.Spec, bool) {
+func (p peer) target(magicDNS bool) (target.Target, bool) {
 	dnsName := strings.TrimSuffix(p.DNSName, ".")
 	key, _, _ := strings.Cut(dnsName, ".")
 	if key == "" || p.Location != nil || slices.Contains(unreachableOS, p.OS) {
-		return target.Spec{}, false
+		return target.Target{}, false
 	}
 	address := dnsName
 	if !magicDNS {
 		if len(p.TailscaleIPs) == 0 {
-			return target.Spec{}, false
+			return target.Target{}, false
 		}
 		address = p.TailscaleIPs[0]
 	}
 
-	quote := func(args ...string) string { return target.Quote(args) }
-	watch := true
-	return target.Spec{
-		Name:     key,
-		Via:      quote("ssh", "-t", "-o", "ConnectTimeout=2", address),
-		Exec:     quote("ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address),
-		Defaults: &target.Spec{Group: group, Watch: &watch},
+	return target.Target{
+		ID:    target.ID{Key: key},
+		Group: group,
+		Reach: target.Reach{
+			Interactive: []string{"ssh", "-t", "-o", "ConnectTimeout=2", address},
+			Background:  []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address},
+		},
+		Logs:  target.LogSource{Journal: true},
+		Watch: true,
+		Stats: target.StatsPolicy{Builtin: true},
 	}, true
 }

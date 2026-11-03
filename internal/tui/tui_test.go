@@ -11,8 +11,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspection"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -27,35 +25,35 @@ type fakeBackend struct {
 	logCalls    int
 }
 
-func (f *fakeBackend) Inspect(t target.Target) (inspection.Snapshot, error) {
+func (f *fakeBackend) Inspect(t target.Target) (target.Environment, error) {
 	f.inspections++
 	if f.down[t.Name] {
-		return inspection.Snapshot{}, errBoom{}
+		return target.Environment{}, errBoom{}
 	}
-	readings := make([]stats.Reading, len(t.Stats))
-	for i, m := range t.Stats {
+	readings := make([]target.Reading, len(t.Stats.Metrics))
+	for i, m := range t.Stats.Metrics {
 		readings[i] = reading(m, 0.1, 4)
 	}
-	return inspection.Snapshot{Readings: readings, Tools: f.tools[t.Name]}, nil
+	return target.Environment{Readings: readings, Tools: f.tools[t.Name]}, nil
 }
 
-var linuxMetrics = []stats.Metric{
-	{Type: stats.TypeGauge, Label: "load", Value: "x", Max: "x"},
-	{Type: stats.TypeGauge, Label: "memory", Value: "x", Max: "x", Unit: stats.UnitBytes},
-	{Type: stats.TypeGauge, Label: "disk", Value: "x", Max: "x", Unit: stats.UnitBytes},
-	{Type: stats.TypeText, Label: "up", Value: "x", Unit: stats.UnitSeconds},
+var linuxMetrics = []target.Metric{
+	{Type: target.TypeGauge, Label: "load", Value: "x", Max: "x"},
+	{Type: target.TypeGauge, Label: "memory", Value: "x", Max: "x", Unit: target.UnitBytes},
+	{Type: target.TypeGauge, Label: "disk", Value: "x", Max: "x", Unit: target.UnitBytes},
+	{Type: target.TypeText, Label: "up", Value: "x", Unit: target.UnitSeconds},
 }
 
-func reading(m stats.Metric, value, max float64) stats.Reading {
-	return stats.Reading{Metric: m, Value: value, Max: max, OK: true}
+func reading(m target.Metric, value, max float64) target.Reading {
+	return target.Reading{Metric: m, Value: value, Max: max, OK: true}
 }
 
-func loadReading(load, cores float64) stats.Reading {
+func loadReading(load, cores float64) target.Reading {
 	return reading(linuxMetrics[0], load, cores)
 }
 
-func linuxReadings(load, cores, used, total float64, uptime time.Duration) []stats.Reading {
-	return []stats.Reading{
+func linuxReadings(load, cores, used, total float64, uptime time.Duration) []target.Reading {
+	return []target.Reading{
 		loadReading(load, cores),
 		reading(linuxMetrics[1], used, total),
 		reading(linuxMetrics[2], used, total),
@@ -99,10 +97,10 @@ func hostTarget() target.Target {
 		ID:    configID("host"),
 		Name:  "host",
 		Group: "local",
-		Logs:  "journalctl",
-		Stats: linuxMetrics,
+		Logs:  target.LogSource{Command: "journalctl"},
+		Stats: target.StatsPolicy{Metrics: linuxMetrics},
 		Modes: []target.Mode{
-			{Name: "tmux", Argv: []string{"tmux"}},
+			{Name: "tmux", Argv: []string{"tmux"}, Multiplexer: "tmux"},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
 			{Name: "top", Argv: []string{"/bin/sh", "-c", "htop"}},
 		},
@@ -115,11 +113,11 @@ func vm(name string) target.Target {
 		ID:    configID(name),
 		Name:  name,
 		Group: "vms",
-		Via:   via,
-		Logs:  "tail serial.log",
-		Stats: linuxMetrics,
+		Reach: target.Reach{Interactive: via},
+		Logs:  target.LogSource{Command: "tail serial.log"},
+		Stats: target.StatsPolicy{Metrics: linuxMetrics},
 		Modes: []target.Mode{
-			{Name: "tmux", Argv: append(via, "tmux")},
+			{Name: "tmux", Argv: append(via, "tmux"), Multiplexer: "tmux"},
 			{Name: "shell", Argv: via},
 			{Name: "top", Argv: append(via, "htop")},
 		},
@@ -153,7 +151,7 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: inspection.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
+	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
 	return next.(model)
 }
 
@@ -194,7 +192,7 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Logs, quiet.Stats = "", nil
+	quiet.Logs, quiet.Stats = target.LogSource{}, target.StatsPolicy{}
 	m = withTargets(m, vm("forge"), quiet)
 
 	m = sized(focus(m, "forge"))
@@ -213,7 +211,7 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 func TestFooterTracksCapabilities(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Logs = ""
+	quiet.Logs = target.LogSource{}
 	m = sized(withTargets(m, vm("forge"), quiet))
 
 	m = focus(m, "forge")
@@ -263,7 +261,7 @@ func TestProbeResultSetsStatus(t *testing.T) {
 func TestReachabilityStandsInForStats(t *testing.T) {
 	m, backend := newTestModel()
 	quiet := remote("dojo")
-	quiet.Stats = nil
+	quiet.Stats = target.StatsPolicy{}
 	m = sized(withTargets(m, quiet))
 	m = focus(m, "dojo")
 
@@ -290,8 +288,8 @@ func (errBoom) Error() string { return "boom" }
 func withDefaultModes(name string) target.Target {
 	t := vm(name)
 	t.Modes = []target.Mode{
-		{Name: "tmux", Argv: append(slices.Clone(t.Via), "tmux"), Requires: "tmux"},
-		{Name: "shell", Argv: t.Via},
+		{Name: "tmux", Argv: append(slices.Clone(t.Reach.Interactive), "tmux"), Requires: "tmux", Multiplexer: "tmux"},
+		{Name: "shell", Argv: t.Reach.Interactive},
 	}
 	return t
 }
@@ -303,7 +301,7 @@ func focusedOn(name string) (model, *fakeBackend) {
 }
 
 func inspected(m model, name string, tools ...string) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: inspection.Snapshot{Tools: tools}, inspectOK: true})
+	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: target.Environment{Tools: tools}, inspectOK: true})
 	return next.(model)
 }
 
@@ -407,9 +405,9 @@ func focusedOnAutomaticModes(names ...string) model {
 	box := vm("box")
 	box.Modes = nil
 	for _, name := range names {
-		mode := target.Mode{Name: name, Argv: box.Via}
+		mode := target.Mode{Name: name, Argv: box.Reach.Interactive}
 		if name != "shell" {
-			mode.Requires = name
+			mode.Requires, mode.Multiplexer = name, name
 		}
 		box.Modes = append(box.Modes, mode)
 	}
@@ -510,9 +508,9 @@ func TestShellDefaultOffersOnlyShellUntilDiscovery(t *testing.T) {
 func TestMissingDefaultFallsToShellBeforeOtherMultiplexers(t *testing.T) {
 	box := vm("box")
 	box.Modes = []target.Mode{
-		{Name: "tmux", Argv: box.Via, Requires: "tmux"},
-		{Name: "shell", Argv: box.Via},
-		{Name: "zellij", Argv: box.Via, Requires: "zellij"},
+		{Name: "tmux", Argv: box.Reach.Interactive, Requires: "tmux", Multiplexer: "tmux"},
+		{Name: "shell", Argv: box.Reach.Interactive},
+		{Name: "zellij", Argv: box.Reach.Interactive, Requires: "zellij", Multiplexer: "zellij"},
 	}
 	m, _ := newTestModel()
 	m = focus(sized(withTargets(m, box)), "box")
@@ -693,7 +691,7 @@ func TestWatchChecksAreCapped(t *testing.T) {
 func TestStartAndStopRunTheHooks(t *testing.T) {
 	m, backend := newTestModel()
 	box := vm("nakama")
-	box.Up, box.Down = "limactl start nakama", "limactl stop nakama"
+	box.Power = &target.Power{Up: "limactl start nakama", Down: "limactl stop nakama"}
 	m = sized(withTargets(m, box, vm("plain")))
 	m = focus(m, "nakama").withSelectionRefreshed()
 
@@ -753,7 +751,7 @@ func finishHook(m model, cmd tea.Cmd) model {
 
 func startable(name string) target.Target {
 	t := vm(name)
-	t.Up = "limactl start " + name
+	t.Power = &target.Power{Up: "limactl start " + name}
 	return t
 }
 
@@ -836,7 +834,7 @@ func TestEnterOnADownTargetWithoutUpConnectsAnyway(t *testing.T) {
 func TestEnterWhileStoppingDoesNothing(t *testing.T) {
 	m, backend := newTestModel()
 	box := startable("nakama")
-	box.Down = "limactl stop nakama"
+	box.Power.Down = "limactl stop nakama"
 	m = focus(sized(withTargets(m, box)), "nakama").withSelectionRefreshed()
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
@@ -864,7 +862,7 @@ func TestStatusAndStatsAreSeparateChecks(t *testing.T) {
 func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 	m, backend := newTestModel()
 	box := vm("nakama")
-	box.Down = "limactl stop nakama"
+	box.Power = &target.Power{Down: "limactl stop nakama"}
 	m = sized(withTargets(m, box))
 	m = focus(m, "nakama").withSelectionRefreshed()
 
@@ -881,7 +879,7 @@ func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 func TestFailedHookReportsAndRechecks(t *testing.T) {
 	m, _ := newTestModel()
 	stuck := vm("stuck")
-	stuck.Down = "false"
+	stuck.Power = &target.Power{Down: "false"}
 	m = sized(withTargets(m, stuck))
 	m = focus(m, "stuck").withSelectionRefreshed()
 
@@ -1233,7 +1231,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspection.Snapshot{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: target.Environment{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -1250,7 +1248,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspection.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1282,7 +1280,7 @@ func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	if got := m.paneSummary(pane{}); got != "" {
 		t.Errorf("an empty pane has nothing to count, got %q", got)
 	}
-	if got := m.paneSummary(pane{items: []item{up}, local: true}); got != "" {
+	if got := m.paneSummary(pane{items: []item{up}, compact: true}); got != "" {
 		t.Errorf("the local pane shows no count, got %q", got)
 	}
 }
@@ -1395,31 +1393,31 @@ func TestPaneRowsSpreadSlackEvenly(t *testing.T) {
 }
 
 func TestLocalPaneKeepsItsHeight(t *testing.T) {
-	panes := []pane{{items: make([]item, 1), local: true}, {items: make([]item, 2)}, {items: make([]item, 2)}}
+	panes := []pane{{items: make([]item, 1), compact: true}, {items: make([]item, 2)}, {items: make([]item, 2)}}
 	rows := distributeRows(panes, 20)
 	if rows[0] != 1+borderCells || rows[0]+rows[1]+rows[2] != 20 {
 		t.Errorf("the local pane should stay one row tall and the rest fill the column, got %v", rows)
 	}
 
-	alone := distributeRows([]pane{{items: make([]item, 1), local: true}}, 20)
+	alone := distributeRows([]pane{{items: make([]item, 1), compact: true}}, 20)
 	if alone[0] != 20 {
 		t.Errorf("a lone local pane still fills the column, got %v", alone)
 	}
 }
 
-func TestPaneIsLocalOnlyWhenEveryTargetIs(t *testing.T) {
-	here := hostTarget()
-	here.Local = true
+func TestPaneIsCompactWhenNothingInItIsWatched(t *testing.T) {
+	watched := vm("forge")
+	watched.Watch = true
 	stray := vm("stray")
-	stray.Group = "local"
+	stray.Group, stray.Watch = "local", true
 
-	m := newModel([]target.Target{here, vm("forge")}, &fakeBackend{})
-	if !m.panes[0].local || m.panes[1].local {
-		t.Errorf("only the pane of local targets should be local, got %v and %v", m.panes[0].local, m.panes[1].local)
+	m := newModel([]target.Target{hostTarget(), watched}, &fakeBackend{})
+	if !m.panes[0].compact || m.panes[1].compact {
+		t.Errorf("only the unwatched pane should be compact, got %v and %v", m.panes[0].compact, m.panes[1].compact)
 	}
-	m = newModel([]target.Target{here, stray}, &fakeBackend{})
-	if m.panes[0].local {
-		t.Error("a pane mixing in other targets is not local")
+	m = newModel([]target.Target{hostTarget(), stray}, &fakeBackend{})
+	if m.panes[0].compact {
+		t.Error("a pane mixing in watched targets is not compact")
 	}
 }
 
@@ -1630,18 +1628,18 @@ func TestCursorSkipsAnEmptyGroup(t *testing.T) {
 }
 
 func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
-	gpu := stats.Metric{Type: stats.TypeGauge, Label: "gpu", Value: "x", Max: "100"}
-	cache := stats.Metric{Type: stats.TypeGauge, Label: "cache", Value: "x", Max: "x", Unit: stats.UnitBytes}
-	agents := stats.Metric{Type: stats.TypeText, Label: "agents", Value: "x"}
-	broken := stats.Metric{Type: stats.TypeGauge, Label: "broken", Value: "x", Max: "1"}
+	gpu := target.Metric{Type: target.TypeGauge, Label: "gpu", Value: "x", Max: "100"}
+	cache := target.Metric{Type: target.TypeGauge, Label: "cache", Value: "x", Max: "x", Unit: target.UnitBytes}
+	agents := target.Metric{Type: target.TypeText, Label: "agents", Value: "x"}
+	broken := target.Metric{Type: target.TypeGauge, Label: "broken", Value: "x", Max: "1"}
 
 	m, _ := newTestModel()
 	box := vm("box")
-	box.Stats = []stats.Metric{gpu, cache, agents, broken}
+	box.Stats = target.StatsPolicy{Metrics: []target.Metric{gpu, cache, agents, broken}}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
 	m.live[configID("box")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true,
-		snapshot: inspection.Snapshot{Readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
+		snapshot: target.Environment{Readings: []target.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}
@@ -1808,7 +1806,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 	m = probed(probed(m, "forge", true), "tokyo", true)
 
 	changed := vm("forge")
-	changed.Stats = linuxMetrics[1:2]
+	changed.Stats = target.StatsPolicy{Metrics: linuxMetrics[1:2]}
 	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
 
 	next, _ := m.Update(configEditedMsg{})
@@ -1839,7 +1837,7 @@ func TestSameNameFromAnotherSourceKeepsItsOwnState(t *testing.T) {
 	theirs := vm("box")
 	theirs.ID = target.ID{Source: "lima", Key: "box"}
 	theirs.Group = "lima"
-	theirs.Down = "limactl stop box"
+	theirs.Power = &target.Power{Down: "limactl stop box"}
 	m = sized(withTargets(m, vm("box"), theirs))
 	m = probed(m, "box", true)
 

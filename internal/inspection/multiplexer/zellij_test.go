@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jazho76/uplink/internal/target"
 )
 
 func fixtureRows(t *testing.T, name, tag string) []string {
@@ -25,7 +27,7 @@ func TestZellijReadsRealOutput(t *testing.T) {
 	rows := append([]string{"session 0"}, fixtureRows(t, "zellij-clients.txt", zellijClientTag)...)
 	rows = append(rows, fixtureRows(t, "zellij-panes.json", zellijPaneTag)...)
 
-	want := []Session{{Name: "0", Attached: true, Windows: []Window{
+	want := []target.Session{{Name: "0", Attached: true, Windows: []target.Window{
 		{Name: "Tab #1", Panes: 1},
 		{Name: "a  terminal_9  terminal  x", Panes: 2},
 		{Name: "notes", Panes: 1},
@@ -63,7 +65,7 @@ func TestZellijClientsBelongToTheirSession(t *testing.T) {
 func TestZellijOrdersTabsByPosition(t *testing.T) {
 	got := Zellij{}.Parse([]string{"session main",
 		`pane [{"tab_id":7,"tab_position":1,"tab_name":"second"},{"tab_id":3,"tab_position":0,"tab_name":"first"},{"tab_id":7,"tab_position":1,"tab_name":"second"}]`})
-	want := []Window{{Name: "first", Panes: 1}, {Name: "second", Panes: 2}}
+	want := []target.Window{{Name: "first", Panes: 1}, {Name: "second", Panes: 2}}
 	if len(got) != 1 || !reflect.DeepEqual(got[0].Windows, want) {
 		t.Errorf("want %+v, got %+v", want, got)
 	}
@@ -82,7 +84,7 @@ func TestZellijSessionSurvivesUnreadablePanes(t *testing.T) {
 		"no panes":    {"session main"},
 	} {
 		got := Zellij{}.Parse(rows)
-		want := []Session{{Name: "main"}}
+		want := []target.Session{{Name: "main"}}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: an older zellij should still show the name, got %+v", name, got)
 		}
@@ -91,9 +93,9 @@ func TestZellijSessionSurvivesUnreadablePanes(t *testing.T) {
 
 func TestZellijSessionsAreSortedByNameAndKeepSpaces(t *testing.T) {
 	got := Zellij{}.Parse([]string{"session my beta", `pane [{"tab_id":0,"tab_position":0,"tab_name":"b"}]`, "session alpha", `pane [{"tab_id":0,"tab_position":0,"tab_name":"a"}]`})
-	want := []Session{
-		{Name: "alpha", Windows: []Window{{Name: "a", Panes: 1}}},
-		{Name: "my beta", Windows: []Window{{Name: "b", Panes: 1}}},
+	want := []target.Session{
+		{Name: "alpha", Windows: []target.Window{{Name: "a", Panes: 1}}},
+		{Name: "my beta", Windows: []target.Window{{Name: "b", Panes: 1}}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("want %+v, got %+v", want, got)

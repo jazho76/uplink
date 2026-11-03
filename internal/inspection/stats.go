@@ -4,27 +4,28 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/inspection/stats"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 var builtinKernels = []string{"Linux", "Darwin"}
 
 var statsSection = section{
-	script: func(request Request) string {
-		if request.BuiltinStats {
+	script: func(policy target.StatsPolicy) string {
+		if policy.Builtin {
 			return builtinStatsScript()
 		}
-		return stats.Script(request.Metrics)
+		return stats.Script(policy.Metrics)
 	},
-	parse: func(request Request, out string, snapshot *Snapshot) {
-		metrics := request.Metrics
-		if request.BuiltinStats {
-			metrics = builtinMetrics(snapshot.OS)
+	parse: func(policy target.StatsPolicy, out string, environment *target.Environment) {
+		metrics := policy.Metrics
+		if policy.Builtin {
+			metrics = builtinMetrics(environment.OS)
 		}
-		snapshot.Readings = stats.Parse(out, metrics)
+		environment.Readings = stats.Parse(out, metrics)
 	},
 }
 
-func builtinMetrics(kernel string) []stats.Metric {
+func builtinMetrics(kernel string) []target.Metric {
 	return stats.ForOS(strings.ToLower(kernel))
 }
 

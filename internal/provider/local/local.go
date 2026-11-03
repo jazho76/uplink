@@ -20,12 +20,13 @@ func (Provider) Name() string { return name }
 
 func (Provider) Default() bool { return true }
 
-func (Provider) Specs() ([]target.Spec, error) {
+func (Provider) Targets() ([]target.Target, error) {
 	display, _ := hostname()
-	return []target.Spec{{
-		Name:     key,
-		Display:  display,
-		Local:    true,
-		Defaults: &target.Spec{Group: group},
+	return []target.Target{{
+		ID:    target.ID{Key: key},
+		Name:  display,
+		Group: group,
+		Logs:  target.LogSource{Journal: true},
+		Stats: target.StatsPolicy{Builtin: true},
 	}}, nil
 }

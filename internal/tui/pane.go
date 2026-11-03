@@ -15,11 +15,11 @@ const (
 )
 
 type pane struct {
-	group  string
-	key    rune
-	items  []item
-	cursor int
-	local  bool
+	group   string
+	key     rune
+	items   []item
+	cursor  int
+	compact bool
 }
 
 func assignPaneKeys(panes []pane) {
@@ -93,7 +93,7 @@ func distributeRows(panes []pane, total int) []int {
 	for i, p := range panes {
 		rows[i] = max(len(p.items)+borderCells, minPaneRows)
 		sum += rows[i]
-		if !p.local {
+		if !p.compact {
 			growing = append(growing, i)
 		}
 	}
@@ -146,7 +146,7 @@ func scrollHint(start, count, rows int) string {
 }
 
 func (m model) paneSummary(p pane) string {
-	if p.local || len(p.items) == 0 {
+	if p.compact || len(p.items) == 0 {
 		return ""
 	}
 	running := 0

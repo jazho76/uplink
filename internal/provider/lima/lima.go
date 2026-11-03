@@ -42,7 +42,7 @@ func (Provider) Default() bool {
 	return err == nil
 }
 
-func (Provider) Specs() ([]target.Spec, error) {
+func (Provider) Targets() ([]target.Target, error) {
 	out, err := list()
 	if err != nil {
 		return nil, err
@@ -51,11 +51,11 @@ func (Provider) Specs() ([]target.Spec, error) {
 	if err != nil {
 		return nil, err
 	}
-	specs := make([]target.Spec, len(instances))
+	targets := make([]target.Target, len(instances))
 	for i, vm := range instances {
-		specs[i] = vm.spec()
+		targets[i] = vm.target()
 	}
-	return specs, nil
+	return targets, nil
 }
 
 func parse(out string) ([]instance, error) {
@@ -76,20 +76,21 @@ func parse(out string) ([]instance, error) {
 	return instances, nil
 }
 
-func (vm instance) spec() target.Spec {
-	quote := func(args ...string) string { return target.Quote(args) }
-	watch := true
-	return target.Spec{
-		Name:   vm.Name,
-		Via:    quote("ssh", "-t", "-F", vm.SSHConfigFile, vm.Hostname),
-		Exec:   quote("ssh", "-F", vm.SSHConfigFile, vm.Hostname),
-		Status: "limactl list --format '{{.Status}}' " + quote(vm.Name) + " | grep -qx Running",
-		Up:     quote("limactl", "start", vm.Name),
-		Down:   quote("limactl", "stop", vm.Name),
-		Logs:   new(quote("tail", "-n", "500", vm.Dir+"/serial.log")),
-		Defaults: &target.Spec{
-			Group: group,
-			Watch: &watch,
+func (vm instance) target() target.Target {
+	return target.Target{
+		ID:    target.ID{Key: vm.Name},
+		Group: group,
+		Reach: target.Reach{
+			Interactive: []string{"ssh", "-t", "-F", vm.SSHConfigFile, vm.Hostname},
+			Background:  []string{"ssh", "-F", vm.SSHConfigFile, vm.Hostname},
 		},
+		Check: "limactl list --format '{{.Status}}' " + shell.Quote([]string{vm.Name}) + " | grep -qx Running",
+		Power: &target.Power{
+			Up:   shell.Quote([]string{"limactl", "start", vm.Name}),
+			Down: shell.Quote([]string{"limactl", "stop", vm.Name}),
+		},
+		Logs:  target.LogSource{Command: shell.Quote([]string{"tail", "-n", "500", vm.Dir + "/serial.log"})},
+		Watch: true,
+		Stats: target.StatsPolicy{Builtin: true},
 	}
 }

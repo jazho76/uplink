@@ -1,6 +1,7 @@
 package multiplexer
 
 import (
+	"github.com/jazho76/uplink/internal/target"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,16 +23,16 @@ func (Tmux) Script() string {
 $limit tmux list-windows -a -F '` + tmuxWindowTag + ` #{session_id} #{window_panes} #{window_name}' </dev/null`
 }
 
-func (Tmux) Parse(rows []string) []Session {
+func (Tmux) Parse(rows []string) []target.Session {
 	var (
-		sessions []Session
+		sessions []target.Session
 		ids      []string
 	)
 	for _, row := range rows {
 		if rest, ok := strings.CutPrefix(row, tmuxSessionTag+" "); ok {
 			if id, attached, name, ok := parseTmuxRow(rest); ok {
 				ids = append(ids, id)
-				sessions = append(sessions, Session{Name: name, Attached: attached > 0})
+				sessions = append(sessions, target.Session{Name: name, Attached: attached > 0})
 			}
 		}
 	}
@@ -43,7 +44,7 @@ func (Tmux) Parse(rows []string) []Session {
 				continue
 			}
 			session := &sessions[owner]
-			session.Windows = append(session.Windows, Window{Name: name, Panes: panes})
+			session.Windows = append(session.Windows, target.Window{Name: name, Panes: panes})
 		}
 	}
 	return sessions

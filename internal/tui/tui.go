@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/uplink/internal/inspection"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -48,7 +48,7 @@ const (
 
 type model struct {
 	targets   []target.Target
-	backend   target.Backend
+	backend   launcher.Backend
 	panes     []pane
 	focus     int
 	modeName  string
@@ -77,7 +77,7 @@ type peek struct {
 type liveEntry struct {
 	state       status
 	action      status
-	snapshot    inspection.Snapshot
+	snapshot    target.Environment
 	inspected   bool
 	inspectOK   bool
 	inspectedAt time.Time
@@ -87,7 +87,7 @@ type liveEntry struct {
 	epoch       int
 }
 
-func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), backend target.Backend) error {
+func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), backend launcher.Backend) error {
 	targets, problems := load()
 	m := newModel(targets, backend)
 	m.load, m.edit = load, edit
@@ -97,7 +97,7 @@ func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), b
 	return err
 }
 
-func newModel(targets []target.Target, backend target.Backend) model {
+func newModel(targets []target.Target, backend launcher.Backend) model {
 	m := model{
 		targets: targets,
 		backend: backend,
@@ -117,11 +117,11 @@ func (m *model) rebuild() {
 	for _, t := range m.targets {
 		i := slices.IndexFunc(panes, func(p pane) bool { return p.group == t.Group })
 		if i < 0 {
-			panes = append(panes, pane{group: t.Group, local: true})
+			panes = append(panes, pane{group: t.Group, compact: true})
 			i = len(panes) - 1
 		}
 		panes[i].items = append(panes[i].items, item{target: t})
-		panes[i].local = panes[i].local && t.Local
+		panes[i].compact = panes[i].compact && !t.Watch
 	}
 	assignPaneKeys(panes)
 	assignItemKeys(panes)
@@ -188,15 +188,7 @@ func (m model) selected() item {
 
 func (m model) modes(t target.Target) []target.Mode {
 	e := m.live[t.ID]
-	var modes []target.Mode
-	for i, mode := range t.Modes {
-		discovered := e.inspected && slices.Contains(e.snapshot.Tools, mode.Requires)
-		trustedDefault := !e.inspected && i == 0
-		if mode.Requires == "" || discovered || trustedDefault {
-			modes = append(modes, mode)
-		}
-	}
-	return modes
+	return target.AvailableModes(t, e.inspected, e.snapshot.Tools)
 }
 
 func (m model) modeIndex() int {
@@ -276,7 +268,7 @@ type liveMsg struct {
 	epoch     int
 	up        bool
 	full      bool
-	snapshot  inspection.Snapshot
+	snapshot  target.Environment
 	inspectOK bool
 }
 
@@ -300,7 +292,7 @@ func logTickCmd(round int) tea.Cmd {
 	return tea.Tick(logInterval, func(time.Time) tea.Msg { return logTickMsg{round: round} })
 }
 
-func checkCmd(backend target.Backend, t target.Target, full bool, epoch int) tea.Cmd {
+func checkCmd(backend launcher.Backend, t target.Target, full bool, epoch int) tea.Cmd {
 	return func() tea.Msg {
 		msg := liveMsg{id: t.ID, epoch: epoch, full: full}
 		msg.up = backend.Status(t) == nil
@@ -389,9 +381,9 @@ type hook struct {
 
 func (m model) hookFor(t target.Target, action status) hook {
 	if action == statusStarting {
-		return hook{command: t.Up, settled: statusUp, verb: "start", run: m.backend.Up}
+		return hook{command: t.StartCommand(), settled: statusUp, verb: "start", run: m.backend.Up}
 	}
-	return hook{command: t.Down, settled: statusDown, verb: "stop", run: m.backend.Down}
+	return hook{command: t.StopCommand(), settled: statusDown, verb: "stop", run: m.backend.Down}
 }
 
 func (m model) canHook(t target.Target, action status) bool {
@@ -443,15 +435,15 @@ func (m model) peekSelectedLogs() tea.Cmd {
 }
 
 func (m model) hasLogs(t target.Target) bool {
-	if t.Logs != "" {
+	if t.Logs.Command != "" {
 		return true
 	}
 	e := m.live[t.ID]
-	return t.GuestLogs && e.inspected && e.state != statusDown &&
-		slices.Contains(e.snapshot.Tools, inspection.ToolJournal)
+	return t.Logs.Journal && e.inspected && e.state != statusDown &&
+		slices.Contains(e.snapshot.Tools, target.ToolJournal)
 }
 
-func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {
+func peekLogsCmd(backend launcher.Backend, t target.Target) tea.Cmd {
 	return func() tea.Msg {
 		return logPeekMsg{id: t.ID, text: backend.Logs(t, maxLogPeek)}
 	}

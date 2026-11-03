@@ -5,6 +5,7 @@ import (
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/jazho76/uplink/internal/tui"
 )
@@ -18,5 +19,5 @@ func dashboard() error {
 		}
 		return exec.Command(config.Editor(), path), nil
 	}
-	return tui.Run(load, edit, target.System{})
+	return tui.Run(load, edit, launcher.System{})
 }

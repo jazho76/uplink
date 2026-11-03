@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jazho76/uplink/internal/inspection/stats"
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -29,7 +30,7 @@ func fixture(t *testing.T) {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := target.Merge(Provider{})
+	targets, err := inventory.Merge("", Provider{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,17 +52,17 @@ func TestContainerFacts(t *testing.T) {
 	fixture(t)
 	web := resolved(t)[1]
 
-	if want := []string{"docker", "exec", "-it", "web", "sh", "-c"}; !slices.Equal(web.Via, want) {
-		t.Errorf("via: got %q, want %q", web.Via, want)
+	if want := []string{"docker", "exec", "-it", "web", "sh", "-c"}; !slices.Equal(web.Reach.Interactive, want) {
+		t.Errorf("via: got %q, want %q", web.Reach.Interactive, want)
 	}
-	if want := []string{"docker", "exec", "-i", "web", "sh", "-c"}; !slices.Equal(web.Exec, want) {
-		t.Errorf("exec: got %q, want %q", web.Exec, want)
+	if want := []string{"docker", "exec", "-i", "web", "sh", "-c"}; !slices.Equal(web.Reach.Background, want) {
+		t.Errorf("exec: got %q, want %q", web.Reach.Background, want)
 	}
 	for _, c := range []struct{ field, got, want string }{
-		{"status", web.Status, `docker inspect -f '{{.State.Running}}' web 2>/dev/null | grep -qx true`},
-		{"up", web.Up, "docker start web"},
-		{"down", web.Down, "docker stop web"},
-		{"logs", web.Logs, `docker events --since 24h --until "$(date +%s)" --filter container=web --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}' | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$' | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`},
+		{"status", web.Check, `docker inspect -f '{{.State.Running}}' web 2>/dev/null | grep -qx true`},
+		{"up", web.StartCommand(), "docker start web"},
+		{"down", web.StopCommand(), "docker stop web"},
+		{"logs", web.Logs.Command, `docker events --since 24h --until "$(date +%s)" --filter container=web --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}' | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$' | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s: got %q, want %q", c.field, c.got, c.want)
@@ -72,8 +73,8 @@ func TestContainerFacts(t *testing.T) {
 func TestContainerDefaults(t *testing.T) {
 	fixture(t)
 	web := resolved(t)[1]
-	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats, containerPreset(t)) || web.BuiltinStats {
-		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats)
+	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats.Metrics, containerPreset(t)) || web.Stats.Builtin {
+		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats.Metrics)
 	}
 }
 
@@ -86,7 +87,7 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"bad json":        {out: "{not json"},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := target.Merge(Provider{})
+		targets, err := inventory.Merge("", Provider{})
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "docker: ") {
 			t.Errorf("%s: want no targets and a docker error, got %v and %v", name, targets, err)
 		}
@@ -119,7 +120,7 @@ func TestOnByDefaultOnlyWithARunningDaemon(t *testing.T) {
 	}
 }
 
-func containerPreset(t *testing.T) []stats.Metric {
+func containerPreset(t *testing.T) []target.Metric {
 	t.Helper()
 	metrics, ok := stats.Preset(stats.PresetContainer)
 	if !ok || len(metrics) == 0 {

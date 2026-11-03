@@ -171,7 +171,7 @@ func (m model) connect() (tea.Model, tea.Cmd) {
 	switch e := m.live[it.id()]; {
 	case e.action != "":
 		return m, nil
-	case e.state == statusDown && it.target.Up != "":
+	case e.state == statusDown && it.target.StartCommand() != "":
 		m.connectAfterStart = it.id()
 		return m.runHook(statusStarting)
 	}
@@ -212,7 +212,7 @@ func configEdited(err error) tea.Msg {
 func (m model) reload(editStatus string) (tea.Model, tea.Cmd) {
 	targets, problems := m.load()
 	for _, t := range targets {
-		if previous, ok := m.targetByID(t.ID); ok && (!slices.Equal(previous.Stats, t.Stats) || previous.BuiltinStats != t.BuiltinStats) {
+		if previous, ok := m.targetByID(t.ID); ok && (!slices.Equal(previous.Stats.Metrics, t.Stats.Metrics) || previous.Stats.Builtin != t.Stats.Builtin) {
 			e := m.live[t.ID]
 			e.snapshot.Readings, e.inspectOK = nil, false
 			m.live[t.ID] = e

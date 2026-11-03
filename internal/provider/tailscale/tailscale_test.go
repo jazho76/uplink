@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -29,7 +30,7 @@ func fixture(t *testing.T) string {
 
 func resolved(t *testing.T) []target.Target {
 	t.Helper()
-	targets, err := target.Merge(Provider{})
+	targets, err := inventory.Merge("", Provider{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,21 +52,21 @@ func TestListsReachablePeersByMagicDNSName(t *testing.T) {
 func TestPeerFacts(t *testing.T) {
 	fixture(t)
 	berlin := resolved(t)[1]
-	if want := []string{"ssh", "-t", "-o", "ConnectTimeout=2", "berlin.tail0000.ts.net"}; !slices.Equal(berlin.Via, want) {
-		t.Errorf("via: got %q, want %q", berlin.Via, want)
+	if want := []string{"ssh", "-t", "-o", "ConnectTimeout=2", "berlin.tail0000.ts.net"}; !slices.Equal(berlin.Reach.Interactive, want) {
+		t.Errorf("via: got %q, want %q", berlin.Reach.Interactive, want)
 	}
-	if want := []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", "berlin.tail0000.ts.net"}; !slices.Equal(berlin.Exec, want) {
-		t.Errorf("exec: got %q, want %q", berlin.Exec, want)
+	if want := []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", "berlin.tail0000.ts.net"}; !slices.Equal(berlin.Reach.Background, want) {
+		t.Errorf("exec: got %q, want %q", berlin.Reach.Background, want)
 	}
-	if berlin.Up != "" || berlin.Down != "" {
-		t.Errorf("uplink does not power remote machines, got up %q down %q", berlin.Up, berlin.Down)
+	if berlin.Power != nil {
+		t.Errorf("uplink does not power remote machines, got %+v", berlin.Power)
 	}
 }
 
 func TestAddressFallsBackToTheIPWithoutMagicDNS(t *testing.T) {
 	out := strings.Replace(fixture(t), `"MagicDNSEnabled": true`, `"MagicDNSEnabled": false`, 1)
 	listing(t, out, nil)
-	if via := resolved(t)[1].Via; via[len(via)-1] != "100.64.0.2" {
+	if via := resolved(t)[1].Reach.Interactive; via[len(via)-1] != "100.64.0.2" {
 		t.Errorf("want the first tailscale IP, got %q", via)
 	}
 }
@@ -75,16 +76,16 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 	targets := resolved(t)
 	mac, berlin := targets[0], targets[1]
 
-	if berlin.Group != "machines" || !berlin.Watch || !berlin.BuiltinStats {
-		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.BuiltinStats)
+	if berlin.Group != "machines" || !berlin.Watch || !berlin.Stats.Builtin {
+		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.Stats.Builtin)
 	}
 	for _, peer := range []target.Target{berlin, mac} {
-		if !peer.GuestLogs || peer.Logs != "" {
-			t.Errorf("%s: the core decides on guest logs, got %v and %q", peer.Name, peer.GuestLogs, peer.Logs)
+		if !peer.Logs.Journal || peer.Logs.Command != "" {
+			t.Errorf("%s: the core decides on guest logs, got %+v", peer.Name, peer.Logs)
 		}
 	}
-	if !mac.BuiltinStats {
-		t.Errorf("want built-in stats, got %v", mac.BuiltinStats)
+	if !mac.Stats.Builtin {
+		t.Errorf("want built-in stats, got %v", mac.Stats.Builtin)
 	}
 }
 
@@ -98,7 +99,7 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 		"stopped":      {out: `{"BackendState": "Stopped"}`},
 	} {
 		listing(t, c.out, c.err)
-		targets, err := target.Merge(Provider{})
+		targets, err := inventory.Merge("", Provider{})
 		if len(targets) != 0 || err == nil || !strings.HasPrefix(err.Error(), "tailscale: ") {
 			t.Errorf("%s: want no targets and a tailscale error, got %v and %v", name, targets, err)
 		}

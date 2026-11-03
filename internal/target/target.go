@@ -1,28 +1,19 @@
 package target
 
 import (
+	"errors"
+	"regexp"
 	"slices"
-	"strings"
-
-	"github.com/jazho76/uplink/internal/inspection/stats"
 )
 
 const (
 	ConfigSource = "config"
 	DefaultGroup = "ungrouped"
-	userShell    = `"${SHELL:-/bin/sh}"`
-	loginShell   = `exec ` + userShell + ` -l`
-
-	KindContainer = "container"
 )
 
-var localVia = []string{"sh", "-c"}
+var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
-type Mode struct {
-	Name     string
-	Argv     []string
-	Requires string
-}
+var localPrefix = []string{"sh", "-c"}
 
 type ID struct {
 	Source string
@@ -36,53 +27,96 @@ func (id ID) String() string {
 	return id.Source + "/" + id.Key
 }
 
-type Target struct {
-	ID     ID
-	Name   string
-	Group  string
-	Via    []string
-	Exec   []string
-	Status string
-	Up     string
-	Down   string
-	Logs   string
-	Watch  bool
-	Stats  []stats.Metric
-	Modes  []Mode
-	Local  bool
-
-	BuiltinStats bool
-	GuestLogs    bool
-}
-
-func (t Target) ArgvFor(command string) []string {
-	return withCommand(t.Via, command)
-}
-
-func (t Target) ExecArgvFor(command string) []string {
-	if len(t.Exec) == 0 {
-		return t.ArgvFor(command)
+func ValidateKey(key string) error {
+	if key == "" {
+		return errors.New("no name")
 	}
-	return withCommand(t.Exec, command)
+	if !namePattern.MatchString(key) {
+		return errors.New("name may only hold letters, digits, '.', '_' and '-'")
+	}
+	return nil
+}
+
+type Target struct {
+	ID    ID
+	Name  string
+	Group string
+	Reach Reach
+	Check string
+	Power *Power
+	Logs  LogSource
+	Watch bool
+	Stats StatsPolicy
+	Modes []Mode
+}
+
+func (t Target) StartCommand() string {
+	if t.Power == nil {
+		return ""
+	}
+	return t.Power.Up
+}
+
+func (t Target) StopCommand() string {
+	if t.Power == nil {
+		return ""
+	}
+	return t.Power.Down
+}
+
+type Reach struct {
+	Interactive []string
+	Background  []string
+}
+
+func (r Reach) Session(command string) []string {
+	return withCommand(r.Interactive, command)
+}
+
+func (r Reach) Probe(command string) []string {
+	if len(r.Background) > 0 {
+		return withCommand(r.Background, command)
+	}
+	return r.Session(command)
 }
 
 func withCommand(prefix []string, command string) []string {
 	if len(prefix) == 0 {
-		prefix = localVia
+		prefix = localPrefix
 	}
 	return append(slices.Clone(prefix), command)
 }
 
-func (m Mode) Command() string { return Quote(m.Argv) }
+type Power struct {
+	Up   string
+	Down string
+}
 
-func Quote(argv []string) string {
-	parts := make([]string, 0, len(argv))
-	for _, a := range argv {
-		if a == "" || strings.ContainsAny(a, " \t'\"") {
-			parts = append(parts, "'"+strings.ReplaceAll(a, "'", `'\''`)+"'")
-			continue
+type LogSource struct {
+	Command string
+	Journal bool
+}
+
+type StatsPolicy struct {
+	Builtin bool
+	Metrics []Metric
+}
+
+type Mode struct {
+	Name        string
+	Argv        []string
+	Multiplexer string
+	Requires    string
+}
+
+func AvailableModes(t Target, inspected bool, tools []string) []Mode {
+	var modes []Mode
+	for i, mode := range t.Modes {
+		found := inspected && slices.Contains(tools, mode.Requires)
+		assumedDefault := !inspected && i == 0
+		if mode.Requires == "" || found || assumedDefault {
+			modes = append(modes, mode)
 		}
-		parts = append(parts, a)
 	}
-	return strings.Join(parts, " ")
+	return modes
 }

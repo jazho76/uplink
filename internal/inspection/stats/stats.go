@@ -1,132 +1,43 @@
 package stats
 
 import (
-	"errors"
 	"fmt"
 	"math"
-	"slices"
 	"strconv"
 	"strings"
-	"time"
+
+	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/target"
 )
 
-const (
-	TypeGauge = "gauge"
-	TypeText  = "text"
-
-	UnitBytes   = "bytes"
-	UnitSeconds = "seconds"
-)
-
-type Metric struct {
-	Type  string `yaml:"type"`
-	Label string `yaml:"label"`
-	Value string `yaml:"value"`
-	Max   string `yaml:"max"`
-	Unit  string `yaml:"unit"`
-
-	Preset string `yaml:"-"`
-}
-
-func (m *Metric) UnmarshalYAML(unmarshal func(any) error) error {
-	if unmarshal(&m.Preset) == nil {
-		return nil
-	}
-	type plain Metric
-	return unmarshal((*plain)(m))
-}
-
-type Reading struct {
-	Metric Metric
-	Value  float64
-	Max    float64
-	Text   string
-	OK     bool
-}
-
-var (
-	types = []string{TypeGauge, TypeText}
-	units = []string{UnitBytes, UnitSeconds}
-)
-
-func (m Metric) Validate() error {
-	if !slices.Contains(types, m.Type) {
-		return fmt.Errorf("type must be one of %s, got %q", strings.Join(types, ", "), m.Type)
-	}
-	if m.Type == TypeText && m.Max != "" {
-		return errors.New("text takes no max")
-	}
-	switch {
-	case m.Label == "":
-		return fmt.Errorf("%s needs a label", m.Type)
-	case m.Value == "":
-		return fmt.Errorf("%s needs a value", m.Type)
-	case m.Gauge() && m.Max == "":
-		return errors.New("gauge needs a max")
-	}
-	if m.Unit != "" && !slices.Contains(units, m.Unit) {
-		return fmt.Errorf("unit must be one of %s, got %q", strings.Join(units, ", "), m.Unit)
-	}
-	return nil
-}
-
-func (m Metric) Gauge() bool { return m.Type == TypeGauge }
-
-func (m Metric) constantMax() (float64, bool) {
+func constantMax(m target.Metric) (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(m.Max), 64)
 	return v, err == nil && !math.IsNaN(v)
 }
 
-func (m Metric) maxCommand() string {
-	if _, constant := m.constantMax(); constant {
+func maxCommand(m target.Metric) string {
+	if _, constant := constantMax(m); constant {
 		return ""
 	}
 	return m.Max
 }
 
 func capture(tag, command string) string {
-	return fmt.Sprintf(`printf '%%s\n' %s"$($limit sh -c %s </dev/null 2>/dev/null | head -n 1)"`, quote(tag+" "), quote(command))
+	return fmt.Sprintf(`printf '%%s\n' %s"$($limit sh -c %s </dev/null 2>/dev/null | head -n 1)"`, shell.SingleQuote(tag+" "), shell.SingleQuote(command))
 }
 
-func quote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
-var metricTimeout = 5 * time.Second
-
-func Preamble() string {
-	return fmt.Sprintf(`if command -v timeout >/dev/null 2>&1; then
-  limit='timeout %[1]d'
-else
-  limited() { sh -c '
-    set -m
-    "$@" &
-    pid=$!
-    { sleep %[1]d && kill -KILL -$pid; } >/dev/null 2>&1 </dev/null &
-    watcher=$!
-    wait $pid
-    status=$?
-    kill $watcher 2>/dev/null
-    exit $status
-  ' sh "$@"; }
-  limit=limited
-fi
-login_path=$($limit "${SHELL:-/bin/sh}" -lc 'printenv PATH' </dev/null 2>/dev/null | tail -n 1)
-case "$login_path" in /*) PATH="$PATH:$login_path" ;; esac`, int(metricTimeout.Seconds()))
-}
-
-func Script(metrics []Metric) string {
+func Script(metrics []target.Metric) string {
 	var lines []string
 	for i, m := range metrics {
 		lines = append(lines, capture(fmt.Sprintf("%d value", i), m.Value))
-		if command := m.maxCommand(); command != "" {
+		if command := maxCommand(m); command != "" {
 			lines = append(lines, capture(fmt.Sprintf("%d max", i), command))
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-func Parse(out string, metrics []Metric) []Reading {
+func Parse(out string, metrics []target.Metric) []target.Reading {
 	values := map[int]string{}
 	maxes := map[int]string{}
 	for _, line := range strings.Split(out, "\n") {
@@ -144,17 +55,17 @@ func Parse(out string, metrics []Metric) []Reading {
 		}
 	}
 
-	readings := make([]Reading, len(metrics))
+	readings := make([]target.Reading, len(metrics))
 	for i, m := range metrics {
-		r := Reading{Metric: m, Text: values[i]}
+		r := target.Reading{Metric: m, Text: values[i]}
 		value, valueErr := strconv.ParseFloat(values[i], 64)
 		switch {
-		case m.Type == TypeText && m.Unit == "":
+		case m.Type == target.TypeText && m.Unit == "":
 			r.OK = r.Text != ""
-		case m.Type == TypeText:
+		case m.Type == target.TypeText:
 			r.Value, r.OK = value, valueErr == nil
 		default:
-			ceiling, constant := m.constantMax()
+			ceiling, constant := constantMax(m)
 			var maxErr error
 			if !constant {
 				ceiling, maxErr = strconv.ParseFloat(maxes[i], 64)
@@ -164,11 +75,4 @@ func Parse(out string, metrics []Metric) []Reading {
 		readings[i] = r
 	}
 	return readings
-}
-
-func (r Reading) Fraction() float64 {
-	if !r.OK || r.Max <= 0 {
-		return 0
-	}
-	return r.Value / r.Max
 }

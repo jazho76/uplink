@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
@@ -69,11 +68,11 @@ func checkConfig() error {
 		}
 		fmt.Printf("%s\n", header)
 		for _, f := range []struct{ key, value string }{
-			{"via", target.Quote(t.Via)},
-			{"exec", target.Quote(t.Exec)},
-			{"status", t.Status},
-			{"up", t.Up},
-			{"down", t.Down},
+			{"via", shell.Quote(t.Reach.Interactive)},
+			{"exec", shell.Quote(t.Reach.Background)},
+			{"check", t.Check},
+			{"up", t.StartCommand()},
+			{"down", t.StopCommand()},
 			{"logs", logsSummary(t)},
 			{"stats", statsSummary(t)},
 		} {
@@ -86,7 +85,7 @@ func checkConfig() error {
 			if i == 0 {
 				marker = "*"
 			}
-			fmt.Printf("  %s %-10s %s\n", marker, mode.Name, mode.Command())
+			fmt.Printf("  %s %-10s %s\n", marker, mode.Name, shell.Quote(mode.Argv))
 		}
 	}
 
@@ -97,22 +96,18 @@ func checkConfig() error {
 }
 
 func logsSummary(t target.Target) string {
-	if t.GuestLogs {
+	if t.Logs.Journal {
 		return "journal through exec, when present"
 	}
-	return t.Logs
+	return t.Logs.Command
 }
 
 func statsSummary(t target.Target) string {
-	if t.BuiltinStats {
+	if t.Stats.Builtin {
 		return "built-in (by OS)"
 	}
-	return statNames(t.Stats)
-}
-
-func statNames(metrics []stats.Metric) string {
-	names := make([]string, len(metrics))
-	for i, m := range metrics {
+	names := make([]string, len(t.Stats.Metrics))
+	for i, m := range t.Stats.Metrics {
 		names[i] = m.Label
 	}
 	return strings.Join(names, ", ")
