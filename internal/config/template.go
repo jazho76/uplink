@@ -11,8 +11,11 @@ const template = `# uplink config. Each target is a machine you can open a shell
 #         out to run on this machine.
 # exec    via for background probes, where no terminal is attached; defaults
 #         to via. Needed by tools that refuse -t without a terminal (docker).
-# check   host-side check, exit 0 means up; defaults to running true via exec.
+# check   host-side check: exit 0 means up, any other exit means down, and a
+#         timeout or a missing command means unknown. Left out, uplink tries to
+#         reach the target through exec, and failing to means unknown.
 # up      host-side start, run by ctrl+s and before entering a down target.
+#         Needs a check.
 # down    host-side stop, run by ctrl+x.
 # logs    host-side command whose output fills the log view (ctrl+l). Left
 #         out means the target's journal, when it has journalctl; "" means none.

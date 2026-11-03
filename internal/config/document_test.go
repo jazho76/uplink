@@ -672,3 +672,22 @@ echo "user shell"
 		}
 	}
 }
+
+func TestUpNeedsACheck(t *testing.T) {
+	targets, err := load(t, `
+targets:
+  - { name: fine, check: "true", up: start, modes: [{ name: shell }] }
+  - { name: stop-only, down: stop, modes: [{ name: shell }] }
+  - { name: blind, up: start, modes: [{ name: shell }] }
+`)
+	if err == nil || !strings.Contains(err.Error(), `"blind": up needs a check`) {
+		t.Errorf("want blind reported, got %v", err)
+	}
+	var names []string
+	for _, found := range targets {
+		names = append(names, found.Name)
+	}
+	if !slices.Equal(names, []string{"fine", "stop-only"}) {
+		t.Errorf("the others survive, got %v", names)
+	}
+}

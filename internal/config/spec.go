@@ -2,6 +2,7 @@ package config
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +57,9 @@ func (m *metricSpec) UnmarshalYAML(unmarshal func(any) error) error {
 func (s Spec) resolve() (target.Target, error) {
 	if err := target.ValidateKey(s.Name); err != nil {
 		return target.Target{}, err
+	}
+	if s.Up != "" && s.Check == "" {
+		return target.Target{}, errors.New("up needs a check, or uplink can't tell when to start it")
 	}
 	fill := func(v string) string { return strings.ReplaceAll(v, namePlaceholder, s.Name) }
 
