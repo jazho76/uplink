@@ -33,7 +33,7 @@ func load(t *testing.T, body string) ([]target.Target, error) {
 }
 
 func loadConfig(path string) ([]target.Target, error) {
-	return inventory.Load(context.Background(), path, nil)
+	return inventory.Load(context.Background(), inventory.Catalog{Path: path})
 }
 
 func mustLoad(t *testing.T, body string) []target.Target {

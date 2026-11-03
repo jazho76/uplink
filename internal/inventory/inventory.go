@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
@@ -35,21 +34,6 @@ type Found struct {
 	Err        error
 }
 
-func Load(ctx context.Context, path string, providers []Provider) ([]target.Target, error) {
-	doc, err := config.Read(path)
-	if err != nil {
-		return nil, err
-	}
-	names, explicit := enabled(doc, providers)
-	found, errs := discoverAll(ctx, names, explicit, providers)
-
-	declared, err := doc.Resolve()
-	errs = append(errs, err)
-	found = append(found, declaredFound(declared))
-	merged, err := Merge(doc.DefaultMode, found...)
-	return Targets(merged), errors.Join(append(errs, err)...)
-}
-
 func enabled(doc config.Document, providers []Provider) (names []string, explicit bool) {
 	if doc.Discover != nil {
 		return doc.Discover, true
@@ -58,28 +42,6 @@ func enabled(doc config.Document, providers []Provider) (names []string, explici
 		names = append(names, p.Name())
 	}
 	return names, false
-}
-
-func discoverAll(ctx context.Context, names []string, explicit bool, providers []Provider) ([]Found, []error) {
-	found := make([]Found, len(names))
-	errs := make([]error, len(names))
-	var running sync.WaitGroup
-	for i, name := range names {
-		found[i].Source = name
-		at := slices.IndexFunc(providers, func(p Provider) bool { return p.Name() == name })
-		if at < 0 {
-			errs[i] = fmt.Errorf("discover: unknown provider %q", name)
-			continue
-		}
-		running.Go(func() {
-			found[i].Discovered, found[i].Err = providers[at].Discover(ctx)
-			if !explicit && errors.Is(found[i].Err, ErrUnavailable) {
-				found[i].Err = nil
-			}
-		})
-	}
-	running.Wait()
-	return found, errs
 }
 
 func declaredFound(declared []target.Target) Found {

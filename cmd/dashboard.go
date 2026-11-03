@@ -12,7 +12,9 @@ import (
 )
 
 func openDashboard() error {
-	load := func() ([]target.Target, error) { return inventory.Load(context.Background(), config.Path(), providers) }
+	load := func() ([]target.Target, error) {
+		return inventory.Load(context.Background(), inventory.Catalog{Path: config.Path(), Providers: providers})
+	}
 	edit := func() (*exec.Cmd, error) {
 		path, err := config.Ensure()
 		if err != nil {

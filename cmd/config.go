@@ -56,7 +56,7 @@ func checkConfig() error {
 	}
 	fmt.Printf("config %s (%s)\n", path, state)
 
-	resolved, problems := inventory.Load(context.Background(), path, providers)
+	resolved, problems := inventory.Load(context.Background(), inventory.Catalog{Path: path, Providers: providers})
 	for _, t := range resolved {
 		fmt.Println()
 		header := t.ID.String()
