@@ -38,7 +38,7 @@ func TestFactsFollowEachResult(t *testing.T) {
 	boom := errors.New("boom")
 	env := target.Environment{Tools: []string{"tmux"}}
 	later := clock.Add(time.Minute)
-	observed, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	observed, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	observed, _ = observed.Apply(clock, Inspected{ID: vm.ID, Env: env})
 
 	for name, c := range map[string]struct {
@@ -49,10 +49,10 @@ func TestFactsFollowEachResult(t *testing.T) {
 	}{
 		"inspected":         {Inspected{ID: vm.ID, Env: env}, true, later, target.StatusUp},
 		"inspection failed": {Inspected{ID: vm.ID, Err: boom}, false, later, target.StatusUp},
-		"down full":         {Checked{ID: vm.ID, Full: true}, false, later, target.StatusDown},
-		"down not full":     {Checked{ID: vm.ID}, false, clock, target.StatusDown},
-		"up":                {Checked{ID: vm.ID, Up: true}, true, clock, target.StatusUp},
-		"up full":           {Checked{ID: vm.ID, Up: true, Full: true}, true, clock, target.StatusUp},
+		"down full":         {Checked{ID: vm.ID, Full: true, Status: target.StatusDown}, false, later, target.StatusDown},
+		"down not full":     {Checked{ID: vm.ID, Status: target.StatusDown}, false, clock, target.StatusDown},
+		"up":                {Checked{ID: vm.ID, Status: target.StatusUp}, true, clock, target.StatusUp},
+		"up full":           {Checked{ID: vm.ID, Status: target.StatusUp, Full: true}, true, clock, target.StatusUp},
 	} {
 		next, _ := observed.Apply(later, c.event)
 		got := next.Observation(vm.ID)
@@ -70,19 +70,19 @@ func TestFactsFollowEachResult(t *testing.T) {
 
 func TestStatusArrivesBeforeInspection(t *testing.T) {
 	vm := box("vm")
-	state, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	if state.Observation(vm.ID).Status != target.StatusUp {
 		t.Error("status is known at once")
 	}
 	if countEffects[Inspect](effects) != 1 {
 		t.Errorf("an up target is inspected next, got %+v", effects)
 	}
-	if _, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Full: true}); countEffects[Inspect](effects) != 0 {
+	if _, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Full: true, Status: target.StatusDown}); countEffects[Inspect](effects) != 0 {
 		t.Errorf("a down target is not inspected, got %+v", effects)
 	}
 	other := box("other")
 	moved := selected(other, vm)
-	if _, effects := moved.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true}); countEffects[Inspect](effects) != 0 {
+	if _, effects := moved.Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true}); countEffects[Inspect](effects) != 0 {
 		t.Errorf("only the selected target is inspected, got %+v", effects)
 	}
 }
@@ -95,7 +95,7 @@ func TestOldCheckIsDroppedButStillPeeksLogs(t *testing.T) {
 	current.epoch = 1
 	state.entries[vm.ID] = current
 
-	next, effects := state.Apply(clock, Checked{ID: vm.ID, Epoch: 0, Up: true, Full: true})
+	next, effects := state.Apply(clock, Checked{ID: vm.ID, Epoch: 0, Status: target.StatusUp, Full: true})
 	if next.Observation(vm.ID).Status != target.StatusUnknown {
 		t.Errorf("a check from before a power operation must not settle, got %+v", next.Observation(vm.ID))
 	}
@@ -135,7 +135,7 @@ func TestOlderConfigReadIsIgnored(t *testing.T) {
 
 func TestReloadWithChangedStatsInvalidatesThem(t *testing.T) {
 	vm := box("vm")
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{Readings: []target.Reading{{}}, Sessions: []target.Session{{Name: "s"}}}})
 	state, _ = state.Apply(clock, ReloadRequested{})
 
@@ -154,7 +154,7 @@ func TestReloadWithChangedStatsInvalidatesThem(t *testing.T) {
 func TestStartThenConnectIssuesRecheckAndConnection(t *testing.T) {
 	vm := box("vm")
 	vm.Power = &target.Power{Up: "start"}
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
 
 	state, effects := state.Apply(clock, ConnectRequested{})
 	if _, ok := effects[0].(Power); !ok || state.Observation(vm.ID).Operation != OperationStarting {
@@ -172,7 +172,7 @@ func TestStartThenConnectIssuesRecheckAndConnection(t *testing.T) {
 func TestFailedStartDoesNotConnect(t *testing.T) {
 	vm := box("vm")
 	vm.Power = &target.Power{Up: "start"}
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
 	state, _ = state.Apply(clock, ConnectRequested{})
 	next, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting, Err: errors.New("no")})
 	for _, effect := range effects {
@@ -188,7 +188,7 @@ func TestFailedStartDoesNotConnect(t *testing.T) {
 func TestFinishedStartForgetsThePendingConnection(t *testing.T) {
 	vm := box("vm")
 	vm.Power = &target.Power{Up: "start"}
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
 	state, _ = state.Apply(clock, ConnectRequested{})
 	state, _ = state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
 	if state.connectAfterStart != (target.ID{}) {
@@ -253,7 +253,7 @@ func TestEveryStatusIsCheckedAgain(t *testing.T) {
 		t.Error("an unknown target must be checked, or its status can never resolve")
 	}
 
-	state, _ = state.Apply(clock, Checked{ID: vm.ID, Full: true})
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Full: true, Status: target.StatusDown})
 	_, effects = state.Apply(clock.Add(LiveInterval), Selected{ID: vm.ID})
 	if countEffects[Check](effects) != 1 {
 		t.Error("a down target must be checked again, or it can never come back up")
@@ -274,7 +274,7 @@ func TestChecksNeverStack(t *testing.T) {
 		t.Error("a tick must not join a running check")
 	}
 
-	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
 	if _, effects := state.Apply(clock.Add(time.Second), Selected{ID: vm.ID}); countEffects[Check](effects) != 0 {
 		t.Error("a selection change right after a check should not repeat it")
@@ -302,9 +302,9 @@ func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
 		t.Fatalf("only the watched target is checked in the background, got %v", background)
 	}
 
-	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
-	state, _ = state.Apply(clock, Checked{ID: watched.ID})
+	state, _ = state.Apply(clock, Checked{ID: watched.ID, Status: target.StatusDown})
 	if got := state.Observation(watched.ID).Status; got != target.StatusDown {
 		t.Errorf("a watched target resolves without being selected, got %q", got)
 	}
@@ -355,7 +355,7 @@ func TestOpenLogScreenStopsPreviewPeeks(t *testing.T) {
 
 func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
 	vm := box("vm")
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
 	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
 	state, _ = state.Apply(clock, ReloadRequested{})
 	_, effects := state.Apply(clock, ConfigRead{Generation: 1, Plan: inventory.Plan{Declared: []target.Target{vm}}})
@@ -575,5 +575,30 @@ func TestProviderFailureDoesNotTakeOverTheNotice(t *testing.T) {
 	state, _ = state.Apply(clock, ConnectionEnded{})
 	if got := state.Notice(); !strings.Contains(got, "timed out") {
 		t.Errorf("the problem shows once the notice clears, got %q", got)
+	}
+}
+
+func TestUnknownCarriesItsReasonUntilResolved(t *testing.T) {
+	vm := box("vm")
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUnknown, Reason: "Permission denied"})
+	if got := state.Observation(vm.ID); got.Status != target.StatusUnknown || got.Reason != "Permission denied" {
+		t.Errorf("got %+v", got)
+	}
+	if _, effects := state.Apply(clock, Checked{ID: vm.ID, Status: target.StatusUnknown, Full: true}); countEffects[Inspect](effects) != 0 {
+		t.Errorf("only an up target is inspected, got %+v", effects)
+	}
+	state, _ = state.Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown, Reason: "exit 1"})
+	if got := state.Observation(vm.ID).Reason; got != "" {
+		t.Errorf("only unknown has a reason, got %q", got)
+	}
+}
+
+func TestFailedDiscoveryExplainsTheUnknown(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima").Select(vm.ID)
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Err: errors.New("limactl broke")})
+	if got := state.Observation(vm.ID); got.Status != target.StatusUnknown || got.Reason != "limactl broke" {
+		t.Errorf("got %+v", got)
 	}
 }

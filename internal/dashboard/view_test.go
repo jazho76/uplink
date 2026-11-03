@@ -333,7 +333,7 @@ func focusedOnGuestLogs() (model, *fakeBackend) {
 }
 
 func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
-	up, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true})
+	up, _ := m.Update(launcher.Checked{ID: configID("box"), Status: target.StatusUp, Full: true})
 	next, cmd := up.(model).Update(launcher.Inspected{ID: configID("box"), Env: target.Environment{Tools: tools}})
 	return next.(model), cmd
 }
@@ -384,7 +384,7 @@ func TestGuestLogsStopWhileDown(t *testing.T) {
 func TestHostSideLogsSurviveDown(t *testing.T) {
 	m, backend := newTestModel()
 	backend.logs["forge"] = "serial line"
-	next, cmd := focus(sized(m), "forge").Update(launcher.Checked{ID: configID("forge"), Full: true})
+	next, cmd := focus(sized(m), "forge").Update(launcher.Checked{ID: configID("forge"), Full: true, Status: target.StatusDown})
 	m = applyCmd(next.(model), cmd)
 	if !strings.Contains(preview(m), "serial line") || !strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf("host-side logs do not need the target up:\n%s", preview(m))
@@ -430,7 +430,7 @@ func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 func modeTagOf(m model) string { return ansi.Strip(m.modeTag(m.selected())) }
 
 func wentDown(m model, name string) model {
-	next, _ := m.Update(launcher.Checked{ID: configID(name)})
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Status: target.StatusDown})
 	return next.(model)
 }
 
@@ -458,7 +458,7 @@ func TestDownTargetTagCountsOnlyWhatItOffers(t *testing.T) {
 
 func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
 	m, _ := focusedOn("box")
-	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true})
+	next, _ := m.Update(launcher.Checked{ID: configID("box"), Status: target.StatusUp})
 	if got := modeTagOf(next.(model)); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
 		t.Errorf("want plain tmux while up, got %q", got)
 	}
@@ -512,5 +512,39 @@ func TestSessionsFollowTheModesMultiplexerNotItsName(t *testing.T) {
 	m = key(m, "tab")
 	if got := preview(m); strings.Contains(got, "main") {
 		t.Errorf("a mode only called tmux shows none:\n%s", got)
+	}
+}
+
+func TestPreviewExplainsUnknown(t *testing.T) {
+	m := focus(sized(func() model { m, _ := newTestModel(); return m }()), "forge")
+	next, _ := m.Update(launcher.Checked{ID: configID("forge"), Status: target.StatusUnknown, Reason: "Permission denied\x1b[31m"})
+	m = next.(model)
+	if got := preview(m); !strings.Contains(got, "Permission denied") {
+		t.Errorf("want the reason, got:\n%s", got)
+	}
+	if got := m.previewBody(60, 30); strings.Contains(got, "\x1b[31mPermission") {
+		t.Errorf("a target must not be able to style the dashboard through it:\n%q", got)
+	}
+	next, _ = m.Update(launcher.Checked{ID: configID("forge"), Status: target.StatusDown})
+	if got := preview(next.(model)); strings.Contains(got, "Permission denied") {
+		t.Errorf("a known status needs no explaining, got:\n%s", got)
+	}
+}
+
+func TestPaneSummaryOnlyHidesForNeverChecked(t *testing.T) {
+	forge, tokyo := vm("forge"), vm("tokyo")
+	forge.Watch, tokyo.Watch = true, true
+	m, _ := newTestModel()
+	m = sized(withTargets(m, forge, tokyo))
+	vms := m.panes[1]
+	if got := m.paneSummary(vms); got != "" {
+		t.Errorf("nothing is known yet, got %q", got)
+	}
+	for _, name := range []string{"forge", "tokyo"} {
+		next, _ := m.Update(launcher.Checked{ID: configID(name), Status: target.StatusUnknown, Reason: "unreachable"})
+		m = next.(model)
+	}
+	if got := m.paneSummary(vms); got != "0 up" {
+		t.Errorf("a stuck unknown must not hide the summary, got %q", got)
 	}
 }

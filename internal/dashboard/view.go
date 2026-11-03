@@ -109,6 +109,9 @@ func (m model) previewBody(width, height int) string {
 	var b strings.Builder
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + m.statusOf(it.target)
 	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
+	if observation := m.state.Observation(it.id()); observation.Status == target.StatusUnknown && observation.Reason != "" {
+		b.WriteString(labelStyle.Render(clip(observation.Reason, width)) + "\n")
+	}
 
 	if m.showsLive(it.target) {
 		b.WriteString("\n" + rule("live", width))

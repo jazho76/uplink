@@ -40,10 +40,11 @@ type (
 	}
 
 	Checked struct {
-		ID    target.ID
-		Epoch int
-		Up    bool
-		Full  bool
+		ID     target.ID
+		Epoch  int
+		Status target.Status
+		Reason string
+		Full   bool
 	}
 
 	Inspected struct {

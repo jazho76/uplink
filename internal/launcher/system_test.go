@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -18,21 +20,50 @@ func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
 	}
 }
 
-func TestStatusPrefersTheHook(t *testing.T) {
-	if err := (System{}).Status(context.Background(), target.Target{Check: "true", Reach: target.Reach{Interactive: []string{"false"}}}); err != nil {
-		t.Errorf("a passing hook means up, regardless of via: %v", err)
+func TestStatusFromACheck(t *testing.T) {
+	via := target.Reach{Interactive: []string{"false"}}
+	for name, c := range map[string]struct {
+		check string
+		want  target.Status
+	}{
+		"exit 0 is up":             {"true", target.StatusUp},
+		"other exits are down":     {"exit 3", target.StatusDown},
+		"grep finding nothing":     {"false", target.StatusDown},
+		"a missing tool can't say": {"uplink-no-such-tool", target.StatusUnknown},
+		"not executable can't say": {"exit 126", target.StatusUnknown},
+	} {
+		got, _ := System{}.Status(context.Background(), target.Target{Check: c.check, Reach: via})
+		if got != c.want {
+			t.Errorf("%s: want %s, got %s", name, c.want, got)
+		}
 	}
-	if err := (System{}).Status(context.Background(), target.Target{Check: "false"}); err == nil {
-		t.Errorf("a failing hook means down")
+}
+
+func TestSlowCheckIsUnknown(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	got, err := System{}.Status(ctx, target.Target{Check: "sleep 5"})
+	if got != target.StatusUnknown {
+		t.Errorf("uplink could not find out, got %s", got)
 	}
-	if err := (System{}).Status(context.Background(), target.Target{}); err != nil {
-		t.Errorf("a local target without a hook is up: %v", err)
+	if reason := shell.Describe(err); reason != "timed out" {
+		t.Errorf("got %q", reason)
 	}
-	if err := (System{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}}}); err == nil {
-		t.Errorf("without a hook, a failing transport means down")
+}
+
+func TestStatusByReachingIt(t *testing.T) {
+	if got, err := (System{}).Status(context.Background(), target.Target{}); got != target.StatusUp || err != nil {
+		t.Errorf("a local target is up, got %s and %v", got, err)
 	}
-	if err := (System{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c"}}}); err != nil {
-		t.Errorf("without a hook, exec carries the check: %v", err)
+	got, err := System{}.Status(context.Background(), target.Target{Reach: target.Reach{Background: []string{"sh", "-c", "echo 'Permission denied' >&2; exit 255"}}})
+	if got != target.StatusUnknown {
+		t.Errorf("failing to reach it says nothing about whether it is alive, got %s", got)
+	}
+	if reason := shell.Describe(err); reason != "Permission denied" {
+		t.Errorf("the reason comes from stderr, got %q", reason)
+	}
+	if got, _ := (System{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c"}}}); got != target.StatusUp {
+		t.Errorf("background carries the check, got %s", got)
 	}
 }
 

@@ -26,6 +26,7 @@ type Provider interface {
 type Discovered struct {
 	Target target.Target
 	Status target.Status
+	Reason string
 }
 
 type Found struct {
@@ -92,7 +93,7 @@ func Merge(defaultMode string, found ...Found) ([]Discovered, error) {
 				continue
 			}
 			seen[t.ID] = true
-			merged = append(merged, Discovered{Target: withDefaults(t, defaultMode), Status: d.Status})
+			merged = append(merged, Discovered{Target: withDefaults(t, defaultMode), Status: d.Status, Reason: d.Reason})
 		}
 	}
 	return merged, errors.Join(errs...)

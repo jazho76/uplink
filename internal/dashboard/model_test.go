@@ -64,12 +64,12 @@ func linuxReadings(load, cores, used, total float64, uptime time.Duration) []tar
 	}
 }
 
-func (f *fakeBackend) Status(_ context.Context, t target.Target) error {
+func (f *fakeBackend) Status(_ context.Context, t target.Target) (target.Status, error) {
 	f.statuses++
 	if f.down[t.Name] {
-		return errBoom{}
+		return target.StatusDown, errBoom{}
 	}
-	return nil
+	return target.StatusUp, nil
 }
 
 func (f *fakeBackend) Up(_ context.Context, t target.Target) error {
@@ -183,13 +183,13 @@ func observed(m model, name string, env target.Environment) model {
 }
 
 func reported(m model, id target.ID, env target.Environment) model {
-	up, _ := m.Update(launcher.Checked{ID: id, Up: true, Full: true})
+	up, _ := m.Update(launcher.Checked{ID: id, Status: target.StatusUp, Full: true})
 	next, _ := up.(model).Update(launcher.Inspected{ID: id, Env: env})
 	return next.(model)
 }
 
 func failedInspection(m model, id target.ID) model {
-	up, _ := m.Update(launcher.Checked{ID: id, Up: true, Full: true})
+	up, _ := m.Update(launcher.Checked{ID: id, Status: target.StatusUp, Full: true})
 	next, _ := up.(model).Update(launcher.Inspected{ID: id, Err: errBoom{}})
 	return next.(model)
 }
@@ -239,7 +239,7 @@ func probed(m model, name string, up bool) model {
 	if up {
 		return reported(m, configID(name), target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)})
 	}
-	next, _ := m.Update(launcher.Checked{ID: configID(name), Full: true})
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Full: true, Status: target.StatusDown})
 	return next.(model)
 }
 
@@ -549,8 +549,8 @@ func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
 	}
 	for name, arrange := range map[string]func(model) model{
 		"never checked":     func(m model) model { return m },
-		"down":              send(launcher.Checked{ID: box, Full: true}),
-		"up, not inspected": send(launcher.Checked{ID: box, Up: true}),
+		"down":              send(launcher.Checked{ID: box, Full: true, Status: target.StatusDown}),
+		"up, not inspected": send(launcher.Checked{ID: box, Status: target.StatusUp}),
 		"failed inspection": func(m model) model { return failedInspection(m, box) },
 	} {
 		m := arrange(focusedOnAutomaticModes("tmux", "zellij", "shell"))
@@ -918,7 +918,7 @@ func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 
 	m = pressHook(m, tea.KeyCtrlX)
 	backend.down["nakama"] = false
-	next, _ := m.Update(launcher.Checked{ID: box.ID, Epoch: 0, Up: true})
+	next, _ := m.Update(launcher.Checked{ID: box.ID, Epoch: 0, Status: target.StatusUp})
 	m = next.(model)
 	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("a check issued before the hook must not overwrite its outcome, got %q", got)

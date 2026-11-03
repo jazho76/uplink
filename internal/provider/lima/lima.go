@@ -54,7 +54,7 @@ func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	}
 	found := make([]inventory.Discovered, len(instances))
 	for i, vm := range instances {
-		found[i] = inventory.Discovered{Target: vm.target(), Status: vm.status()}
+		found[i] = inventory.Discovered{Target: vm.target(), Status: vm.status(), Reason: "lima reports " + vm.Status}
 	}
 	return found, nil
 }

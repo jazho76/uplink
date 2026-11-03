@@ -60,7 +60,7 @@ func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	}
 	found := make([]inventory.Discovered, len(containers))
 	for i, c := range containers {
-		found[i] = inventory.Discovered{Target: containerTarget(c.name()), Status: c.status()}
+		found[i] = inventory.Discovered{Target: containerTarget(c.name()), Status: c.status(), Reason: "docker reports " + c.State}
 	}
 	return found, nil
 }

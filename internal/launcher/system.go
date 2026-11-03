@@ -18,13 +18,16 @@ const (
 	powerTimeout = 10 * time.Minute
 	logsTimeout  = 2 * time.Second
 
+	exitCannotRun = 126
+	exitNotFound  = 127
+
 	journalTimeout = 10 * time.Second
 	journalCommand = "journalctl --system -n 500 --no-pager -o short"
 )
 
 type Backend interface {
 	Inspect(context.Context, target.Target) (target.Environment, error)
-	Status(context.Context, target.Target) error
+	Status(context.Context, target.Target) (target.Status, error)
 	Up(context.Context, target.Target) error
 	Down(context.Context, target.Target) error
 	Logs(ctx context.Context, t target.Target, lines int) string
@@ -36,13 +39,29 @@ func (System) Inspect(ctx context.Context, t target.Target) (target.Environment,
 	return inspection.Run(ctx, probeCeiling, t.Stats, t.Reach.Probe("sh"))
 }
 
-func (System) Status(ctx context.Context, t target.Target) error {
+func (System) Status(ctx context.Context, t target.Target) (target.Status, error) {
 	if t.Check != "" {
-		return hook(ctx, checkTimeout, t.Check)
+		_, err := shell.NonInteractive(ctx, checkTimeout, "", "sh", "-c", t.Check)
+		return checkStatus(err), err
 	}
 	argv := t.Reach.Probe("true")
 	_, err := shell.NonInteractive(ctx, probeCeiling, "", argv[0], argv[1:]...)
-	return err
+	if err != nil {
+		return target.StatusUnknown, err
+	}
+	return target.StatusUp, nil
+}
+
+func checkStatus(err error) target.Status {
+	code, exited := shell.ExitCode(err)
+	switch {
+	case err == nil:
+		return target.StatusUp
+	case shell.Interrupted(err), !exited, code == exitCannotRun, code == exitNotFound:
+		return target.StatusUnknown
+	default:
+		return target.StatusDown
+	}
 }
 
 func (System) Up(ctx context.Context, t target.Target) error {

@@ -152,10 +152,10 @@ func (m model) paneSummary(p pane) string {
 	}
 	running := 0
 	for _, it := range p.items {
-		switch m.state.Observation(it.id()).Status {
-		case target.StatusUnknown:
+		switch observation := m.state.Observation(it.id()); {
+		case observation.Status == target.StatusUnknown && observation.Reason == "":
 			return ""
-		case target.StatusUp:
+		case observation.Status == target.StatusUp:
 			running++
 		}
 	}

@@ -39,6 +39,7 @@ const (
 
 type Observation struct {
 	Status    target.Status
+	Reason    string
 	Operation Operation
 	Stats     target.Fact[[]target.Reading]
 	Tools     target.Fact[[]string]
@@ -193,7 +194,7 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 			return nil
 		}
 		var effects []Effect
-		if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Up {
+		if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Status == target.StatusUp {
 			effects = s.inspect(t)
 		}
 		return append(effects, s.peekSelectedIfStale(now)...)
@@ -344,12 +345,9 @@ func (s *State) settle(now time.Time, e Checked) bool {
 		return false
 	}
 	current.checking, current.checkedAt = false, now
-	current.Status = target.StatusDown
-	if e.Up {
-		current.Status = target.StatusUp
-	}
+	current.Status, current.Reason = e.Status, reasonFor(e.Status, e.Reason)
 	switch {
-	case e.Up:
+	case e.Status == target.StatusUp:
 	case e.Full:
 		current.failInspection(errDown, now)
 	default:
@@ -357,6 +355,13 @@ func (s *State) settle(now time.Time, e Checked) bool {
 	}
 	s.entries[e.ID] = current
 	return true
+}
+
+func reasonFor(status target.Status, reason string) string {
+	if status == target.StatusUnknown {
+		return reason
+	}
+	return ""
 }
 
 func (e *entry) failInspection(err error, at time.Time) {
@@ -535,7 +540,7 @@ func (s *State) adopt(now time.Time) {
 func (s *State) observeReported(now time.Time, d inventory.Discovered) {
 	current := s.entries[d.Target.ID]
 	wasUp := current.Status == target.StatusUp
-	current.Status = d.Status
+	current.Status, current.Reason = d.Status, reasonFor(d.Status, d.Reason)
 	switch {
 	case d.Status != target.StatusUp:
 		current.failInspection(errDown, now)

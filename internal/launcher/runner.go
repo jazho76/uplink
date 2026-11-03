@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/shell"
 )
 
 const stopWait = 2 * time.Second
@@ -80,7 +81,8 @@ func (r *Runner) operate(ctx context.Context, e Power) Event {
 func (r *Runner) probe(ctx context.Context, effect Effect) Event {
 	switch e := effect.(type) {
 	case Check:
-		return Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full, Up: r.Backend.Status(ctx, e.Target) == nil}
+		status, err := r.Backend.Status(ctx, e.Target)
+		return Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full, Status: status, Reason: shell.Describe(err)}
 
 	case PeekLogs:
 		return LogsPeeked{ID: e.Target.ID, Text: r.Backend.Logs(ctx, e.Target, maxLogPeek)}

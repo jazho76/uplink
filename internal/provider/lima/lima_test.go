@@ -113,6 +113,9 @@ func TestReportsStatus(t *testing.T) {
 		if err != nil || len(merged) != 1 || merged[0].Status != want {
 			t.Errorf("%s: want %s, got %+v and %v", state, want, merged, err)
 		}
+		if merged[0].Reason != "lima reports "+state {
+			t.Errorf("%s: got reason %q", state, merged[0].Reason)
+		}
 	}
 }
 

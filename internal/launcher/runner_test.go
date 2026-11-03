@@ -23,11 +23,11 @@ type blockingBackend struct {
 	release       chan struct{}
 }
 
-func (b blockingBackend) Status(ctx context.Context, _ target.Target) error {
+func (b blockingBackend) Status(ctx context.Context, _ target.Target) (target.Status, error) {
 	close(b.statusStarted)
 	<-ctx.Done()
 	b.statusErr <- ctx.Err()
-	return ctx.Err()
+	return target.StatusUnknown, ctx.Err()
 }
 
 func (b blockingBackend) Up(ctx context.Context, _ target.Target) error {
@@ -100,7 +100,7 @@ func TestStopKillsTheProbeProcess(t *testing.T) {
 	}
 
 	runner.Stop()
-	if checked, ok := (<-finished).(Checked); !ok || checked.Up {
+	if checked, ok := (<-finished).(Checked); !ok || checked.Status != target.StatusUnknown {
 		t.Errorf("got %+v", checked)
 	}
 	time.Sleep(50 * time.Millisecond)

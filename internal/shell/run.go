@@ -43,6 +43,27 @@ func NonInteractive(ctx context.Context, limit time.Duration, stdin, bin string,
 	}
 }
 
+func ExitCode(err error) (int, bool) {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return 0, false
+	}
+	return exitErr.ExitCode(), true
+}
+
+func Describe(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case Interrupted(err):
+		return "timed out"
+	}
+	if tail := StderrTail(err); tail != "" {
+		return tail
+	}
+	return err.Error()
+}
+
 func Interrupted(err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
