@@ -25,3 +25,19 @@ func (m model) renderLogs() string {
 
 	return lipgloss.JoinVertical(lipgloss.Left, truncate(header, m.width), body, footer)
 }
+
+func logTail(logs string, width, room int) string {
+	if logs == "" || room <= 0 {
+		return ""
+	}
+	lines := strings.Split(logs, "\n")
+	if len(lines) > room {
+		lines = lines[len(lines)-room:]
+	}
+	var b strings.Builder
+	b.WriteString("\n" + rule("logs", width))
+	for _, line := range lines {
+		b.WriteString(detailLogStyle.Render(truncate(line, width)) + "\n")
+	}
+	return b.String()
+}

@@ -28,9 +28,9 @@ func (m model) previewBody(width, height int) string {
 		b.WriteString(modeMarker.Render("connecting") + "  " + keyStyle.Render("esc") + " " + labelStyle.Render("cancel") + "\n")
 	}
 
-	if m.showsLive(it.target) {
+	if m.showsStats(it.target) {
 		b.WriteString("\n" + rule("live", width))
-		b.WriteString(m.renderLive(it.id(), width))
+		b.WriteString(m.renderStats(it.id(), width))
 	}
 
 	if sessions := m.renderSessions(it.id(), width); sessions != "" {
@@ -38,20 +38,8 @@ func (m model) previewBody(width, height int) string {
 		b.WriteString(sessions)
 	}
 
-	if logs := m.state.Logs(it.target); logs != "" {
-		used := strings.Count(b.String(), "\n")
-		fit := height - used - 2
-		if fit > 0 {
-			lines := strings.Split(logs, "\n")
-			if len(lines) > fit {
-				lines = lines[len(lines)-fit:]
-			}
-			b.WriteString("\n" + rule("logs", width))
-			for _, line := range lines {
-				b.WriteString(detailLogStyle.Render(truncate(line, width)) + "\n")
-			}
-		}
-	}
+	used := strings.Count(b.String(), "\n")
+	b.WriteString(logTail(m.state.Logs(it.target), width, height-used-2))
 	return clampBlock(b.String(), width, height)
 }
 

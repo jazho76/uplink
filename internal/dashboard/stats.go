@@ -13,10 +13,10 @@ const (
 	gaugeGap     = 3
 	percentGap   = 2
 	percentWidth = len("100%")
-	minLiveBar   = 8
+	minStatsBar  = 8
 )
 
-func (m model) showsLive(t target.Target) bool {
+func (m model) showsStats(t target.Target) bool {
 	if !t.Stats.Builtin {
 		return len(t.Stats.Metrics) > 0
 	}
@@ -27,7 +27,7 @@ func (m model) showsLive(t target.Target) bool {
 	return stats.At.IsZero()
 }
 
-func (m model) renderLive(id target.ID, width int) string {
+func (m model) renderStats(id target.ID, width int) string {
 	stats := m.state.Observation(id).Stats
 	if stats.At.IsZero() {
 		return labelStyle.Render("…") + "\n"
@@ -104,7 +104,7 @@ func gaugeFields(gauges []gaugeRow, width int) []field {
 	}
 
 	bar := width - gaugeGap - readings - percentGap - percentWidth
-	if bar < minLiveBar {
+	if bar < minStatsBar {
 		bar = 0
 	}
 
