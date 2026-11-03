@@ -44,3 +44,19 @@ func TestFormatDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestAmountCollapsesASharedUnit(t *testing.T) {
+	for _, c := range []struct {
+		used, total uint64
+		want        string
+	}{
+		{used: 780 << 30, total: 930 << 30, want: "780/930GiB"},
+		{used: 8 << 30, total: 31 << 30, want: "8/31GiB"},
+		{used: 900 << 20, total: 31 << 30, want: "900MiB/31GiB"},
+		{used: 0, total: 0, want: "0/0B"},
+	} {
+		if got := amount(c.used, c.total); got != c.want {
+			t.Errorf("amount(%d, %d) = %q, want %q", c.used, c.total, got, c.want)
+		}
+	}
+}
