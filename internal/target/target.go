@@ -3,7 +3,6 @@ package target
 import (
 	"errors"
 	"regexp"
-	"slices"
 )
 
 const (
@@ -12,8 +11,6 @@ const (
 )
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-var localPrefix = []string{"sh", "-c"}
 
 type ID struct {
 	Source string
@@ -66,29 +63,6 @@ func (t Target) StopCommand() string {
 	return t.Power.Down
 }
 
-type Reach struct {
-	Interactive []string
-	Background  []string
-}
-
-func (r Reach) Session(command string) []string {
-	return withCommand(r.Interactive, command)
-}
-
-func (r Reach) Probe(command string) []string {
-	if len(r.Background) > 0 {
-		return withCommand(r.Background, command)
-	}
-	return r.Session(command)
-}
-
-func withCommand(prefix []string, command string) []string {
-	if len(prefix) == 0 {
-		prefix = localPrefix
-	}
-	return append(slices.Clone(prefix), command)
-}
-
 type Power struct {
 	Up   string
 	Down string
@@ -102,23 +76,4 @@ type LogSource struct {
 type StatsPolicy struct {
 	Builtin bool
 	Metrics []Metric
-}
-
-type Mode struct {
-	Name        string
-	Argv        []string
-	Multiplexer string
-	Requires    string
-}
-
-func AvailableModes(t Target, tools Fact[[]string]) []Mode {
-	var modes []Mode
-	for i, mode := range t.Modes {
-		found := tools.Known && slices.Contains(tools.Value, mode.Requires)
-		assumedDefault := !tools.Known && i == 0
-		if mode.Requires == "" || found || assumedDefault {
-			modes = append(modes, mode)
-		}
-	}
-	return modes
 }

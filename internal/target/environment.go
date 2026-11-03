@@ -15,15 +15,3 @@ type MissingSections struct {
 	Tools    bool
 	Sessions bool
 }
-
-type Session struct {
-	Tool     string
-	Name     string
-	Attached bool
-	Windows  []Window
-}
-
-type Window struct {
-	Name  string
-	Panes int
-}

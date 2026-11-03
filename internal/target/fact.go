@@ -2,14 +2,6 @@ package target
 
 import "time"
 
-type Status string
-
-const (
-	StatusUnknown Status = "unknown"
-	StatusUp      Status = "up"
-	StatusDown    Status = "down"
-)
-
 type Fact[T any] struct {
 	Value T
 	Known bool
