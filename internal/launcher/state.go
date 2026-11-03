@@ -138,7 +138,11 @@ func (s State) targetByID(id target.ID) (target.Target, bool) {
 	if i < 0 {
 		return target.Target{}, false
 	}
-	return s.targets[i], true
+	return s.resolved(s.targets[i]), true
+}
+
+func (s State) resolved(t target.Target) target.Target {
+	return t.Resolve(s.entries[t.ID].Profile.Value)
 }
 
 func (s State) selectedTarget() (target.Target, bool) {

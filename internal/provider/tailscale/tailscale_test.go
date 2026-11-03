@@ -87,7 +87,7 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.Stats.Builtin)
 	}
 	for _, peer := range []target.Target{berlin, mac} {
-		if !peer.Logs.Journal || peer.Logs.Command != "" {
+		if peer.Logs != target.DetectedLogs() {
 			t.Errorf("%s: the core decides on guest logs, got %+v", peer.Name, peer.Logs)
 		}
 	}

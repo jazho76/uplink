@@ -1,9 +1,8 @@
 package target
 
-const ToolJournal = "journalctl"
-
 type Environment struct {
 	OS       string
+	Profile  Profile
 	Readings []Reading
 	Tools    []string
 	Sessions []Session
@@ -11,6 +10,7 @@ type Environment struct {
 }
 
 type MissingSections struct {
+	Profile  bool
 	Stats    bool
 	Tools    bool
 	Sessions bool

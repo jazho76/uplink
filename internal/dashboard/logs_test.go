@@ -12,15 +12,15 @@ import (
 
 func focusedOnGuestLogs() (model, *fakeBackend) {
 	box := remote("box")
-	box.Logs = target.LogSource{Journal: true}
+	box.Logs = target.DetectedLogs()
 	m, backend := newTestModel()
 	backend.logs["box"] = "journal line"
 	return focus(sized(withTargets(m, box)), "box"), backend
 }
 
-func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
+func inspectedLogSystem(m model, system target.LogSystem) (model, tea.Cmd) {
 	up, _ := m.Update(launcher.Checked{ID: configID("box"), Status: target.StatusUp, Full: true})
-	next, cmd := up.(model).Update(launcher.Inspected{ID: configID("box"), Env: target.Environment{Tools: tools}})
+	next, cmd := up.(model).Update(launcher.Inspected{ID: configID("box"), Env: target.Environment{Profile: target.Profile{LogSystem: system}}})
 	return next.(model), cmd
 }
 
@@ -99,16 +99,16 @@ func TestGuestLogsWaitForTheJournalToBeReported(t *testing.T) {
 		t.Error("ctrl+l has nothing to open")
 	}
 
-	m, cmd := inspectedTools(m)
+	m, cmd := inspectedLogSystem(m, "")
 	m = applyCmd(m, cmd)
 	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
-		t.Errorf("no journal here: %d calls, footer %s", backend.logCalls, m.renderFooter())
+		t.Errorf("no log system here: %d calls, footer %s", backend.logCalls, m.renderFooter())
 	}
 }
 
-func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
+func TestReportedLogSystemIsPeekedStraightAway(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, target.ToolJournal)
+	m, cmd := inspectedLogSystem(m, target.LogSystemJournal)
 	m = applyCmd(m, cmd)
 
 	if backend.logCalls != 1 || !strings.Contains(preview(m), "journal line") {
@@ -121,7 +121,7 @@ func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 
 func TestGuestLogsStopWhileDown(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, target.ToolJournal)
+	m, cmd := inspectedLogSystem(m, target.LogSystemJournal)
 	m = applyCmd(m, cmd)
 
 	m = probed(m, "box", false)
@@ -147,7 +147,7 @@ func TestNoLogsOffersNothing(t *testing.T) {
 	box := m.selected().target
 	box.Logs = target.LogSource{}
 	m = focus(withTargets(m, box), "box")
-	m, cmd := inspectedTools(m, target.ToolJournal)
+	m, cmd := inspectedLogSystem(m, target.LogSystemJournal)
 	m = applyCmd(m, cmd)
 	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf(`logs: "" reads nothing: %d calls, footer %s`, backend.logCalls, m.renderFooter())

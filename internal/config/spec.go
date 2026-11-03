@@ -110,7 +110,7 @@ func validateMetrics(metrics []target.Metric) error {
 
 func (s Spec) logSource(fill func(string) string) target.LogSource {
 	if s.Logs == nil {
-		return target.LogSource{Journal: true}
+		return target.DetectedLogs()
 	}
 	return target.LogSource{Command: fill(*s.Logs)}
 }

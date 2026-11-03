@@ -24,7 +24,7 @@ type section struct {
 	parse   func(policy target.StatsPolicy, out string, environment *target.Environment)
 }
 
-var sections = []section{osSection, toolsSection, sessionsSection, statsSection}
+var sections = []section{osSection, logsSection, toolsSection, sessionsSection, statsSection}
 
 func Run(ctx context.Context, limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
 	if len(argv) == 0 {

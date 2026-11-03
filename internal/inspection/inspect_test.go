@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-const allEnded = "section os end\nsection tools end\nsection sessions end\nsection stats end\n"
+const allEnded = "section os end\nsection logs end\nsection tools end\nsection sessions end\nsection stats end\n"
 
 const tmuxStub = `case "$1" in
 list-sessions) echo 'session $0 1 work' ;;
@@ -224,10 +224,51 @@ func TestRunReportsEachToolsOwnSessions(t *testing.T) {
 	}
 }
 
-func TestRunReportsTheJournal(t *testing.T) {
-	pathWith(t, map[string]string{target.ToolJournal: "exit 0"})
-	if snapshot := inspectLocally(t); !slices.Contains(snapshot.Tools, target.ToolJournal) {
-		t.Errorf("want journalctl reported, got %q", snapshot.Tools)
+func withSystemdMarker(t *testing.T, path string) {
+	t.Helper()
+	previous := systemdMarker
+	t.Cleanup(func() { systemdMarker = previous })
+	systemdMarker = path
+}
+
+func TestRunReportsTheLogSystem(t *testing.T) {
+	booted, absent := t.TempDir(), filepath.Join(t.TempDir(), "absent")
+	for name, c := range map[string]struct {
+		kernel string
+		marker string
+		stubs  map[string]string
+		want   target.LogSystem
+	}{
+		"booted systemd":      {"Linux", booted, map[string]string{"journalctl": "exit 0"}, target.LogSystemJournal},
+		"journalctl, no boot": {"Linux", absent, map[string]string{"journalctl": "exit 0"}, ""},
+		"macOS":               {"Darwin", absent, map[string]string{"log": "exit 0"}, target.LogSystemUnified},
+		"unknown kernel":      {"Plan9", booted, map[string]string{"journalctl": "exit 0", "log": "exit 0"}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			withSystemdMarker(t, c.marker)
+			stubs := map[string]string{"uname": "echo " + c.kernel}
+			for tool, body := range c.stubs {
+				stubs[tool] = body
+			}
+			pathWith(t, stubs)
+			snapshot := inspectLocally(t)
+			if snapshot.Missing.Profile || snapshot.Profile.LogSystem != c.want {
+				t.Errorf("want %q, got %+v", c.want, snapshot.Profile)
+			}
+		})
+	}
+}
+
+func TestOnlyKnownLogSystemsAreReported(t *testing.T) {
+	for line, want := range map[string]target.LogSystem{
+		"logsystem journal\n":                    target.LogSystemJournal,
+		"logsystem journal\nlogsystem unified\n": target.LogSystemUnified,
+		"logsystem rm -rf /\n":                   "",
+		"logsystem journal\nlogsystem evil\n":    "",
+	} {
+		if got := Parse(line+allEnded, target.StatsPolicy{}).Profile.LogSystem; got != want {
+			t.Errorf("%q: want %q, got %q", line, want, got)
+		}
 	}
 }
 
@@ -411,7 +452,7 @@ func TestRunNeedsACommand(t *testing.T) {
 
 func TestOnlyKnownToolsAreReported(t *testing.T) {
 	got := Parse("tool tmux\ntool \x1b[31mevil\ntool journalctl\n"+allEnded, target.StatsPolicy{}).Tools
-	if want := []string{"tmux", target.ToolJournal}; !slices.Equal(got, want) {
+	if want := []string{"tmux"}; !slices.Equal(got, want) {
 		t.Errorf("want %q, got %q", want, got)
 	}
 }
@@ -428,8 +469,8 @@ func TestSectionsWithoutAnEndAreMissing(t *testing.T) {
 	if got.Missing.Tools {
 		t.Errorf("tools finished, got %+v", got.Missing)
 	}
-	if !got.Missing.Sessions || !got.Missing.Stats {
-		t.Errorf("sessions and stats did not, got %+v", got.Missing)
+	if !got.Missing.Profile || !got.Missing.Sessions || !got.Missing.Stats {
+		t.Errorf("logs, sessions and stats did not, got %+v", got.Missing)
 	}
 	if len(got.Sessions) != 0 || len(got.Readings) != 0 {
 		t.Errorf("an unfinished section reports nothing, got %+v", got)

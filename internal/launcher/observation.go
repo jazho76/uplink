@@ -27,6 +27,7 @@ type Observation struct {
 	Status    target.Status
 	Reason    string
 	Operation Operation
+	Profile   target.Fact[target.Profile]
 	Stats     target.Fact[[]target.Reading]
 	Tools     target.Fact[[]string]
 	Sessions  target.Fact[[]target.Session]
@@ -147,6 +148,7 @@ func reasonFor(status target.Status, reason string) string {
 }
 
 func (e *entry) failInspection(err error, at time.Time) {
+	e.Profile.Fail(err, at)
 	e.Stats.Fail(err, at)
 	e.Tools.Fail(err, at)
 	e.Sessions.Fail(err, at)
@@ -157,8 +159,12 @@ func (s *State) markStale(id target.ID) {
 	if !ok {
 		return
 	}
-	current.Stats.At, current.Tools.At, current.Sessions.At = time.Time{}, time.Time{}, time.Time{}
+	current.clearInspectionTimes()
 	s.entries[id] = current
+}
+
+func (e *entry) clearInspectionTimes() {
+	e.Profile.At, e.Stats.At, e.Tools.At, e.Sessions.At = time.Time{}, time.Time{}, time.Time{}, time.Time{}
 }
 
 func (s *State) observeReported(now time.Time, d inventory.Discovered) {
@@ -169,7 +175,7 @@ func (s *State) observeReported(now time.Time, d inventory.Discovered) {
 	case d.Status != target.StatusUp:
 		current.failInspection(errDown, now)
 	case !wasUp:
-		current.Stats.At, current.Tools.At, current.Sessions.At = time.Time{}, time.Time{}, time.Time{}
+		current.clearInspectionTimes()
 	}
 	s.entries[d.Target.ID] = current
 }
@@ -189,6 +195,7 @@ func (s *State) inspected(now time.Time, e Inspected) {
 		if e.Err != nil {
 			current.failInspection(e.Err, now)
 		} else {
+			record(&current.Profile, e.Env.Profile, e.Env.Missing.Profile, now)
 			record(&current.Stats, e.Env.Readings, e.Env.Missing.Stats, now)
 			record(&current.Tools, e.Env.Tools, e.Env.Missing.Tools, now)
 			record(&current.Sessions, e.Env.Sessions, e.Env.Missing.Sessions, now)

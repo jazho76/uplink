@@ -68,11 +68,6 @@ type Power struct {
 	Down string
 }
 
-type LogSource struct {
-	Command string
-	Journal bool
-}
-
 type StatsPolicy struct {
 	Builtin bool
 	Metrics []Metric

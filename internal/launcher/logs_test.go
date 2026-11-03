@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -64,6 +65,95 @@ func TestLogScreenClosesWhenItsTargetVanishes(t *testing.T) {
 	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima"})
 	if state.LogsOpen() {
 		t.Error("there is nothing left to show")
+	}
+}
+
+func detectedVM(name string) target.Target {
+	vm := box(name)
+	vm.Logs = target.DetectedLogs()
+	return vm
+}
+
+func journalReported() target.Environment {
+	return target.Environment{Profile: target.Profile{LogSystem: target.LogSystemJournal}}
+}
+
+func TestDetectedLogsWaitForTheProfile(t *testing.T) {
+	vm := detectedVM("vm")
+	state, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
+	if countEffects[PeekLogs](effects) != 0 || state.HasLogs(vm) {
+		t.Fatal("nothing is known about its logs before inspection")
+	}
+
+	state, effects = state.Apply(clock, Inspected{ID: vm.ID, Env: journalReported()})
+	if !state.HasLogs(vm) {
+		t.Fatal("the reported log system should offer logs")
+	}
+	for _, effect := range effects {
+		if peek, ok := effect.(PeekLogs); ok {
+			if peek.Target.Logs.Command == "" {
+				t.Errorf("the effect must carry the concrete command, got %+v", peek.Target.Logs)
+			}
+			return
+		}
+	}
+	t.Error("the report should peek straight away")
+}
+
+func TestNoLogSystemMeansNoLogs(t *testing.T) {
+	vm := detectedVM("vm")
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
+	state, effects := state.Apply(clock, Inspected{ID: vm.ID})
+	if countEffects[PeekLogs](effects) != 0 || state.HasLogs(vm) {
+		t.Error("an empty profile has nothing to read")
+	}
+}
+
+func TestDetectedLogsFollowStatusWithoutRedetecting(t *testing.T) {
+	vm := detectedVM("vm")
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: journalReported()})
+
+	for _, status := range []target.Status{target.StatusDown, target.StatusUnknown} {
+		away, _ := state.Apply(clock, Checked{ID: vm.ID, Status: status})
+		if away.HasLogs(vm) {
+			t.Errorf("%s: logs inside the target need it up", status)
+		}
+		back, _ := away.Apply(clock, Checked{ID: vm.ID, Status: target.StatusUp})
+		if !back.HasLogs(vm) {
+			t.Errorf("back from %s: the profile should still be known", status)
+		}
+	}
+}
+
+func TestHostLogsDoNotNeedTheTargetUp(t *testing.T) {
+	vm := withLogs(box("vm"))
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Status: target.StatusDown})
+	if !state.HasLogs(vm) {
+		t.Error("host logs are readable while the target is down")
+	}
+}
+
+func TestProfileSurvivesRefreshesAndFailures(t *testing.T) {
+	vm := limaVM("vm")
+	vm.Logs = target.DetectedLogs()
+	state := startedWith(t, "lima").Select(vm.ID)
+	found := discoveredOf(vm, target.StatusUp)
+	found[0].Target.Logs = vm.Logs
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: found})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: journalReported()})
+
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: found})
+	if !state.HasLogs(vm) {
+		t.Error("a discovery refresh replaces the declaration, not the facts")
+	}
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Err: errors.New("boom")})
+	if !state.HasLogs(vm) {
+		t.Error("a failed inspection keeps what was known")
+	}
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{Missing: target.MissingSections{Profile: true}}})
+	if !state.HasLogs(vm) {
+		t.Error("an unfinished section keeps what was known")
 	}
 }
 

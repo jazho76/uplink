@@ -16,13 +16,12 @@ const (
 	probeCeiling = 30 * time.Second
 	checkTimeout = 5 * time.Second
 	powerTimeout = 10 * time.Minute
-	logsTimeout  = 2 * time.Second
+
+	hostLogsTimeout   = 2 * time.Second
+	targetLogsTimeout = 10 * time.Second
 
 	exitCannotRun = 126
 	exitNotFound  = 127
-
-	journalTimeout = 10 * time.Second
-	journalCommand = "journalctl --system -n 500 --no-pager -o short"
 )
 
 type Backend interface {
@@ -84,19 +83,14 @@ func hook(ctx context.Context, limit time.Duration, command string) error {
 }
 
 func (Commands) Logs(ctx context.Context, t target.Target, lines int) string {
-	var (
-		out string
-		err error
-	)
-	switch {
-	case t.Logs.Command != "":
-		out, err = process.NonInteractive(ctx, logsTimeout, "", "sh", "-c", t.Logs.Command)
-	case t.Logs.Journal:
-		argv := t.Reach.Probe(journalCommand)
-		out, err = process.NonInteractive(ctx, journalTimeout, "", argv[0], argv[1:]...)
-	default:
+	if t.Logs.Command == "" {
 		return ""
 	}
+	limit, argv := hostLogsTimeout, []string{"sh", "-c", t.Logs.Command}
+	if t.Logs.Where == target.InTarget {
+		limit, argv = targetLogsTimeout, t.Reach.Probe(t.Logs.Command)
+	}
+	out, err := process.NonInteractive(ctx, limit, "", argv[0], argv[1:]...)
 	if err != nil && out == "" {
 		return ""
 	}

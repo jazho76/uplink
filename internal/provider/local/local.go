@@ -28,7 +28,7 @@ func (Provider) Discover(context.Context) ([]inventory.Discovered, error) {
 			ID:    target.ID{Key: key},
 			Name:  display,
 			Group: group,
-			Logs:  target.LogSource{Journal: true},
+			Logs:  target.DetectedLogs(),
 			Stats: target.StatsPolicy{Builtin: true},
 		},
 	}}, nil

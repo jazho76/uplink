@@ -39,8 +39,8 @@ func TestDescribesThisMachine(t *testing.T) {
 	if got.Watch {
 		t.Errorf("this machine is not watched, got %+v", got)
 	}
-	if !got.Logs.Journal || !got.Stats.Builtin {
-		t.Errorf("want the journal and built-in stats, got %+v", got)
+	if got.Logs != target.DetectedLogs() || !got.Stats.Builtin {
+		t.Errorf("want detected logs and built-in stats, got %+v", got)
 	}
 }
 

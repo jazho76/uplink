@@ -98,8 +98,8 @@ func checkConfig() error {
 }
 
 func logsSummary(t target.Target) string {
-	if t.Logs.Journal {
-		return "journal through exec, when present"
+	if t.Logs.Detected() {
+		return "detected in the target"
 	}
 	return t.Logs.Command
 }

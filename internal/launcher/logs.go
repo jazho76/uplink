@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"slices"
 	"time"
 
 	"github.com/jazho76/uplink/internal/target"
@@ -44,12 +43,8 @@ func (s *State) peekSelected() []Effect {
 }
 
 func (s State) HasLogs(t target.Target) bool {
-	if t.Logs.Command != "" {
-		return true
-	}
-	observation := s.Observation(t.ID)
-	return t.Logs.Journal && observation.Tools.Known && observation.Status != target.StatusDown &&
-		slices.Contains(observation.Tools.Value, target.ToolJournal)
+	logs := s.resolved(t).Logs
+	return logs.Command != "" && (logs.Where == target.InHost || s.Observation(t.ID).Status == target.StatusUp)
 }
 
 func (s State) Logs(t target.Target) string {

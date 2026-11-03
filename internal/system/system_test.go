@@ -98,11 +98,26 @@ func TestStatsFlowThroughExec(t *testing.T) {
 }
 
 func TestGuestLogsFlowThroughExec(t *testing.T) {
-	guest := target.Target{Logs: target.LogSource{Journal: true}, Reach: target.Reach{Background: []string{"sh", "-c", `printf 'old\n\033[31m%s\033[0m\n' "$0"`}}}
-	if got, want := (Commands{}).Logs(context.Background(), guest, 1), journalCommand; got != want {
-		t.Errorf("want the journal command through exec, stripped and limited, got %q", got)
+	const command = "read the logs"
+	guest := target.Target{
+		Logs:  target.LogSource{Where: target.InTarget, Command: command},
+		Reach: target.Reach{Background: []string{"sh", "-c", `printf 'old\n\033[31m%s\033[0m\n' "$0"`}},
+	}
+	if got := (Commands{}).Logs(context.Background(), guest, 1); got != command {
+		t.Errorf("want the command through exec, stripped and limited, got %q", got)
 	}
 	if got := (Commands{}).Logs(context.Background(), target.Target{}, 1); got != "" {
 		t.Errorf("no logs at all should run nothing, got %q", got)
+	}
+	undetected := target.Target{Logs: target.DetectedLogs(), Reach: guest.Reach}
+	if got := (Commands{}).Logs(context.Background(), undetected, 1); got != "" {
+		t.Errorf("an undetected log system should run nothing, got %q", got)
+	}
+}
+
+func TestHostLogsIgnoreReach(t *testing.T) {
+	host := target.Target{Logs: target.LogSource{Command: "echo here"}, Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"false"}}}
+	if got := (Commands{}).Logs(context.Background(), host, 1); got != "here" {
+		t.Errorf("host logs run on this machine, got %q", got)
 	}
 }

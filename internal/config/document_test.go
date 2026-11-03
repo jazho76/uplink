@@ -459,20 +459,20 @@ targets:`+host+`
 	}
 }
 
-func TestLogsDefaultToTheGuestJournal(t *testing.T) {
+func TestLogsDefaultToDetection(t *testing.T) {
 	targets := mustLoad(t, `
 targets:
   - name: omitted
   - { name: off, logs: "" }
   - { name: declared, logs: "tail {name}.log" }
 `)
-	if omitted := find(t, targets, "omitted"); !omitted.Logs.Journal || omitted.Logs.Command != "" {
-		t.Errorf("left out means the guest journal, got %+v", omitted)
+	if omitted := find(t, targets, "omitted"); omitted.Logs != target.DetectedLogs() {
+		t.Errorf("left out means detected in the target, got %+v", omitted)
 	}
-	if off := find(t, targets, "off"); off.Logs.Journal || off.Logs.Command != "" {
+	if off := find(t, targets, "off"); off.Logs != (target.LogSource{}) {
 		t.Errorf(`logs: "" turns logs off, got %+v`, off)
 	}
-	if declared := find(t, targets, "declared"); declared.Logs.Journal || declared.Logs.Command != "tail declared.log" {
+	if declared := find(t, targets, "declared"); declared.Logs != (target.LogSource{Where: target.InHost, Command: "tail declared.log"}) {
 		t.Errorf("declared logs stay host-side and interpolate, got %+v", declared)
 	}
 }
