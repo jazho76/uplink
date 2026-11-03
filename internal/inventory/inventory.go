@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -61,7 +61,7 @@ func (i Inventory) WithResult(name string, found []Discovered, err error) Invent
 	case errors.Is(err, ErrUnavailable):
 		results[name] = result{err: reportedOnlyIf(i.plan.Explicit, err)}
 	default:
-		results[name] = result{found: unknownStatus(i.results[name].found, shell.Describe(err)), err: err}
+		results[name] = result{found: unknownStatus(i.results[name].found, process.Describe(err)), err: err}
 	}
 	i.results = results
 	return i

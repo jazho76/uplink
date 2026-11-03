@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inspection"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -40,11 +41,11 @@ func (System) Inspect(ctx context.Context, t target.Target) (target.Environment,
 
 func (System) Status(ctx context.Context, t target.Target) (target.Status, error) {
 	if t.Check != "" {
-		_, err := shell.NonInteractive(ctx, checkTimeout, "", "sh", "-c", t.Check)
+		_, err := process.NonInteractive(ctx, checkTimeout, "", "sh", "-c", t.Check)
 		return checkStatus(err), err
 	}
 	argv := t.Reach.Probe("true")
-	_, err := shell.NonInteractive(ctx, probeCeiling, "", argv[0], argv[1:]...)
+	_, err := process.NonInteractive(ctx, probeCeiling, "", argv[0], argv[1:]...)
 	if err != nil {
 		return target.StatusUnknown, err
 	}
@@ -52,11 +53,11 @@ func (System) Status(ctx context.Context, t target.Target) (target.Status, error
 }
 
 func checkStatus(err error) target.Status {
-	code, exited := shell.ExitCode(err)
+	code, exited := process.ExitCode(err)
 	switch {
 	case err == nil:
 		return target.StatusUp
-	case shell.Interrupted(err), !exited, code == exitCannotRun, code == exitNotFound:
+	case process.Interrupted(err), !exited, code == exitCannotRun, code == exitNotFound:
 		return target.StatusUnknown
 	default:
 		return target.StatusDown
@@ -75,8 +76,8 @@ func hook(ctx context.Context, limit time.Duration, command string) error {
 	if command == "" {
 		return errors.New("no hook configured")
 	}
-	_, err := shell.NonInteractive(ctx, limit, "", "sh", "-c", command)
-	if reason := shell.StderrTail(err); reason != "" {
+	_, err := process.NonInteractive(ctx, limit, "", "sh", "-c", command)
+	if reason := process.StderrTail(err); reason != "" {
 		return errors.New(reason)
 	}
 	return err
@@ -89,10 +90,10 @@ func (System) Logs(ctx context.Context, t target.Target, lines int) string {
 	)
 	switch {
 	case t.Logs.Command != "":
-		out, err = shell.NonInteractive(ctx, logsTimeout, "", "sh", "-c", t.Logs.Command)
+		out, err = process.NonInteractive(ctx, logsTimeout, "", "sh", "-c", t.Logs.Command)
 	case t.Logs.Journal:
 		argv := t.Reach.Probe(journalCommand)
-		out, err = shell.NonInteractive(ctx, journalTimeout, "", argv[0], argv[1:]...)
+		out, err = process.NonInteractive(ctx, journalTimeout, "", argv[0], argv[1:]...)
 	default:
 		return ""
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
@@ -26,11 +27,11 @@ const (
 var (
 	lookPath = exec.LookPath
 	ping     = func(ctx context.Context) error {
-		_, err := shell.NonInteractive(ctx, pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
+		_, err := process.NonInteractive(ctx, pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
 		return err
 	}
 	list = func(ctx context.Context) (string, error) {
-		return shell.NonInteractive(ctx, listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
+		return process.NonInteractive(ctx, listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
 	}
 )
 
@@ -49,7 +50,7 @@ func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	}
 	out, err := list(ctx)
 	if err != nil {
-		if pingErr := ping(ctx); pingErr != nil && !shell.Interrupted(pingErr) {
+		if pingErr := ping(ctx); pingErr != nil && !process.Interrupted(pingErr) {
 			return nil, inventory.ErrUnavailable
 		}
 		return nil, err

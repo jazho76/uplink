@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -46,7 +46,7 @@ func TestSlowCheckIsUnknown(t *testing.T) {
 	if got != target.StatusUnknown {
 		t.Errorf("uplink could not find out, got %s", got)
 	}
-	if reason := shell.Describe(err); reason != "timed out" {
+	if reason := process.Describe(err); reason != "timed out" {
 		t.Errorf("got %q", reason)
 	}
 }
@@ -59,7 +59,7 @@ func TestStatusByReachingIt(t *testing.T) {
 	if got != target.StatusUnknown {
 		t.Errorf("failing to reach it says nothing about whether it is alive, got %s", got)
 	}
-	if reason := shell.Describe(err); reason != "Permission denied" {
+	if reason := process.Describe(err); reason != "Permission denied" {
 		t.Errorf("the reason comes from stderr, got %q", reason)
 	}
 	if got, _ := (System{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c"}}}); got != target.StatusUp {

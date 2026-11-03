@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
-	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -24,7 +24,7 @@ const (
 var (
 	lookPath = exec.LookPath
 	list     = func(ctx context.Context) (string, error) {
-		return shell.NonInteractive(ctx, listTimeout, "", "tailscale", "status", "--json")
+		return process.NonInteractive(ctx, listTimeout, "", "tailscale", "status", "--json")
 	}
 )
 
@@ -56,7 +56,7 @@ func (Provider) Discover(ctx context.Context) ([]inventory.Discovered, error) {
 	}
 	out, err := list(ctx)
 	if err != nil {
-		if shell.Interrupted(err) {
+		if process.Interrupted(err) {
 			return nil, err
 		}
 		return nil, inventory.ErrUnavailable

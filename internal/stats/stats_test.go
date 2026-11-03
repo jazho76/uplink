@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -21,7 +22,7 @@ func TestMain(m *testing.M) {
 
 func runLocally(t *testing.T, metrics []target.Metric) []target.Reading {
 	t.Helper()
-	out, err := shell.NonInteractive(context.Background(), 10*time.Second, shell.Preamble(metricTimeout)+"\n"+Script(metrics), "sh")
+	out, err := process.NonInteractive(context.Background(), 10*time.Second, shell.Preamble(metricTimeout)+"\n"+Script(metrics), "sh")
 	if err != nil {
 		t.Fatalf("stats: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -29,7 +30,7 @@ func Run(ctx context.Context, limit time.Duration, policy target.StatsPolicy, ar
 	if len(argv) == 0 {
 		return target.Environment{}, errors.New("inspection: no command to run")
 	}
-	out, err := shell.NonInteractive(ctx, limit, script(policy), argv[0], argv[1:]...)
+	out, err := process.NonInteractive(ctx, limit, script(policy), argv[0], argv[1:]...)
 	if err != nil && !anySectionEnded(out) {
 		return target.Environment{}, err
 	}

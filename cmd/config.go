@@ -8,6 +8,7 @@ import (
 
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 	"github.com/spf13/cobra"
@@ -27,7 +28,7 @@ var configEditCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		if err := shell.Stream(config.Editor(), path); err != nil {
+		if err := process.Stream(config.Editor(), path); err != nil {
 			return err
 		}
 		return checkConfig()

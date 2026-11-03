@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -24,7 +25,7 @@ const (
 var (
 	lookPath = exec.LookPath
 	list     = func(ctx context.Context) (string, error) {
-		return shell.NonInteractive(ctx, listTimeout, "", "limactl", "list", "--json")
+		return process.NonInteractive(ctx, listTimeout, "", "limactl", "list", "--json")
 	}
 )
 
