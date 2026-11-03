@@ -3,9 +3,11 @@ package launcher
 import (
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -100,13 +102,13 @@ func TestTickCountsTheSelectedCheckAgainstTheWatchCap(t *testing.T) {
 	}
 }
 
-func TestOlderReloadIsIgnored(t *testing.T) {
+func TestOlderConfigReadIsIgnored(t *testing.T) {
 	vm := box("vm")
 	state, _ := selected(vm).Apply(clock, ReloadRequested{})
 	state, _ = state.Apply(clock, ReloadRequested{})
-	next, effects := state.Apply(clock, Reloaded{Generation: 1, Targets: nil})
+	next, effects := state.Apply(clock, ConfigRead{Generation: 1})
 	if len(next.Targets()) != 1 || effects != nil {
-		t.Errorf("an older reload must not win, got %d targets and %+v", len(next.Targets()), effects)
+		t.Errorf("an older read must not win, got %d targets and %+v", len(next.Targets()), effects)
 	}
 }
 
@@ -117,7 +119,7 @@ func TestReloadWithChangedStatsInvalidatesThem(t *testing.T) {
 
 	changed := vm
 	changed.Stats.Builtin = true
-	next, _ := state.Apply(clock.Add(time.Minute), Reloaded{Generation: 1, Targets: []target.Target{changed}, Selected: vm.ID})
+	next, _ := state.Apply(clock.Add(time.Minute), ConfigRead{Generation: 1, Plan: inventory.Plan{Declared: []target.Target{changed}}})
 	got := next.Observation(vm.ID)
 	if got.Stats.Value != nil || got.Stats.Current() || got.Sessions.Current() {
 		t.Errorf("readings of the old stats are gone, got %+v", got)
@@ -196,8 +198,8 @@ func TestProblemsNoticeSummarizes(t *testing.T) {
 	nested := errors.Join(errors.Join(one, errors.New("b")), errors.New("c"))
 	for err, want := range map[error]string{
 		nil:    "",
-		one:    `config: target "box": no modes`,
-		nested: "config: 3 problems, see uplink config check",
+		one:    `target "box": no modes`,
+		nested: "3 problems, see uplink config check",
 	} {
 		if got := problemsNotice(err); got != want {
 			t.Errorf("problemsNotice(%v) = %q, want %q", err, got, want)
@@ -265,7 +267,7 @@ func TestChecksNeverStack(t *testing.T) {
 func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
 	vm, watched, unwatched := box("vm"), box("watched"), box("unwatched")
 	watched.Watch = true
-	state, effects := selected(vm, watched, unwatched).Apply(clock, Started{})
+	state, effects := selected(vm, watched, unwatched).Apply(clock, Ticked{})
 
 	var background []target.ID
 	for _, effect := range effects {
@@ -331,7 +333,7 @@ func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
 	vm := box("vm")
 	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
 	state, _ = state.Apply(clock, ReloadRequested{})
-	_, effects := state.Apply(clock, Reloaded{Generation: 1, Targets: []target.Target{vm}, Selected: vm.ID})
+	_, effects := state.Apply(clock, ConfigRead{Generation: 1, Plan: inventory.Plan{Declared: []target.Target{vm}}})
 	if countEffects[Check](effects) != 1 {
 		t.Errorf("a reload must not leave the selection on readings from the old config, got %+v", effects)
 	}
@@ -340,7 +342,7 @@ func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
 func TestProblemsSurviveNoticesComingAndGoing(t *testing.T) {
 	vm := box("vm")
 	state := New([]target.Target{vm}, errors.New("target \"x\": broken")).Select(vm.ID)
-	if got := state.Notice(); got != `config: target "x": broken` {
+	if got := state.Notice(); got != `target "x": broken` {
 		t.Fatalf("a problem shows when nothing else does, got %q", got)
 	}
 	state, _ = state.Apply(clock, NoticeSet{Text: "hello"})
@@ -348,7 +350,205 @@ func TestProblemsSurviveNoticesComingAndGoing(t *testing.T) {
 		t.Errorf("a notice goes first, got %q", got)
 	}
 	state, _ = state.Apply(clock, ConnectionEnded{})
-	if got := state.Notice(); got != `config: target "x": broken` {
+	if got := state.Notice(); got != `target "x": broken` {
 		t.Errorf("clearing a notice must not lose the problem, got %q", got)
+	}
+}
+
+func limaVM(name string) target.Target {
+	t := box(name)
+	t.ID.Source = "lima"
+	return t
+}
+
+func discoveredOf(t target.Target, status target.Status) []inventory.Discovered {
+	return []inventory.Discovered{{Target: target.Target{ID: target.ID{Key: t.ID.Key}, Name: t.Name, Modes: t.Modes, Power: t.Power}, Status: status}}
+}
+
+func startedWith(t *testing.T, providers ...string) State {
+	t.Helper()
+	state, effects := New(nil, nil).Apply(clock, Started{})
+	if !state.Loading() {
+		t.Error("nothing has answered yet")
+	}
+	read, ok := effects[0].(ReadConfig)
+	if !ok {
+		t.Fatalf("startup reads the config, got %+v", effects)
+	}
+	state, effects = state.Apply(clock, ConfigRead{Generation: read.Generation, Plan: inventory.Plan{Providers: providers}})
+	if got := countEffects[Discover](effects); got != len(providers) {
+		t.Errorf("want a discovery per provider, got %+v", effects)
+	}
+	return state
+}
+
+func TestStartupReadsTheConfigThenDiscovers(t *testing.T) {
+	state := startedWith(t, "lima", "docker")
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(limaVM("vm"), target.StatusUp)})
+	if !state.Loading() || len(state.Targets()) != 1 {
+		t.Errorf("docker has not answered, and lima's targets are already here, got %v", state.Targets())
+	}
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "docker", Err: inventory.ErrUnavailable})
+	if state.Loading() {
+		t.Error("everyone has answered")
+	}
+	if got := state.Observation(limaVM("vm").ID).Status; got != target.StatusUp {
+		t.Errorf("status comes from the provider, got %q", got)
+	}
+}
+
+func TestDiscoveredTargetIsInspectedOnlyWhileUp(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima").Select(vm.ID)
+
+	state, effects := state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusDown)})
+	if countEffects[Inspect](effects)+countEffects[Check](effects) != 0 {
+		t.Errorf("a stopped target is not inspected and has no status call, got %+v", effects)
+	}
+	if got := state.Observation(vm.ID).Stats; got.At.IsZero() || got.Err == nil {
+		t.Errorf("the preview must not wait forever, got %+v", got)
+	}
+
+	later := clock.Add(time.Second)
+	state, effects = state.Apply(later, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	if countEffects[Inspect](effects) != 1 {
+		t.Errorf("coming up inspects at once, got %+v", effects)
+	}
+	if !state.Observation(vm.ID).Stats.At.IsZero() {
+		t.Error("the preview shows it is waiting")
+	}
+}
+
+func TestFailedInspectionLeavesAReportedTargetUp(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima").Select(vm.ID)
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Err: errors.New("permission denied")})
+	got := state.Observation(vm.ID)
+	if got.Status != target.StatusUp || got.Stats.Err == nil {
+		t.Errorf("up means the owner says so, got %+v", got)
+	}
+}
+
+func TestLateInspectionCannotOverwriteAStop(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima").Select(vm.ID)
+	state, effects := state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	if countEffects[Inspect](effects) != 1 {
+		t.Fatal("it should be inspected")
+	}
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusDown)})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{Tools: []string{"tmux"}}})
+	if got := state.Observation(vm.ID); got.Tools.Current() {
+		t.Errorf("a late result must not land, got %+v", got)
+	}
+	if _, effects := state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)}); countEffects[Inspect](effects) != 1 {
+		t.Errorf("the flag must not stick, got %+v", effects)
+	}
+}
+
+func TestSelectedProviderIsDiscoveredOftenAndOthersRarely(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima", "docker").Select(vm.ID)
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusDown)})
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "docker"})
+
+	_, effects := state.Apply(clock.Add(LiveInterval), Ticked{})
+	if len(effects) != 1 || effects[0].(Discover).Provider != "lima" {
+		t.Errorf("only the selected target's provider is due, got %+v", effects)
+	}
+	_, effects = state.Apply(clock.Add(watchInterval), Ticked{})
+	if countEffects[Discover](effects) != 2 {
+		t.Errorf("both are due, got %+v", effects)
+	}
+	busy, _ := state.Apply(clock.Add(LiveInterval), Ticked{})
+	if _, effects := busy.Apply(clock.Add(2*LiveInterval), Ticked{}); countEffects[Discover](effects) != 0 {
+		t.Errorf("one in flight is enough, got %+v", effects)
+	}
+}
+
+func TestPowerRediscoversAndDropsOlderResults(t *testing.T) {
+	vm := limaVM("vm")
+	vm.Power = &target.Power{Up: "start"}
+	state := startedWith(t, "lima").Select(vm.ID)
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusDown)})
+
+	older, _ := state.Apply(clock.Add(LiveInterval), Ticked{})
+	state, _ = older.Apply(clock, PowerRequested{Operation: OperationStarting})
+	state, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
+	if countEffects[Discover](effects) != 1 || countEffects[Check](effects) != 0 {
+		t.Fatalf("the provider is asked again, got %+v", effects)
+	}
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Epoch: 0, Found: discoveredOf(vm, target.StatusDown)})
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Epoch: 1, Found: discoveredOf(vm, target.StatusUp)})
+	if got := state.Observation(vm.ID).Status; got != target.StatusUp {
+		t.Errorf("a result from before the start must not win, got %q", got)
+	}
+}
+
+func TestPowerOnAVanishedTargetStillRediscovers(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima")
+	_, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStopping})
+	if countEffects[Discover](effects) != 1 {
+		t.Errorf("got %+v", effects)
+	}
+}
+
+func TestConnectionEndRediscovers(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima").Select(vm.ID)
+	_, effects := state.Apply(clock, ConnectionEnded{})
+	if countEffects[Discover](effects) != 1 {
+		t.Errorf("results from before the session must not hide what changed, got %+v", effects)
+	}
+}
+
+func TestProviderDroppedFromThePlanStaysGone(t *testing.T) {
+	vm := limaVM("vm")
+	state := startedWith(t, "lima")
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	state, _ = state.Apply(clock, ReloadRequested{})
+	state, _ = state.Apply(clock, ConfigRead{Generation: state.generation})
+	if len(state.Targets()) != 0 {
+		t.Fatalf("got %v", state.Targets())
+	}
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: discoveredOf(vm, target.StatusUp)})
+	if len(state.Targets()) != 0 {
+		t.Errorf("a late result must not bring it back, got %v", state.Targets())
+	}
+	if _, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStopping}); countEffects[Discover](effects) != 0 {
+		t.Errorf("nor may a late power result, got %+v", effects)
+	}
+}
+
+func TestLogScreenClosesWhenItsTargetVanishes(t *testing.T) {
+	vm := limaVM("vm")
+	vm.Logs.Command = "tail"
+	state := startedWith(t, "lima").Select(vm.ID)
+	found := discoveredOf(vm, target.StatusUp)
+	found[0].Target.Logs = vm.Logs
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Found: found})
+	state, _ = state.Apply(clock, LogsOpened{})
+	if !state.LogsOpen() {
+		t.Fatal("it should open")
+	}
+	state, _ = state.Apply(clock.Add(LiveInterval), Ticked{})
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima"})
+	if state.LogsOpen() {
+		t.Error("there is nothing left to show")
+	}
+}
+
+func TestProviderFailureDoesNotTakeOverTheNotice(t *testing.T) {
+	state := startedWith(t, "lima")
+	state, _ = state.Apply(clock, NoticeSet{Text: "session ended"})
+	state, _ = state.Apply(clock, DiscoveryDone{Provider: "lima", Err: errors.New("timed out")})
+	if got := state.Notice(); got != "session ended" {
+		t.Errorf("got %q", got)
+	}
+	state, _ = state.Apply(clock, ConnectionEnded{})
+	if got := state.Notice(); !strings.Contains(got, "timed out") {
+		t.Errorf("the problem shows once the notice clears, got %q", got)
 	}
 }

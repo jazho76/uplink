@@ -33,21 +33,20 @@ type model struct {
 	exec    func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 }
 
-func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), backend launcher.Backend) error {
-	targets, problems := load()
-	m := newModel(targets, backend)
-	m.runner.Load, m.edit = load, edit
-	defer m.runner.Stop()
-	m.state, m.startup = launcher.New(targets, problems).Select(m.selected().id()).Apply(time.Now(), launcher.Started{})
+func Run(runner *launcher.Runner, edit func() (*exec.Cmd, error)) error {
+	defer runner.Stop()
+	m := newModel(nil, runner)
+	m.edit = edit
+	m.state, m.startup = m.state.Apply(time.Now(), launcher.Started{})
 
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	return err
 }
 
-func newModel(targets []target.Target, backend launcher.Backend) model {
+func newModel(targets []target.Target, runner *launcher.Runner) model {
 	m := model{
 		state:  launcher.New(targets, nil),
-		runner: launcher.NewRunner(backend, nil),
+		runner: runner,
 		exec:   tea.ExecProcess,
 	}
 	m.rebuild(targets)

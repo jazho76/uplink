@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -137,13 +138,33 @@ func newTestModel() (model, *fakeBackend) {
 		logs: map[string]string{"host": "journal line"},
 		down: map[string]bool{},
 	}
-	m := newModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
+	m := testModel([]target.Target{hostTarget(), vm("forge"), vm("tokyo")}, backend)
 	m.edit = func() (*exec.Cmd, error) { return exec.Command("vi", "/tmp/config.yaml"), nil }
 	m.exec = func(cmd *exec.Cmd, _ tea.ExecCallback) tea.Cmd {
 		backend.sessions = append(backend.sessions, strings.Join(cmd.Args, " "))
 		return nil
 	}
 	return m, backend
+}
+
+type fakeCatalog struct {
+	plan     inventory.Plan
+	found    map[string][]inventory.Discovered
+	failures map[string]error
+}
+
+func (f *fakeCatalog) ReadPlan() inventory.Plan { return f.plan }
+
+func (f *fakeCatalog) Discover(_ context.Context, name string) ([]inventory.Discovered, error) {
+	return f.found[name], f.failures[name]
+}
+
+func planOf(targets []target.Target, problems error) *fakeCatalog {
+	return &fakeCatalog{plan: inventory.Plan{Declared: targets, Problems: problems}}
+}
+
+func testModel(targets []target.Target, backend launcher.Backend) model {
+	return newModel(targets, launcher.NewRunner(backend, nil))
 }
 
 func withTargets(m model, targets ...target.Target) model {
@@ -1386,11 +1407,11 @@ func TestPaneIsCompactWhenNothingInItIsWatched(t *testing.T) {
 	stray := vm("stray")
 	stray.Group, stray.Watch = "local", true
 
-	m := newModel([]target.Target{hostTarget(), watched}, &fakeBackend{})
+	m := testModel([]target.Target{hostTarget(), watched}, &fakeBackend{})
 	if !m.panes[0].compact || m.panes[1].compact {
 		t.Errorf("only the unwatched pane should be compact, got %v and %v", m.panes[0].compact, m.panes[1].compact)
 	}
-	m = newModel([]target.Target{hostTarget(), stray}, &fakeBackend{})
+	m = testModel([]target.Target{hostTarget(), stray}, &fakeBackend{})
 	if m.panes[0].compact {
 		t.Error("a pane mixing in watched targets is not compact")
 	}
@@ -1655,9 +1676,7 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	moved := vm("tokyo")
 	moved.Group = "far"
 	broken := errors.Join(errors.New(`target "x": no modes`), errors.New(`target "y": no modes`))
-	m.runner.Load = func() ([]target.Target, error) {
-		return []target.Target{hostTarget(), moved, remote("berlin")}, broken
-	}
+	m.runner.Catalog = planOf([]target.Target{hostTarget(), moved, remote("berlin")}, broken)
 
 	if footer := m.renderFooter(); !strings.Contains(footer, "config") {
 		t.Errorf("the footer should offer the config editor: %s", footer)
@@ -1678,7 +1697,7 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	if itemNamed(m, "forge").name() != "" {
 		t.Errorf("a removed target should disappear")
 	}
-	if m.state.Notice() != "config: 2 problems, see uplink config check" {
+	if m.state.Notice() != "2 problems, see uplink config check" {
 		t.Errorf("problems should be summarized, got %q", m.state.Notice())
 	}
 
@@ -1695,7 +1714,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Metrics: linuxMetrics[1:2]}
-	m.runner.Load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+	m.runner.Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	m = next.(model)
@@ -1710,9 +1729,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 func TestReloadKeepsTheSelectionOnTheSameTarget(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(focus(m, "tokyo"))
-	m.runner.Load = func() ([]target.Target, error) {
-		return []target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil
-	}
+	m.runner.Catalog = planOf([]target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	if got := next.(model).selected().name(); got != "tokyo" {
@@ -1793,5 +1810,86 @@ func TestCtrlEOpensTheEditorDirectly(t *testing.T) {
 	m = key(m, "ctrl+e")
 	if len(backend.sessions) != 0 || m.state.Notice() != "config edit: read-only file system" {
 		t.Errorf("a failed edit runs nothing and says why, ran %v, notice %q", backend.sessions, m.state.Notice())
+	}
+}
+
+func discovered(key string, status target.Status) inventory.Discovered {
+	return inventory.Discovered{Status: status, Target: target.Target{
+		ID:    target.ID{Key: key},
+		Name:  key,
+		Group: "vms",
+		Watch: true,
+		Modes: []target.Mode{{Name: "shell", Argv: []string{"sh"}}},
+	}}
+}
+
+func arrive(m model, provider string, found ...inventory.Discovered) model {
+	next, _ := m.Update(launcher.DiscoveryDone{Provider: provider, Found: found})
+	return next.(model)
+}
+
+func startedWithProviders(t *testing.T, providers ...string) model {
+	t.Helper()
+	backend := &fakeBackend{down: map[string]bool{}}
+	m := testModel(nil, backend)
+	m.runner.Catalog = &fakeCatalog{plan: inventory.Plan{Providers: providers}}
+	m.edit = func() (*exec.Cmd, error) { return exec.Command("true"), nil }
+	m.exec = func(*exec.Cmd, tea.ExecCallback) tea.Cmd { return nil }
+	state, effects := m.state.Apply(time.Now(), launcher.Started{})
+	m.state = state
+	read := effects[0].(launcher.ReadConfig)
+	next, _ := m.Update(launcher.ConfigRead{Generation: read.Generation, Plan: inventory.Plan{Providers: providers}})
+	return sized(next.(model))
+}
+
+func TestEmptyDashboardSaysItIsDiscovering(t *testing.T) {
+	m := startedWithProviders(t, "lima")
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "discovering") {
+		t.Errorf("want a discovering pane, got:\n%s", got)
+	}
+	m = arrive(m, "lima")
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "no targets") {
+		t.Errorf("once providers have answered, want no targets, got:\n%s", got)
+	}
+}
+
+func TestFirstArrivalIsSelected(t *testing.T) {
+	m := arrive(startedWithProviders(t, "lima"), "lima", discovered("dev", target.StatusUp))
+	id := target.ID{Source: "lima", Key: "dev"}
+	if m.selected().id() != id || m.state.Selection() != id {
+		t.Errorf("want dev selected in both places, got %v and %v", m.selected().id(), m.state.Selection())
+	}
+	if got := ansi.Strip(m.View()); !strings.Contains(got, "dev") || !strings.Contains(got, "up") {
+		t.Errorf("status comes from the provider, got:\n%s", got)
+	}
+}
+
+func TestRefreshKeepsSelectionAndMode(t *testing.T) {
+	dev := discovered("dev", target.StatusUp)
+	dev.Target.Modes = []target.Mode{{Name: "one", Argv: []string{"sh"}}, {Name: "two", Argv: []string{"sh"}}}
+	m := arrive(startedWithProviders(t, "lima"), "lima", dev, discovered("other", target.StatusUp))
+	m = key(m, "tab")
+	if got := m.state.Mode().Name; got != "two" {
+		t.Fatalf("tab should reach two, got %q", got)
+	}
+	m = arrive(m, "lima", dev, discovered("other", target.StatusDown))
+	if got := m.state.Mode().Name; got != "two" {
+		t.Errorf("a refresh must not reset the mode, got %q", got)
+	}
+	if got := m.selected().name(); got != "dev" {
+		t.Errorf("a refresh must not move the selection, got %q", got)
+	}
+}
+
+func TestSelectionMovesWhenItsTargetVanishes(t *testing.T) {
+	m := arrive(startedWithProviders(t, "lima"), "lima", discovered("dev", target.StatusUp), discovered("other", target.StatusUp))
+	m = arrive(m, "lima", discovered("other", target.StatusUp))
+	want := target.ID{Source: "lima", Key: "other"}
+	if m.selected().id() != want || m.state.Selection() != want {
+		t.Errorf("selection and core must agree on the neighbor, got %v and %v", m.selected().id(), m.state.Selection())
+	}
+	m = arrive(m, "lima")
+	if m.selected().id() != (target.ID{}) || m.state.Selection() != (target.ID{}) {
+		t.Errorf("nothing is left to select, got %v and %v", m.selected().id(), m.state.Selection())
 	}
 }

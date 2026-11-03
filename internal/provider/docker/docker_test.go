@@ -73,7 +73,6 @@ func TestContainerFacts(t *testing.T) {
 		t.Errorf("exec: got %q, want %q", web.Reach.Background, want)
 	}
 	for _, c := range []struct{ field, got, want string }{
-		{"status", web.Check, `docker inspect -f '{{.State.Running}}' web 2>/dev/null | grep -qx true`},
 		{"up", web.StartCommand(), "docker start web"},
 		{"down", web.StopCommand(), "docker stop web"},
 		{"logs", web.Logs.Command, `docker events --since 24h --until "$(date +%s)" --filter container=web --format '{{.Time}} {{.Action}}{{with .Actor.Attributes.exitCode}} (exit {{.}}){{end}}' | grep -Ev ' exec_(create|die)| exec_start: sh -c sh$' | awk '{ $1 = strftime("%b %d %H:%M:%S", $1); print }' | tail -n 500`},
@@ -148,5 +147,14 @@ func TestUnavailableWithoutTheCLIOrDaemon(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
 		t.Errorf("a missing cli is unavailable, got %v", err)
+	}
+}
+
+func TestProviderOwnsStatus(t *testing.T) {
+	fixture(t)
+	for _, found := range resolved(t) {
+		if found.Check != "" || !found.Discovered() {
+			t.Errorf("status comes from discovery, got %+v", found)
+		}
 	}
 }

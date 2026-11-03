@@ -19,14 +19,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.send(launcher.Ticked{})
 		return m, tea.Batch(cmd, liveTickCmd())
 
-	case launcher.Reloaded:
-		if !m.state.ReloadIsCurrent(msg.Generation) {
-			return m, nil
-		}
-		m.rebuild(msg.Targets)
-		msg.Selected = m.selected().id()
-		cmd := m.send(msg)
-		return m, cmd
+	case launcher.ConfigRead:
+		return m.inventoryChanged(msg)
+
+	case launcher.DiscoveryDone:
+		return m.inventoryChanged(msg)
 
 	case launcher.Event:
 		cmd := m.send(msg)
@@ -39,6 +36,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateList(msg)
 	}
 	return m, nil
+}
+
+func (m model) inventoryChanged(event launcher.Event) (tea.Model, tea.Cmd) {
+	cmd := m.send(event)
+	m.rebuild(m.state.Targets())
+	if id := m.selected().id(); id != m.state.Selection() {
+		cmd = tea.Batch(cmd, m.send(launcher.Selected{ID: id}))
+	}
+	return m, cmd
 }
 
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

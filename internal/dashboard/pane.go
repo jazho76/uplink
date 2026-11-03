@@ -164,7 +164,7 @@ func (m model) paneSummary(p pane) string {
 
 func (m model) renderPanes(width, height int) string {
 	if len(m.panes) == 0 {
-		return emptyPane(width, height)
+		return m.emptyPane(width, height)
 	}
 	rows := distributeRows(m.panes, height)
 	blocks := make([]string, 0, len(m.panes))
@@ -259,7 +259,10 @@ func rowBase(selected, focused bool) lipgloss.Style {
 	return plainStyle
 }
 
-func emptyPane(width, height int) string {
+func (m model) emptyPane(width, height int) string {
+	if m.state.Loading() {
+		return boxStyle.Width(width - borderCells).Height(height - borderCells).Render(labelStyle.Render("discovering…"))
+	}
 	return boxStyle.Width(width - borderCells).Height(height - borderCells).Render(
 		valueStyle.Render("no targets") + "\n" +
 			keyStyle.Render("^e") + " " + labelStyle.Render("to edit the config"))

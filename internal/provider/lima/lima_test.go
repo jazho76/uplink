@@ -66,7 +66,6 @@ func TestInstanceFacts(t *testing.T) {
 		t.Errorf("exec: got %q, want %q", dev.Reach.Background, want)
 	}
 	for _, c := range []struct{ field, got, want string }{
-		{"status", dev.Check, `limactl list --format '{{.Status}}' dev | grep -qx Running`},
 		{"up", dev.StartCommand(), "limactl start dev"},
 		{"down", dev.StopCommand(), "limactl stop dev"},
 		{"logs", dev.Logs.Command, `tail -n 500 '/home/me/lima vms/dev/serial.log'`},
@@ -122,5 +121,14 @@ func TestUnavailableWithoutLimactl(t *testing.T) {
 	lookPath = func(string) (string, error) { return "", errors.New("not found") }
 	if _, err := (Provider{}).Discover(context.Background()); !errors.Is(err, inventory.ErrUnavailable) {
 		t.Errorf("got %v", err)
+	}
+}
+
+func TestProviderOwnsStatus(t *testing.T) {
+	fixture(t)
+	for _, found := range resolved(t) {
+		if found.Check != "" || !found.Discovered() {
+			t.Errorf("status comes from discovery, got %+v", found)
+		}
 	}
 }

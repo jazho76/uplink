@@ -50,6 +50,8 @@ type Target struct {
 	Modes []Mode
 }
 
+func (t Target) Discovered() bool { return t.ID.Source != ConfigSource }
+
 func (t Target) StartCommand() string {
 	if t.Power == nil {
 		return ""

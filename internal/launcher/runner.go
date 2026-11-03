@@ -5,14 +5,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jazho76/uplink/internal/target"
+	"github.com/jazho76/uplink/internal/inventory"
 )
 
 const stopWait = 2 * time.Second
 
+type Catalog interface {
+	ReadPlan() inventory.Plan
+	Discover(ctx context.Context, name string) ([]inventory.Discovered, error)
+}
+
 type Runner struct {
 	Backend Backend
-	Load    func() ([]target.Target, error)
+	Catalog Catalog
 
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -21,9 +26,9 @@ type Runner struct {
 	inFlight sync.WaitGroup
 }
 
-func NewRunner(backend Backend, load func() ([]target.Target, error)) *Runner {
+func NewRunner(backend Backend, catalog Catalog) *Runner {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runner{Backend: backend, Load: load, ctx: ctx, cancel: cancel}
+	return &Runner{Backend: backend, Catalog: catalog, ctx: ctx, cancel: cancel}
 }
 
 func (r *Runner) Run(effect Effect) Event {
@@ -88,9 +93,16 @@ func (r *Runner) probe(ctx context.Context, effect Effect) Event {
 	case ViewLogs:
 		return LogsViewed{Round: e.Round, Text: r.Backend.Logs(ctx, e.Target, logScreenLines)}
 
-	case Reload:
-		targets, problems := r.Load()
-		return Reloaded{Generation: e.Generation, Targets: targets, Problems: problems, Notice: e.Notice}
+	case Inspect:
+		env, err := r.Backend.Inspect(ctx, e.Target)
+		return Inspected{ID: e.Target.ID, Epoch: e.Epoch, Env: env, Err: err}
+
+	case ReadConfig:
+		return ConfigRead{Generation: e.Generation, Plan: r.Catalog.ReadPlan(), Notice: e.Notice}
+
+	case Discover:
+		found, err := r.Catalog.Discover(ctx, e.Provider)
+		return DiscoveryDone{Provider: e.Provider, Epoch: e.Epoch, Found: found, Err: err}
 	}
 	return nil
 }

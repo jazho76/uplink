@@ -1,6 +1,9 @@
 package launcher
 
-import "github.com/jazho76/uplink/internal/target"
+import (
+	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/target"
+)
 
 type Event interface{ isEvent() }
 
@@ -45,13 +48,24 @@ type (
 		InspectErr error
 	}
 
+	Inspected struct {
+		ID    target.ID
+		Epoch int
+		Env   target.Environment
+		Err   error
+	}
+
 	ReloadRequested struct{ Notice string }
-	Reloaded        struct {
+	ConfigRead      struct {
 		Generation int
-		Targets    []target.Target
-		Problems   error
+		Plan       inventory.Plan
 		Notice     string
-		Selected   target.ID
+	}
+	DiscoveryDone struct {
+		Provider string
+		Epoch    int
+		Found    []inventory.Discovered
+		Err      error
 	}
 
 	NoticeSet struct{ Text string }
@@ -72,7 +86,9 @@ func (LogsPeeked) isEvent()       {}
 func (LogsViewed) isEvent()       {}
 func (Checked) isEvent()          {}
 func (ReloadRequested) isEvent()  {}
-func (Reloaded) isEvent()         {}
+func (Inspected) isEvent()        {}
+func (ConfigRead) isEvent()       {}
+func (DiscoveryDone) isEvent()    {}
 func (NoticeSet) isEvent()        {}
 
 type Effect interface{ isEffect() }
@@ -92,9 +108,17 @@ type (
 		Target    target.Target
 		Operation Operation
 	}
-	Reload struct {
+	Inspect struct {
+		Target target.Target
+		Epoch  int
+	}
+	ReadConfig struct {
 		Generation int
 		Notice     string
+	}
+	Discover struct {
+		Provider string
+		Epoch    int
 	}
 
 	Connect struct {
@@ -108,6 +132,8 @@ func (Check) isEffect()           {}
 func (PeekLogs) isEffect()        {}
 func (ViewLogs) isEffect()        {}
 func (Power) isEffect()           {}
-func (Reload) isEffect()          {}
+func (Inspect) isEffect()         {}
+func (ReadConfig) isEffect()      {}
+func (Discover) isEffect()        {}
 func (Connect) isEffect()         {}
 func (ScheduleLogTick) isEffect() {}

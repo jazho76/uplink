@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -17,13 +18,14 @@ const (
 	LogInterval  = time.Second
 
 	watchInterval  = 30 * time.Second
+	intervalGrace  = time.Second
 	maxWatchChecks = 4
 	maxLogPeek     = 300
 	logScreenLines = 500
 )
 
 var (
-	errDown  = errors.New("target is down")
+	errDown  = errors.New("target is not up")
 	errStale = errors.New("stats changed")
 )
 
@@ -61,15 +63,24 @@ type logPeek struct {
 	at   time.Time
 }
 
+type discovery struct {
+	inFlight bool
+	issuedAt time.Time
+	epoch    int
+}
+
 type State struct {
 	targets           []target.Target
 	entries           map[target.ID]entry
+	inventory         inventory.Inventory
+	discoveries       map[string]discovery
+	loading           bool
 	selected          target.ID
 	modeName          string
 	notice            string
 	problems          error
 	connectAfterStart target.ID
-	reloadGeneration  int
+	generation        int
 	peek              logPeek
 	logOpen           bool
 	logRound          int
@@ -78,7 +89,7 @@ type State struct {
 }
 
 func New(targets []target.Target, problems error) State {
-	return State{targets: targets, entries: map[target.ID]entry{}, problems: problems}
+	return State{targets: targets, entries: map[target.ID]entry{}, discoveries: map[string]discovery{}, problems: problems}
 }
 
 func (s State) Targets() []target.Target { return s.targets }
@@ -99,7 +110,7 @@ func (s State) LogTarget() target.Target { return s.logTarget }
 
 func (s State) LogText() string { return s.logText }
 
-func (s State) ReloadIsCurrent(generation int) bool { return generation == s.reloadGeneration }
+func (s State) Loading() bool { return s.loading }
 
 func (s State) Select(id target.ID) State {
 	s.selected = id
@@ -113,6 +124,7 @@ func (s State) WithTargets(targets []target.Target) State {
 
 func (s State) Apply(now time.Time, event Event) (State, []Effect) {
 	s.entries = maps.Clone(s.entries)
+	s.discoveries = maps.Clone(s.discoveries)
 	effects := s.apply(now, event)
 	return s, effects
 }
@@ -120,12 +132,14 @@ func (s State) Apply(now time.Time, event Event) (State, []Effect) {
 func (s *State) apply(now time.Time, event Event) []Effect {
 	switch e := event.(type) {
 	case Started:
-		return append(s.refreshSelected(now), s.checkWatched(now)...)
+		s.loading = true
+		return s.requestConfig("")
 
 	case Ticked:
 		effects := s.checkSelected()
 		effects = append(effects, s.peekSelected()...)
-		return append(effects, s.checkWatched(now)...)
+		effects = append(effects, s.checkWatched(now)...)
+		return append(effects, s.dueDiscoveries(now)...)
 
 	case Selected:
 		s.selected, s.modeName = e.ID, ""
@@ -146,7 +160,7 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 	case ConnectionEnded:
 		s.notice = connectionNotice(e)
 		s.markStale(s.selected)
-		return s.refreshSelected(now)
+		return append(s.rediscover(now, s.selected.Source), s.refreshSelected(now)...)
 
 	case LogsOpened:
 		return s.openLogs()
@@ -179,12 +193,20 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 			return s.peekSelectedIfStale(now)
 		}
 
-	case ReloadRequested:
-		s.reloadGeneration++
-		return []Effect{Reload{Generation: s.reloadGeneration, Notice: e.Notice}}
+	case Inspected:
+		s.inspected(now, e)
+		if e.ID == s.selected {
+			return s.peekSelectedIfStale(now)
+		}
 
-	case Reloaded:
-		return s.reloaded(now, e)
+	case ReloadRequested:
+		return s.requestConfig(e.Notice)
+
+	case ConfigRead:
+		return s.configRead(now, e)
+
+	case DiscoveryDone:
+		return s.discoveryDone(now, e)
 
 	case NoticeSet:
 		s.notice = e.Text
@@ -227,7 +249,16 @@ func (s *State) checkSelected() []Effect {
 	if !ok || s.entries[t.ID].checking {
 		return nil
 	}
-	return []Effect{s.check(t, true)}
+	if !t.Discovered() {
+		return []Effect{s.check(t, true)}
+	}
+	if s.Observation(t.ID).Status != target.StatusUp {
+		return nil
+	}
+	current := s.entries[t.ID]
+	current.checking = true
+	s.entries[t.ID] = current
+	return []Effect{Inspect{Target: t, Epoch: current.epoch}}
 }
 
 func (s *State) checkWatched(now time.Time) []Effect {
@@ -244,7 +275,7 @@ func (s *State) checkWatched(now time.Time) []Effect {
 			break
 		}
 		current := s.entries[t.ID]
-		if !t.Watch || t.ID == s.selected || current.checking || now.Sub(current.checkedAt) < watchInterval {
+		if !t.Watch || t.Discovered() || t.ID == s.selected || current.checking || now.Sub(current.checkedAt) < watchInterval {
 			continue
 		}
 		effects = append(effects, s.check(t, false))
@@ -377,11 +408,7 @@ func (s *State) powerDone(now time.Time, e PowerDone) []Effect {
 	if e.Err != nil {
 		s.notice = fmt.Sprintf("%s %s failed: %v", verb(e.Operation), e.ID, e.Err)
 	}
-	t, ok := s.targetByID(e.ID)
-	if !ok {
-		return nil
-	}
-	effects := []Effect{s.check(t, t.ID == s.selected)}
+	effects := s.recheck(now, e.ID)
 	if connect {
 		effects = append(effects, s.connection()...)
 	}
@@ -432,11 +459,35 @@ func connectionNotice(e ConnectionEnded) string {
 	}
 }
 
-func (s *State) reloaded(now time.Time, e Reloaded) []Effect {
-	if !s.ReloadIsCurrent(e.Generation) {
+func (s *State) requestConfig(notice string) []Effect {
+	s.generation++
+	return []Effect{ReadConfig{Generation: s.generation, Notice: notice}}
+}
+
+func (s *State) configRead(now time.Time, e ConfigRead) []Effect {
+	if e.Generation != s.generation {
 		return nil
 	}
-	for _, t := range e.Targets {
+	s.inventory = s.inventory.WithPlan(e.Plan)
+	s.invalidateChangedStats()
+	s.adopt(now)
+	s.modeName, s.notice = "", e.Notice
+	s.markStale(s.selected)
+
+	var effects []Effect
+	for _, name := range s.inventory.Providers() {
+		if !s.discoveries[name].inFlight {
+			effects = append(effects, s.discover(now, name))
+		}
+	}
+	effects = append(effects, s.refreshSelected(now)...)
+	return append(effects, s.checkWatched(now)...)
+}
+
+func (s *State) invalidateChangedStats() {
+	merged, _ := s.inventory.Merged()
+	for _, d := range merged {
+		t := d.Target
 		previous, ok := s.targetByID(t.ID)
 		if ok && (!slices.Equal(previous.Stats.Metrics, t.Stats.Metrics) || previous.Stats.Builtin != t.Stats.Builtin) {
 			current := s.entries[t.ID]
@@ -445,10 +496,106 @@ func (s *State) reloaded(now time.Time, e Reloaded) []Effect {
 			s.entries[t.ID] = current
 		}
 	}
-	s.targets, s.selected, s.modeName = e.Targets, e.Selected, ""
-	s.markStale(s.selected)
-	s.notice, s.problems = e.Notice, e.Problems
-	return append(s.refreshSelected(now), s.checkWatched(now)...)
+}
+
+func (s *State) discoveryDone(now time.Time, e DiscoveryDone) []Effect {
+	current := s.discoveries[e.Provider]
+	if e.Epoch != current.epoch {
+		return nil
+	}
+	current.inFlight = false
+	s.discoveries[e.Provider] = current
+	if !s.inventory.Plans(e.Provider) {
+		return nil
+	}
+	s.inventory = s.inventory.WithResult(e.Provider, e.Found, e.Err)
+	s.adopt(now)
+	return s.refreshSelected(now)
+}
+
+func (s *State) adopt(now time.Time) {
+	merged, problems := s.inventory.Merged()
+	s.targets, s.problems = inventory.Targets(merged), problems
+	for _, d := range merged {
+		if d.Target.Discovered() {
+			s.observeReported(now, d)
+		}
+	}
+	s.loading = s.loading && !s.inventory.Answered()
+	if _, ok := s.targetByID(s.logTarget.ID); s.logOpen && !ok {
+		s.logOpen = false
+	}
+}
+
+func (s *State) observeReported(now time.Time, d inventory.Discovered) {
+	current := s.entries[d.Target.ID]
+	wasUp := current.Status == target.StatusUp
+	current.Status = d.Status
+	switch {
+	case d.Status != target.StatusUp:
+		current.failInspection(errDown, now)
+	case !wasUp:
+		current.Stats.At, current.Tools.At, current.Sessions.At = time.Time{}, time.Time{}, time.Time{}
+	}
+	s.entries[d.Target.ID] = current
+}
+
+func (s *State) inspected(now time.Time, e Inspected) {
+	current := s.entries[e.ID]
+	current.checking = false
+	if e.Epoch == current.epoch && current.Status == target.StatusUp {
+		if e.Err != nil {
+			current.failInspection(e.Err, now)
+		} else {
+			current.Stats.Observe(e.Env.Readings, now)
+			current.Tools.Observe(e.Env.Tools, now)
+			current.Sessions.Observe(e.Env.Sessions, now)
+		}
+	}
+	s.entries[e.ID] = current
+}
+
+func (s *State) discover(now time.Time, name string) Effect {
+	current := s.discoveries[name]
+	current.inFlight, current.issuedAt = true, now
+	s.discoveries[name] = current
+	return Discover{Provider: name, Epoch: current.epoch}
+}
+
+func (s *State) rediscover(now time.Time, name string) []Effect {
+	if !s.inventory.Plans(name) {
+		return nil
+	}
+	current := s.discoveries[name]
+	current.epoch++
+	s.discoveries[name] = current
+	return []Effect{s.discover(now, name)}
+}
+
+func (s *State) recheck(now time.Time, id target.ID) []Effect {
+	if id.Source != target.ConfigSource {
+		return s.rediscover(now, id.Source)
+	}
+	t, ok := s.targetByID(id)
+	if !ok {
+		return nil
+	}
+	return []Effect{s.check(t, t.ID == s.selected)}
+}
+
+func (s *State) dueDiscoveries(now time.Time) []Effect {
+	var effects []Effect
+	for _, name := range s.inventory.Providers() {
+		interval := watchInterval
+		if s.selected.Source == name {
+			interval = LiveInterval
+		}
+		current := s.discoveries[name]
+		if !current.inFlight && now.Sub(current.issuedAt) >= interval-intervalGrace {
+			effects = append(effects, s.discover(now, name))
+		}
+	}
+	return effects
 }
 
 func (s State) Modes(t target.Target) []target.Mode {
@@ -488,9 +635,9 @@ func problemsNotice(problems error) string {
 	case 0:
 		return ""
 	case 1:
-		return "config: " + problems.Error()
+		return problems.Error()
 	default:
-		return fmt.Sprintf("config: %d problems, see uplink config check", count)
+		return fmt.Sprintf("%d problems, see uplink config check", count)
 	}
 }
 

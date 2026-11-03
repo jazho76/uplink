@@ -96,7 +96,6 @@ func (vm instance) target() target.Target {
 			Interactive: []string{"ssh", "-t", "-F", vm.SSHConfigFile, vm.Hostname},
 			Background:  []string{"ssh", "-F", vm.SSHConfigFile, vm.Hostname},
 		},
-		Check: "limactl list --format '{{.Status}}' " + shell.Quote([]string{vm.Name}) + " | grep -qx Running",
 		Power: &target.Power{
 			Up:   shell.Quote([]string{"limactl", "start", vm.Name}),
 			Down: shell.Quote([]string{"limactl", "stop", vm.Name}),

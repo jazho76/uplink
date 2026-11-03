@@ -321,7 +321,7 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Builtin: true}
-	m.runner.Load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+	m.runner.Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	if got := next.(model).state.Observation(configID("forge")).Stats.Value; got != nil {

@@ -109,7 +109,6 @@ func containerTarget(container string) target.Target {
 			Interactive: []string{"docker", "exec", "-it", container, "sh", "-c"},
 			Background:  []string{"docker", "exec", "-i", container, "sh", "-c"},
 		},
-		Check: "docker inspect -f '{{.State.Running}}' " + quote(container) + " 2>/dev/null | grep -qx true",
 		Power: &target.Power{Up: quote("docker", "start", container), Down: quote("docker", "stop", container)},
 		Logs:  target.LogSource{Command: events(container)},
 		Watch: true,

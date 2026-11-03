@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -106,5 +107,24 @@ func TestStopKillsTheProbeProcess(t *testing.T) {
 	if syscall.Kill(pid, 0) == nil {
 		syscall.Kill(pid, syscall.SIGKILL)
 		t.Errorf("process %d outlived the dashboard", pid)
+	}
+}
+
+type fakeCatalog struct{}
+
+func (fakeCatalog) ReadPlan() inventory.Plan { return inventory.Plan{Providers: []string{"lima"}} }
+
+func (fakeCatalog) Discover(_ context.Context, name string) ([]inventory.Discovered, error) {
+	return nil, errors.New(name + " failed")
+}
+
+func TestRunnerReadsConfigAndDiscovers(t *testing.T) {
+	runner := NewRunner(System{}, fakeCatalog{})
+	if read := runner.Run(ReadConfig{Generation: 3, Notice: "n"}).(ConfigRead); read.Generation != 3 || read.Notice != "n" || len(read.Plan.Providers) != 1 {
+		t.Errorf("got %+v", read)
+	}
+	done := runner.Run(Discover{Provider: "lima", Epoch: 2}).(DiscoveryDone)
+	if done.Provider != "lima" || done.Epoch != 2 || done.Err == nil {
+		t.Errorf("got %+v", done)
 	}
 }
