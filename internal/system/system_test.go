@@ -1,4 +1,4 @@
-package launcher
+package system
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 )
 
 func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
-	out := System{}.Logs(context.Background(), target.Target{Logs: target.LogSource{Command: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}}, 2)
+	out := Commands{}.Logs(context.Background(), target.Target{Logs: target.LogSource{Command: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}}, 2)
 	if out != "two x\nthree" {
 		t.Errorf("logs = %q", out)
 	}
-	if got := (System{}).Logs(context.Background(), target.Target{}, 5); got != "" {
+	if got := (Commands{}).Logs(context.Background(), target.Target{}, 5); got != "" {
 		t.Errorf("a target without logs yields nothing, got %q", got)
 	}
 }
@@ -32,7 +32,7 @@ func TestStatusFromACheck(t *testing.T) {
 		"a missing tool can't say": {"uplink-no-such-tool", target.StatusUnknown},
 		"not executable can't say": {"exit 126", target.StatusUnknown},
 	} {
-		got, _ := System{}.Status(context.Background(), target.Target{Check: c.check, Reach: via})
+		got, _ := Commands{}.Status(context.Background(), target.Target{Check: c.check, Reach: via})
 		if got != c.want {
 			t.Errorf("%s: want %s, got %s", name, c.want, got)
 		}
@@ -42,7 +42,7 @@ func TestStatusFromACheck(t *testing.T) {
 func TestSlowCheckIsUnknown(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	got, err := System{}.Status(ctx, target.Target{Check: "sleep 5"})
+	got, err := Commands{}.Status(ctx, target.Target{Check: "sleep 5"})
 	if got != target.StatusUnknown {
 		t.Errorf("uplink could not find out, got %s", got)
 	}
@@ -52,30 +52,30 @@ func TestSlowCheckIsUnknown(t *testing.T) {
 }
 
 func TestStatusByReachingIt(t *testing.T) {
-	if got, err := (System{}).Status(context.Background(), target.Target{}); got != target.StatusUp || err != nil {
+	if got, err := (Commands{}).Status(context.Background(), target.Target{}); got != target.StatusUp || err != nil {
 		t.Errorf("a local target is up, got %s and %v", got, err)
 	}
-	got, err := System{}.Status(context.Background(), target.Target{Reach: target.Reach{Background: []string{"sh", "-c", "echo 'Permission denied' >&2; exit 255"}}})
+	got, err := Commands{}.Status(context.Background(), target.Target{Reach: target.Reach{Background: []string{"sh", "-c", "echo 'Permission denied' >&2; exit 255"}}})
 	if got != target.StatusUnknown {
 		t.Errorf("failing to reach it says nothing about whether it is alive, got %s", got)
 	}
 	if reason := process.Describe(err); reason != "Permission denied" {
 		t.Errorf("the reason comes from stderr, got %q", reason)
 	}
-	if got, _ := (System{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c"}}}); got != target.StatusUp {
+	if got, _ := (Commands{}).Status(context.Background(), target.Target{Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c"}}}); got != target.StatusUp {
 		t.Errorf("background carries the check, got %s", got)
 	}
 }
 
 func TestHookFailureCarriesItsStderr(t *testing.T) {
-	err := (System{}).Up(context.Background(), target.Target{Power: &target.Power{Up: "echo progress; echo 'no such instance' >&2; exit 1"}})
+	err := (Commands{}).Up(context.Background(), target.Target{Power: &target.Power{Up: "echo progress; echo 'no such instance' >&2; exit 1"}})
 	if err == nil || err.Error() != "no such instance" {
 		t.Errorf("a failed hook should say why and nothing else, got %v", err)
 	}
-	if err := (System{}).Up(context.Background(), target.Target{Power: &target.Power{Up: "exit 3"}}); err == nil || !strings.Contains(err.Error(), "exit status 3") {
+	if err := (Commands{}).Up(context.Background(), target.Target{Power: &target.Power{Up: "exit 3"}}); err == nil || !strings.Contains(err.Error(), "exit status 3") {
 		t.Errorf("a silent failure still reports its exit, got %v", err)
 	}
-	if err := (System{}).Down(context.Background(), target.Target{}); err == nil {
+	if err := (Commands{}).Down(context.Background(), target.Target{}); err == nil {
 		t.Errorf("a missing hook cannot succeed")
 	}
 }
@@ -86,7 +86,7 @@ func TestStatsFlowThroughExec(t *testing.T) {
 		"local": {Stats: stats},
 		"via":   {Stats: stats, Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c", "exec sh"}}},
 	} {
-		snapshot, err := System{}.Inspect(context.Background(), found)
+		snapshot, err := Commands{}.Inspect(context.Background(), found)
 		if err != nil {
 			t.Fatalf("%s: stats through a local shell: %v", name, err)
 		}
@@ -99,10 +99,10 @@ func TestStatsFlowThroughExec(t *testing.T) {
 
 func TestGuestLogsFlowThroughExec(t *testing.T) {
 	guest := target.Target{Logs: target.LogSource{Journal: true}, Reach: target.Reach{Background: []string{"sh", "-c", `printf 'old\n\033[31m%s\033[0m\n' "$0"`}}}
-	if got, want := (System{}).Logs(context.Background(), guest, 1), journalCommand; got != want {
+	if got, want := (Commands{}).Logs(context.Background(), guest, 1), journalCommand; got != want {
 		t.Errorf("want the journal command through exec, stripped and limited, got %q", got)
 	}
-	if got := (System{}).Logs(context.Background(), target.Target{}, 1); got != "" {
+	if got := (Commands{}).Logs(context.Background(), target.Target{}, 1); got != "" {
 		t.Errorf("no logs at all should run nothing, got %q", got)
 	}
 }

@@ -1,4 +1,4 @@
-package launcher
+package system
 
 import (
 	"context"
@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
 
 type blockingBackend struct {
-	System
+	Commands
 	statusStarted chan struct{}
 	statusErr     chan error
 	upCtxErr      chan error
@@ -39,8 +40,8 @@ func (b blockingBackend) Up(ctx context.Context, _ target.Target) error {
 func TestStopCancelsProbesAndWaitsForThem(t *testing.T) {
 	backend := blockingBackend{statusStarted: make(chan struct{}), statusErr: make(chan error, 1)}
 	runner := NewRunner(backend, nil)
-	finished := make(chan Event, 1)
-	go func() { finished <- runner.Run(Check{Target: box("vm")}) }()
+	finished := make(chan launcher.Event, 1)
+	go func() { finished <- runner.Run(launcher.Check{Target: box("vm")}) }()
 	<-backend.statusStarted
 
 	runner.Stop()
@@ -57,8 +58,10 @@ func TestStopCancelsProbesAndWaitsForThem(t *testing.T) {
 func TestPowerOutlivesStop(t *testing.T) {
 	backend := blockingBackend{upCtxErr: make(chan error, 1), release: make(chan struct{})}
 	runner := NewRunner(backend, nil)
-	finished := make(chan Event, 1)
-	go func() { finished <- runner.Run(Power{Target: box("vm"), Operation: OperationStarting}) }()
+	finished := make(chan launcher.Event, 1)
+	go func() {
+		finished <- runner.Run(launcher.Power{Target: box("vm"), Operation: launcher.OperationStarting})
+	}()
 
 	start := time.Now()
 	runner.Stop()
@@ -69,15 +72,15 @@ func TestPowerOutlivesStop(t *testing.T) {
 	if err := <-backend.upCtxErr; err != nil {
 		t.Errorf("a start keeps its own lifetime, got %v", err)
 	}
-	if done, ok := (<-finished).(PowerDone); !ok || done.Err != nil {
+	if done, ok := (<-finished).(launcher.PowerDone); !ok || done.Err != nil {
 		t.Errorf("got %+v", done)
 	}
 }
 
 func TestNothingStartsAfterStop(t *testing.T) {
-	runner := NewRunner(System{}, nil)
+	runner := NewRunner(Commands{}, nil)
 	runner.Stop()
-	if got := runner.Run(Check{Target: box("vm")}); got != nil {
+	if got := runner.Run(launcher.Check{Target: box("vm")}); got != nil {
 		t.Errorf("a stopped runner starts nothing, got %+v", got)
 	}
 }
@@ -86,9 +89,9 @@ func TestStopKillsTheProbeProcess(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "pid")
 	vm := box("vm")
 	vm.Check = "sleep 30 & echo $! > " + pidFile + "; wait"
-	runner := NewRunner(System{}, nil)
-	finished := make(chan Event, 1)
-	go func() { finished <- runner.Run(Check{Target: vm}) }()
+	runner := NewRunner(Commands{}, nil)
+	finished := make(chan launcher.Event, 1)
+	go func() { finished <- runner.Run(launcher.Check{Target: vm}) }()
 
 	var pid int
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline) && pid == 0; time.Sleep(10 * time.Millisecond) {
@@ -100,7 +103,7 @@ func TestStopKillsTheProbeProcess(t *testing.T) {
 	}
 
 	runner.Stop()
-	if checked, ok := (<-finished).(Checked); !ok || checked.Status != target.StatusUnknown {
+	if checked, ok := (<-finished).(launcher.Checked); !ok || checked.Status != target.StatusUnknown {
 		t.Errorf("got %+v", checked)
 	}
 	time.Sleep(50 * time.Millisecond)
@@ -119,12 +122,16 @@ func (fakeCatalog) Discover(_ context.Context, name string) ([]inventory.Discove
 }
 
 func TestRunnerReadsConfigAndDiscovers(t *testing.T) {
-	runner := NewRunner(System{}, fakeCatalog{})
-	if read := runner.Run(ReadConfig{Generation: 3, Notice: "n"}).(ConfigRead); read.Generation != 3 || read.Notice != "n" || len(read.Plan.Providers) != 1 {
+	runner := NewRunner(Commands{}, fakeCatalog{})
+	if read := runner.Run(launcher.ReadConfig{Generation: 3, Notice: "n"}).(launcher.ConfigRead); read.Generation != 3 || read.Notice != "n" || len(read.Plan.Providers) != 1 {
 		t.Errorf("got %+v", read)
 	}
-	done := runner.Run(Discover{Provider: "lima", Epoch: 2}).(DiscoveryDone)
+	done := runner.Run(launcher.Discover{Provider: "lima", Epoch: 2}).(launcher.DiscoveryDone)
 	if done.Provider != "lima" || done.Epoch != 2 || done.Err == nil {
 		t.Errorf("got %+v", done)
 	}
+}
+
+func box(name string) target.Target {
+	return target.Target{ID: target.ID{Source: target.ConfigSource, Key: name}, Name: name, Modes: []target.Mode{{Name: "shell", Argv: []string{"sh"}}}}
 }

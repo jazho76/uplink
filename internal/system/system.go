@@ -1,4 +1,4 @@
-package launcher
+package system
 
 import (
 	"context"
@@ -33,13 +33,13 @@ type Backend interface {
 	Logs(ctx context.Context, t target.Target, lines int) string
 }
 
-type System struct{}
+type Commands struct{}
 
-func (System) Inspect(ctx context.Context, t target.Target) (target.Environment, error) {
+func (Commands) Inspect(ctx context.Context, t target.Target) (target.Environment, error) {
 	return inspection.Run(ctx, probeCeiling, t.Stats, t.Reach.Probe("sh"))
 }
 
-func (System) Status(ctx context.Context, t target.Target) (target.Status, error) {
+func (Commands) Status(ctx context.Context, t target.Target) (target.Status, error) {
 	if t.Check != "" {
 		_, err := process.NonInteractive(ctx, checkTimeout, "", "sh", "-c", t.Check)
 		return checkStatus(err), err
@@ -64,11 +64,11 @@ func checkStatus(err error) target.Status {
 	}
 }
 
-func (System) Up(ctx context.Context, t target.Target) error {
+func (Commands) Up(ctx context.Context, t target.Target) error {
 	return hook(ctx, powerTimeout, t.StartCommand())
 }
 
-func (System) Down(ctx context.Context, t target.Target) error {
+func (Commands) Down(ctx context.Context, t target.Target) error {
 	return hook(ctx, powerTimeout, t.StopCommand())
 }
 
@@ -83,7 +83,7 @@ func hook(ctx context.Context, limit time.Duration, command string) error {
 	return err
 }
 
-func (System) Logs(ctx context.Context, t target.Target, lines int) string {
+func (Commands) Logs(ctx context.Context, t target.Target, lines int) string {
 	var (
 		out string
 		err error

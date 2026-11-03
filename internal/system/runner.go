@@ -1,4 +1,4 @@
-package launcher
+package system
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/process"
 )
 
@@ -32,8 +33,8 @@ func NewRunner(backend Backend, catalog Catalog) *Runner {
 	return &Runner{Backend: backend, Catalog: catalog, ctx: ctx, cancel: cancel}
 }
 
-func (r *Runner) Run(effect Effect) Event {
-	if power, ok := effect.(Power); ok {
+func (r *Runner) Run(effect launcher.Effect) launcher.Event {
+	if power, ok := effect.(launcher.Power); ok {
 		return r.operate(context.WithoutCancel(r.ctx), power)
 	}
 	if !r.begin() {
@@ -70,36 +71,36 @@ func (r *Runner) Stop() {
 	}
 }
 
-func (r *Runner) operate(ctx context.Context, e Power) Event {
+func (r *Runner) operate(ctx context.Context, e launcher.Power) launcher.Event {
 	operation := r.Backend.Down
-	if e.Operation == OperationStarting {
+	if e.Operation == launcher.OperationStarting {
 		operation = r.Backend.Up
 	}
-	return PowerDone{ID: e.Target.ID, Operation: e.Operation, Err: operation(ctx, e.Target)}
+	return launcher.PowerDone{ID: e.Target.ID, Operation: e.Operation, Err: operation(ctx, e.Target)}
 }
 
-func (r *Runner) probe(ctx context.Context, effect Effect) Event {
+func (r *Runner) probe(ctx context.Context, effect launcher.Effect) launcher.Event {
 	switch e := effect.(type) {
-	case Check:
+	case launcher.Check:
 		status, err := r.Backend.Status(ctx, e.Target)
-		return Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full, Status: status, Reason: process.Describe(err)}
+		return launcher.Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full, Status: status, Reason: process.Describe(err)}
 
-	case PeekLogs:
-		return LogsPeeked{ID: e.Target.ID, Text: r.Backend.Logs(ctx, e.Target, maxLogPeek)}
+	case launcher.PeekLogs:
+		return launcher.LogsPeeked{ID: e.Target.ID, Text: r.Backend.Logs(ctx, e.Target, e.Lines)}
 
-	case ViewLogs:
-		return LogsViewed{Round: e.Round, Text: r.Backend.Logs(ctx, e.Target, logScreenLines)}
+	case launcher.ViewLogs:
+		return launcher.LogsViewed{Round: e.Round, Text: r.Backend.Logs(ctx, e.Target, e.Lines)}
 
-	case Inspect:
+	case launcher.Inspect:
 		env, err := r.Backend.Inspect(ctx, e.Target)
-		return Inspected{ID: e.Target.ID, Epoch: e.Epoch, Env: env, Err: err}
+		return launcher.Inspected{ID: e.Target.ID, Epoch: e.Epoch, Env: env, Err: err}
 
-	case ReadConfig:
-		return ConfigRead{Generation: e.Generation, Plan: r.Catalog.ReadPlan(), Notice: e.Notice}
+	case launcher.ReadConfig:
+		return launcher.ConfigRead{Generation: e.Generation, Plan: r.Catalog.ReadPlan(), Notice: e.Notice}
 
-	case Discover:
+	case launcher.Discover:
 		found, err := r.Catalog.Discover(ctx, e.Provider)
-		return DiscoveryDone{Provider: e.Provider, Epoch: e.Epoch, Found: found, Err: err}
+		return launcher.DiscoveryDone{Provider: e.Provider, Epoch: e.Epoch, Found: found, Err: err}
 	}
 	return nil
 }

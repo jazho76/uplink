@@ -6,7 +6,7 @@ import (
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/dashboard"
 	"github.com/jazho76/uplink/internal/inventory"
-	"github.com/jazho76/uplink/internal/launcher"
+	"github.com/jazho76/uplink/internal/system"
 )
 
 func openDashboard() error {
@@ -18,5 +18,5 @@ func openDashboard() error {
 		}
 		return exec.Command(config.Editor(), path), nil
 	}
-	return dashboard.Run(launcher.NewRunner(launcher.System{}, catalog), edit)
+	return dashboard.Run(system.NewRunner(system.Commands{}, catalog), edit)
 }

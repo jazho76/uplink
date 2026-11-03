@@ -4,16 +4,25 @@ import "github.com/jazho76/uplink/internal/target"
 
 type Effect interface{ isEffect() }
 
+type Runner interface {
+	Run(Effect) Event
+	Stop()
+}
+
 type (
 	Check struct {
 		Target target.Target
 		Full   bool
 		Epoch  int
 	}
-	PeekLogs struct{ Target target.Target }
+	PeekLogs struct {
+		Target target.Target
+		Lines  int
+	}
 	ViewLogs struct {
 		Target target.Target
 		Round  int
+		Lines  int
 	}
 	Power struct {
 		Target    target.Target

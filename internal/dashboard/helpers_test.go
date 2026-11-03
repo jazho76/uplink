@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/launcher"
+	"github.com/jazho76/uplink/internal/system"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -193,8 +194,8 @@ func newTestModel() (model, *fakeBackend) {
 	return m, backend
 }
 
-func testModel(targets []target.Target, backend launcher.Backend) model {
-	return newModel(targets, launcher.NewRunner(backend, nil))
+func testModel(targets []target.Target, backend system.Backend) model {
+	return newModel(targets, system.NewRunner(backend, nil))
 }
 
 func sized(m model) model {
@@ -397,7 +398,7 @@ func startedWithProviders(t *testing.T, providers ...string) model {
 	t.Helper()
 	backend := &fakeBackend{down: map[string]bool{}}
 	m := testModel(nil, backend)
-	m.runner.Catalog = &fakeCatalog{plan: inventory.Plan{Providers: providers}}
+	m.runner.(*system.Runner).Catalog = &fakeCatalog{plan: inventory.Plan{Providers: providers}}
 	m.edit = func() (*exec.Cmd, error) { return exec.Command("true"), nil }
 	m.exec = func(*exec.Cmd, tea.ExecCallback) tea.Cmd { return nil }
 	state, effects := m.state.Apply(time.Now(), launcher.Started{})

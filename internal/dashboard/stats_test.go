@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/system"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -167,7 +168,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Metrics: linuxMetrics[1:2]}
-	m.runner.Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
+	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	m = next.(model)
@@ -185,7 +186,7 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Builtin: true}
-	m.runner.Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
+	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	if got := next.(model).state.Observation(configID("forge")).Stats.Value; got != nil {

@@ -23,7 +23,7 @@ func (i item) empty() bool { return i.id() == target.ID{} }
 
 type model struct {
 	state   launcher.State
-	runner  *launcher.Runner
+	runner  launcher.Runner
 	startup []launcher.Effect
 	panes   []pane
 	focus   int
@@ -34,7 +34,7 @@ type model struct {
 	exec    func(*exec.Cmd, tea.ExecCallback) tea.Cmd
 }
 
-func Run(runner *launcher.Runner, edit func() (*exec.Cmd, error)) error {
+func Run(runner launcher.Runner, edit func() (*exec.Cmd, error)) error {
 	defer runner.Stop()
 	m := newModel(nil, runner)
 	m.edit = edit
@@ -44,7 +44,7 @@ func Run(runner *launcher.Runner, edit func() (*exec.Cmd, error)) error {
 	return err
 }
 
-func newModel(targets []target.Target, runner *launcher.Runner) model {
+func newModel(targets []target.Target, runner launcher.Runner) model {
 	m := model{
 		state:  launcher.New(targets, nil),
 		runner: runner,

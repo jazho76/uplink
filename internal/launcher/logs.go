@@ -40,7 +40,7 @@ func (s *State) peekSelected() []Effect {
 	current := s.entries[t.ID]
 	current.peeking = true
 	s.entries[t.ID] = current
-	return []Effect{PeekLogs{Target: t}}
+	return []Effect{PeekLogs{Target: t, Lines: maxLogPeek}}
 }
 
 func (s State) HasLogs(t target.Target) bool {
@@ -67,12 +67,12 @@ func (s *State) openLogs() []Effect {
 	s.logText = s.Logs(t)
 	s.logOpen, s.logTarget, s.notice = true, t, ""
 	s.logRound++
-	return []Effect{ViewLogs{Target: t, Round: s.logRound}}
+	return []Effect{ViewLogs{Target: t, Round: s.logRound, Lines: logScreenLines}}
 }
 
 func (s *State) logTicked(e LogTicked) []Effect {
 	if s.logOpen && e.Round == s.logRound {
-		return []Effect{ViewLogs{Target: s.logTarget, Round: s.logRound}}
+		return []Effect{ViewLogs{Target: s.logTarget, Round: s.logRound, Lines: logScreenLines}}
 	}
 	return nil
 }

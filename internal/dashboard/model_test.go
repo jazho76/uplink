@@ -12,6 +12,7 @@ import (
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/launcher"
+	"github.com/jazho76/uplink/internal/system"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -202,7 +203,7 @@ func TestHidingTheSelectedTargetMovesToANeighbor(t *testing.T) {
 
 	hide := true
 	plan := inventory.Plan{Providers: []string{"lima"}, Overlays: []config.Overlay{{Match: "lima/other", Hide: &hide}}}
-	m.runner.Catalog = &fakeCatalog{plan: plan}
+	m.runner.(*system.Runner).Catalog = &fakeCatalog{plan: plan}
 	next, _ := reload(m, "")
 	m = next.(model)
 	want := target.ID{Source: "lima", Key: "dev"}
@@ -222,7 +223,7 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	moved := vm("tokyo")
 	moved.Group = "far"
 	broken := errors.Join(errors.New(`target "x": no modes`), errors.New(`target "y": no modes`))
-	m.runner.Catalog = planOf([]target.Target{hostTarget(), moved, remote("berlin")}, broken)
+	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), moved, remote("berlin")}, broken)
 
 	if footer := m.renderFooter(); !strings.Contains(footer, "config") {
 		t.Errorf("the footer should offer the config editor: %s", footer)
@@ -256,7 +257,7 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 func TestReloadKeepsTheSelectionOnTheSameTarget(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(focus(m, "tokyo"))
-	m.runner.Catalog = planOf([]target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil)
+	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
 	if got := next.(model).selected().name(); got != "tokyo" {
