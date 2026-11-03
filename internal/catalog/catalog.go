@@ -1,4 +1,4 @@
-package inventory
+package catalog
 
 import (
 	"context"
@@ -9,29 +9,21 @@ import (
 	"sync"
 
 	"github.com/jazho76/uplink/internal/config"
+	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/target"
 )
 
-type Plan struct {
-	Providers   []string
-	Explicit    bool
-	Invalid     bool
-	Declared    []target.Target
-	Overlays    []config.Overlay
-	DefaultMode string
-	Problems    error
-}
-
 type Catalog struct {
 	Path      string
-	Providers []Provider
+	Providers []inventory.Provider
 }
 
-func (c Catalog) ReadPlan() Plan {
+func (c Catalog) ReadPlan() inventory.Plan {
 	doc, err := config.Read(c.Path)
 	if err != nil {
 		names, _ := enabled(config.Document{}, c.Providers)
-		return Plan{Providers: names, Invalid: true, Problems: err}
+		return inventory.Plan{Providers: names, Invalid: true, Problems: err}
 	}
 	names, explicit := enabled(doc, c.Providers)
 	var (
@@ -39,7 +31,7 @@ func (c Catalog) ReadPlan() Plan {
 		errs  []error
 	)
 	for _, name := range names {
-		if !slices.ContainsFunc(c.Providers, func(p Provider) bool { return p.Name() == name }) {
+		if !c.knows(name) {
 			errs = append(errs, fmt.Errorf("discover: unknown provider %q", name))
 			continue
 		}
@@ -50,7 +42,7 @@ func (c Catalog) ReadPlan() Plan {
 	overlays, err := doc.Overlays()
 	errs = append(errs, err)
 	errs = append(errs, c.unknownOverlayProviders(overlays)...)
-	return Plan{
+	return inventory.Plan{
 		Providers:   known,
 		Explicit:    explicit,
 		Declared:    declared,
@@ -60,27 +52,35 @@ func (c Catalog) ReadPlan() Plan {
 	}
 }
 
+func (c Catalog) knows(name string) bool {
+	return slices.ContainsFunc(c.Providers, func(p inventory.Provider) bool { return p.Name() == name })
+}
+
 func (c Catalog) unknownOverlayProviders(overlays []config.Overlay) []error {
 	var errs []error
 	for _, overlay := range overlays {
 		name := overlay.Provider()
 		isPattern := strings.ContainsAny(name, `*?[\`)
-		if !isPattern && !slices.ContainsFunc(c.Providers, func(p Provider) bool { return p.Name() == name }) {
+		if !isPattern && !c.knows(name) {
 			errs = append(errs, fmt.Errorf("discovered: unknown provider %q in %q", name, overlay.Match))
 		}
 	}
 	return errs
 }
 
-func (c Catalog) Discover(ctx context.Context, name string) ([]Discovered, error) {
-	i := slices.IndexFunc(c.Providers, func(p Provider) bool { return p.Name() == name })
+func (c Catalog) Discover(ctx context.Context, name string) ([]inventory.Discovered, error) {
+	i := slices.IndexFunc(c.Providers, func(p inventory.Provider) bool { return p.Name() == name })
 	if i < 0 {
 		return nil, fmt.Errorf("unknown provider %q", name)
 	}
-	return c.Providers[i].Discover(ctx)
+	found, err := c.Providers[i].Discover(ctx)
+	if err != nil && !errors.Is(err, inventory.ErrUnavailable) {
+		return found, inventory.Failure{Reason: process.Describe(err), Err: err}
+	}
+	return found, err
 }
 
-func enabled(doc config.Document, providers []Provider) (names []string, explicit bool) {
+func enabled(doc config.Document, providers []inventory.Provider) (names []string, explicit bool) {
 	if doc.Discover != nil {
 		return doc.Discover, true
 	}
@@ -90,28 +90,24 @@ func enabled(doc config.Document, providers []Provider) (names []string, explici
 	return names, false
 }
 
-func declaredFound(declared []target.Target) Found {
-	found := Found{Source: target.ConfigSource, Discovered: make([]Discovered, len(declared))}
-	for i, t := range declared {
-		found.Discovered[i] = Discovered{Target: t, Status: target.StatusUnknown}
-	}
-	return found
-}
-
 func Load(ctx context.Context, catalog Catalog) ([]target.Target, error) {
-	inventory := Inventory{}.WithPlan(catalog.ReadPlan())
-	names := inventory.Providers()
-	results := make([]result, len(names))
+	current := inventory.Inventory{}.WithPlan(catalog.ReadPlan())
+	names := current.Providers()
+	type answer struct {
+		found []inventory.Discovered
+		err   error
+	}
+	answers := make([]answer, len(names))
 	var running sync.WaitGroup
 	for i, name := range names {
 		running.Go(func() {
-			results[i].found, results[i].err = catalog.Discover(ctx, name)
+			answers[i].found, answers[i].err = catalog.Discover(ctx, name)
 		})
 	}
 	running.Wait()
 	for i, name := range names {
-		inventory = inventory.WithResult(name, results[i].found, results[i].err)
+		current = current.WithResult(name, answers[i].found, answers[i].err)
 	}
-	merged, err := inventory.Merged()
-	return Targets(merged), err
+	merged, err := current.Merged()
+	return inventory.Targets(merged), err
 }

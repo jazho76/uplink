@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jazho76/uplink/internal/catalog"
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
@@ -33,7 +33,7 @@ func load(t *testing.T, body string) ([]target.Target, error) {
 }
 
 func loadConfig(path string) ([]target.Target, error) {
-	return inventory.Load(context.Background(), inventory.Catalog{Path: path})
+	return catalog.Load(context.Background(), catalog.Catalog{Path: path})
 }
 
 func mustLoad(t *testing.T, body string) []target.Target {

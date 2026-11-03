@@ -153,3 +153,11 @@ func TestUnknownDefaultModeIsReportedAndTargetsStillLoad(t *testing.T) {
 		t.Errorf("want the target with the implicit default, got %+v", all)
 	}
 }
+
+func ids(targets []target.Target) string {
+	var out []string
+	for _, t := range targets {
+		out = append(out, t.ID.String())
+	}
+	return strings.Join(out, " ")
+}

@@ -19,3 +19,12 @@ type Discovered struct {
 	Status target.Status
 	Reason string
 }
+
+type Failure struct {
+	Reason string
+	Err    error
+}
+
+func (f Failure) Error() string { return f.Err.Error() }
+
+func (f Failure) Unwrap() error { return f.Err }

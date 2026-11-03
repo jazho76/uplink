@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/jazho76/uplink/internal/catalog"
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
@@ -57,7 +57,7 @@ func checkConfig() error {
 	}
 	fmt.Printf("config %s (%s)\n", path, state)
 
-	resolved, problems := inventory.Load(context.Background(), inventory.Catalog{Path: path, Providers: providers})
+	resolved, problems := catalog.Load(context.Background(), catalog.Catalog{Path: path, Providers: providers})
 	for _, t := range resolved {
 		fmt.Println()
 		header := t.ID.String()
