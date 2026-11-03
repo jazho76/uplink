@@ -30,8 +30,7 @@ func (o overlaySpec) adjust(t target.Target) target.Target {
 		t.Logs = spec.logSource(fill)
 	}
 	if o.Stats != nil {
-		metrics, _ := spec.metrics(fill)
-		t.Stats = target.StatsPolicy{Metrics: metrics}
+		t.Metrics, _ = spec.metrics(fill)
 	}
 	if len(o.Modes) > 0 {
 		t.Modes, _ = spec.modes(t.Reach, fill)

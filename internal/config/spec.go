@@ -11,7 +11,6 @@ import (
 
 	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/shell"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -80,14 +79,14 @@ func (s Spec) resolve() (target.Target, error) {
 	}
 
 	t := target.Target{
-		ID:    target.ID{Source: target.ConfigSource, Key: s.Name},
-		Name:  s.Name,
-		Group: s.Group,
-		Reach: target.Reach{Interactive: interactive, Background: background},
-		Check: fill(s.Check),
-		Logs:  s.logSource(fill),
-		Watch: s.Watch,
-		Stats: target.StatsPolicy{Builtin: s.Stats == nil, Metrics: metrics},
+		ID:      target.ID{Source: target.ConfigSource, Key: s.Name},
+		Name:    s.Name,
+		Group:   s.Group,
+		Reach:   target.Reach{Interactive: interactive, Background: background},
+		Check:   fill(s.Check),
+		Logs:    s.logSource(fill),
+		Watch:   s.Watch,
+		Metrics: metrics,
 	}
 	if s.Up != "" || s.Down != "" {
 		t.Power = &target.Power{Up: fill(s.Up), Down: fill(s.Down)}
@@ -122,7 +121,7 @@ func (s Spec) metrics(fill func(string) string) ([]target.Metric, error) {
 	metrics := []target.Metric{}
 	for _, m := range s.Stats {
 		if m.preset != "" {
-			preset, ok := stats.Preset(m.preset)
+			preset, ok := target.Preset(m.preset)
 			if !ok {
 				return nil, fmt.Errorf("stats: unknown preset %q", m.preset)
 			}

@@ -133,12 +133,20 @@ func (s *State) selectTarget(now time.Time, id target.ID) []Effect {
 	return s.refreshSelected(now)
 }
 
-func (s State) targetByID(id target.ID) (target.Target, bool) {
+func (s State) declared(id target.ID) (target.Target, bool) {
 	i := slices.IndexFunc(s.targets, func(t target.Target) bool { return t.ID == id })
 	if i < 0 {
 		return target.Target{}, false
 	}
-	return s.resolved(s.targets[i]), true
+	return s.targets[i], true
+}
+
+func (s State) targetByID(id target.ID) (target.Target, bool) {
+	t, ok := s.declared(id)
+	if !ok {
+		return target.Target{}, false
+	}
+	return s.resolved(t), true
 }
 
 func (s State) resolved(t target.Target) target.Target {

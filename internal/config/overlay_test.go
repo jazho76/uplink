@@ -41,19 +41,19 @@ discovered:
 	reach := target.Reach{Interactive: []string{"ssh", "nakama"}}
 	power := &target.Power{Up: "start"}
 	got := overlays[0].Adjust(target.Target{
-		ID:    target.ID{Source: "lima", Key: "nakama"},
-		Group: "vms",
-		Reach: reach,
-		Power: power,
-		Stats: target.StatsPolicy{Builtin: true},
-		Logs:  target.DetectedLogs(),
-		Watch: true,
+		ID:      target.ID{Source: "lima", Key: "nakama"},
+		Group:   "vms",
+		Reach:   reach,
+		Power:   power,
+		Metrics: target.DetectedMetrics(),
+		Logs:    target.DetectedLogs(),
+		Watch:   true,
 	})
 	if got.Group != "work" || got.Logs != (target.LogSource{Where: target.InHost, Command: "tail nakama.log"}) {
 		t.Errorf("got %+v", got)
 	}
-	if got.Stats.Builtin || got.Stats.Metrics[0].Value != "whoami nakama" {
-		t.Errorf("got %+v", got.Stats)
+	if got.DetectsMetrics() || got.Metrics[0].Value != "whoami nakama" {
+		t.Errorf("got %+v", got.Metrics)
 	}
 	if mode := got.Modes[0]; mode.Multiplexer != "tmux" || !slices.Equal(mode.Argv, []string{"ssh", "nakama", shell.POSIX("tmux new -s nakama")}) {
 		t.Errorf("modes go through the target's reach, got %+v", mode)
@@ -62,8 +62,8 @@ discovered:
 		t.Errorf("what the provider owns stays, got %+v", got)
 	}
 
-	untouched := overlaySpec{Match: "lima/nakama", Group: "only"}.adjust(target.Target{Logs: target.DetectedLogs(), Stats: target.StatsPolicy{Builtin: true}})
-	if untouched.Logs != target.DetectedLogs() || !untouched.Stats.Builtin || untouched.Modes != nil {
+	untouched := overlaySpec{Match: "lima/nakama", Group: "only"}.adjust(target.Target{Logs: target.DetectedLogs(), Metrics: target.DetectedMetrics()})
+	if untouched.Logs != target.DetectedLogs() || !untouched.DetectsMetrics() || untouched.Modes != nil {
 		t.Errorf("fields left out stay as they were, got %+v", untouched)
 	}
 }
@@ -71,8 +71,8 @@ discovered:
 func TestOverlayCanTurnThingsOff(t *testing.T) {
 	doc := read(t, "discovered:\n  - { match: lima/a, logs: \"\", stats: [] }\n")
 	overlays, _ := doc.Overlays()
-	got := overlays[0].Adjust(target.Target{Logs: target.DetectedLogs(), Stats: target.StatsPolicy{Builtin: true}})
-	if got.Logs != (target.LogSource{}) || got.Stats.Builtin || len(got.Stats.Metrics) != 0 {
+	got := overlays[0].Adjust(target.Target{Logs: target.DetectedLogs(), Metrics: target.DetectedMetrics()})
+	if got.Logs != (target.LogSource{}) || got.DetectsMetrics() || len(got.Metrics) != 0 {
 		t.Errorf("got %+v", got)
 	}
 }

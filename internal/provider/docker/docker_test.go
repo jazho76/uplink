@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/jazho76/uplink/internal/inventory"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -86,8 +85,8 @@ func TestContainerFacts(t *testing.T) {
 func TestContainerDefaults(t *testing.T) {
 	fixture(t)
 	web := resolved(t)[1]
-	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Stats.Metrics, containerPreset(t)) || web.Stats.Builtin {
-		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Stats.Metrics)
+	if web.Group != "containers" || !web.Watch || !slices.Equal(web.Metrics, containerPreset(t)) || web.DetectsMetrics() {
+		t.Errorf("want a watched containers target with the memory gauge, got %q %v %v", web.Group, web.Watch, web.Metrics)
 	}
 }
 
@@ -110,7 +109,7 @@ func TestFailuresBelongToTheSource(t *testing.T) {
 
 func containerPreset(t *testing.T) []target.Metric {
 	t.Helper()
-	metrics, ok := stats.Preset(stats.PresetContainer)
+	metrics, ok := target.Preset(target.PresetContainer)
 	if !ok || len(metrics) == 0 {
 		t.Fatal("the container preset should exist")
 	}

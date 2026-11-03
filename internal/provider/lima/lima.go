@@ -101,8 +101,8 @@ func (vm instance) target() target.Target {
 			Up:   shell.Quote([]string{"limactl", "start", vm.Name}),
 			Down: shell.Quote([]string{"limactl", "stop", vm.Name}),
 		},
-		Logs:  target.LogSource{Command: shell.Quote([]string{"tail", "-n", "500", vm.Dir + "/serial.log"})},
-		Watch: true,
-		Stats: target.StatsPolicy{Builtin: true},
+		Logs:    target.LogSource{Command: shell.Quote([]string{"tail", "-n", "500", vm.Dir + "/serial.log"})},
+		Watch:   true,
+		Metrics: target.DetectedMetrics(),
 	}
 }

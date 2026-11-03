@@ -32,7 +32,7 @@ func TestRebuildOrdersHostFirst(t *testing.T) {
 func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Logs, quiet.Stats = target.LogSource{}, target.StatsPolicy{}
+	quiet.Logs, quiet.Metrics = target.LogSource{}, []target.Metric{}
 	m = withTargets(m, vm("forge"), quiet)
 
 	m = sized(focus(m, "forge"))
@@ -73,7 +73,7 @@ func TestProbeResultSetsStatus(t *testing.T) {
 func TestReachabilityStandsInForStats(t *testing.T) {
 	m, backend := newTestModel()
 	quiet := remote("dojo")
-	quiet.Stats = target.StatsPolicy{}
+	quiet.Metrics = []target.Metric{}
 	m = sized(withTargets(m, quiet))
 	m = focus(m, "dojo")
 

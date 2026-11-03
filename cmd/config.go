@@ -105,11 +105,11 @@ func logsSummary(t target.Target) string {
 }
 
 func statsSummary(t target.Target) string {
-	if t.Stats.Builtin {
+	if t.DetectsMetrics() {
 		return "built-in (by OS)"
 	}
-	names := make([]string, len(t.Stats.Metrics))
-	for i, m := range t.Stats.Metrics {
+	names := make([]string, len(t.Metrics))
+	for i, m := range t.Metrics {
 		names[i] = m.Label
 	}
 	return strings.Join(names, ", ")

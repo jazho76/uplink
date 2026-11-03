@@ -16,7 +16,7 @@ func limaVM(name string) target.Target {
 }
 
 func discoveredOf(t target.Target, status target.Status) []inventory.Discovered {
-	return []inventory.Discovered{{Target: target.Target{ID: target.ID{Key: t.ID.Key}, Name: t.Name, Modes: t.Modes, Power: t.Power}, Status: status}}
+	return []inventory.Discovered{{Target: target.Target{ID: target.ID{Key: t.ID.Key}, Name: t.Name, Metrics: t.Metrics, Modes: t.Modes, Power: t.Power}, Status: status}}
 }
 
 func startedWith(t *testing.T, providers ...string) State {
@@ -53,7 +53,7 @@ func TestReloadWithChangedStatsInvalidatesThem(t *testing.T) {
 	state, _ = state.Apply(clock, ReloadRequested{})
 
 	changed := vm
-	changed.Stats.Builtin = true
+	changed.Metrics = target.DetectedMetrics()
 	next, _ := state.Apply(clock.Add(time.Minute), ConfigRead{Generation: 1, Plan: inventory.Plan{Declared: []target.Target{changed}}})
 	got := next.Observation(vm.ID)
 	if got.Stats.Value != nil || got.Stats.Current() || got.Sessions.Current() {

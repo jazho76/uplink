@@ -32,8 +32,8 @@ func (f *fakeBackend) Inspect(_ context.Context, t target.Target) (target.Enviro
 	if f.down[t.Name] {
 		return target.Environment{}, errBoom{}
 	}
-	readings := make([]target.Reading, len(t.Stats.Metrics))
-	for i, m := range t.Stats.Metrics {
+	readings := make([]target.Reading, len(t.Metrics))
+	for i, m := range t.Metrics {
 		readings[i] = reading(m, 0.1, 4)
 	}
 	return target.Environment{Readings: readings, Tools: f.tools[t.Name]}, nil
@@ -112,11 +112,11 @@ func linuxReadings(load, cores, used, total float64, uptime time.Duration) []tar
 
 func hostTarget() target.Target {
 	return target.Target{
-		ID:    configID("host"),
-		Name:  "host",
-		Group: "local",
-		Logs:  target.LogSource{Command: "journalctl"},
-		Stats: target.StatsPolicy{Metrics: linuxMetrics},
+		ID:      configID("host"),
+		Name:    "host",
+		Group:   "local",
+		Logs:    target.LogSource{Command: "journalctl"},
+		Metrics: linuxMetrics,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: []string{"tmux"}, Multiplexer: "tmux"},
 			{Name: "shell", Argv: []string{"/bin/sh"}},
@@ -128,12 +128,12 @@ func hostTarget() target.Target {
 func vm(name string) target.Target {
 	via := []string{"ssh", "lima-" + name}
 	return target.Target{
-		ID:    configID(name),
-		Name:  name,
-		Group: "vms",
-		Reach: target.Reach{Interactive: via},
-		Logs:  target.LogSource{Command: "tail serial.log"},
-		Stats: target.StatsPolicy{Metrics: linuxMetrics},
+		ID:      configID(name),
+		Name:    name,
+		Group:   "vms",
+		Reach:   target.Reach{Interactive: via},
+		Logs:    target.LogSource{Command: "tail serial.log"},
+		Metrics: linuxMetrics,
 		Modes: []target.Mode{
 			{Name: "tmux", Argv: append(via, "tmux"), Multiplexer: "tmux"},
 			{Name: "shell", Argv: via},

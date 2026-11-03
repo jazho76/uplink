@@ -13,7 +13,6 @@ import (
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/process"
 	"github.com/jazho76/uplink/internal/shell"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -102,7 +101,7 @@ func (c container) status() target.Status {
 
 func containerTarget(container string) target.Target {
 	quote := func(args ...string) string { return shell.Quote(args) }
-	metrics, _ := stats.Preset(stats.PresetContainer)
+	metrics, _ := target.Preset(target.PresetContainer)
 	return target.Target{
 		ID:    target.ID{Key: container},
 		Group: group,
@@ -110,10 +109,10 @@ func containerTarget(container string) target.Target {
 			Interactive: []string{"docker", "exec", "-it", container, "sh", "-c"},
 			Background:  []string{"docker", "exec", "-i", container, "sh", "-c"},
 		},
-		Power: &target.Power{Up: quote("docker", "start", container), Down: quote("docker", "stop", container)},
-		Logs:  target.LogSource{Command: events(container)},
-		Watch: true,
-		Stats: target.StatsPolicy{Metrics: metrics},
+		Power:   &target.Power{Up: quote("docker", "start", container), Down: quote("docker", "stop", container)},
+		Logs:    target.LogSource{Command: events(container)},
+		Watch:   true,
+		Metrics: metrics,
 	}
 }
 

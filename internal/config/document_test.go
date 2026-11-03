@@ -13,7 +13,6 @@ import (
 	"github.com/jazho76/uplink/internal/catalog"
 	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/shell"
-	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -128,10 +127,10 @@ targets:`+host+`
 	home, _ := os.UserHomeDir()
 
 	forge := find(t, targets, "forge")
-	if forge.Group != "vms" || !forge.Watch || len(forge.Stats.Metrics) != 2 {
+	if forge.Group != "vms" || !forge.Watch || len(forge.Metrics) != 2 {
 		t.Errorf("forge should inherit group, watch and stats, got %+v", forge)
 	}
-	if got := forge.Stats.Metrics[0].Value + ", " + forge.Stats.Metrics[1].Value; got != "uptime forge, jobs forge" {
+	if got := forge.Metrics[0].Value + ", " + forge.Metrics[1].Value; got != "uptime forge, jobs forge" {
 		t.Errorf("metric commands should interpolate the name, got %q", got)
 	}
 	wantVia := []string{"ssh", "-F", filepath.Join(home, ".lima/forge/ssh.config"), "lima-forge"}
@@ -149,8 +148,8 @@ targets:`+host+`
 	}
 
 	tokyo := find(t, targets, "tokyo")
-	if tokyo.Logs.Command != "echo own" || tokyo.Stats.Metrics == nil || len(tokyo.Stats.Metrics) != 0 {
-		t.Errorf("target fields override the anchor, got logs %q stats %v", tokyo.Logs.Command, tokyo.Stats.Metrics)
+	if tokyo.Logs.Command != "echo own" || tokyo.Metrics == nil || len(tokyo.Metrics) != 0 {
+		t.Errorf("target fields override the anchor, got logs %q stats %v", tokyo.Logs.Command, tokyo.Metrics)
 	}
 	if got := modeNames(tokyo); !slices.Equal(got, []string{"top"}) {
 		t.Errorf("target modes replace the anchor's wholesale, got %v", got)
@@ -175,7 +174,7 @@ targets:
 	if mode := modeNamed(t, local, "shell"); !slices.Equal(mode.Argv, []string{"sh", "-c", shell.POSIX(shell.LoginShell)}) {
 		t.Errorf("shell argv = %q", mode.Argv)
 	}
-	if local.Group != target.DefaultGroup || local.Watch || local.Stats.Metrics != nil {
+	if local.Group != target.DefaultGroup || local.Watch || local.Metrics != nil {
 		t.Errorf("unset fields should take their defaults, got %+v", local)
 	}
 }
@@ -484,13 +483,13 @@ targets:
   - { name: off, stats: [] }
   - { name: declared, stats: [{ type: text, label: a, value: x }] }
 `)
-	if omitted := find(t, targets, "omitted"); !omitted.Stats.Builtin || len(omitted.Stats.Metrics) != 0 {
+	if omitted := find(t, targets, "omitted"); !omitted.DetectsMetrics() || len(omitted.Metrics) != 0 {
 		t.Errorf("left out means built-in, got %+v", omitted)
 	}
-	if off := find(t, targets, "off"); off.Stats.Builtin || len(off.Stats.Metrics) != 0 {
+	if off := find(t, targets, "off"); off.DetectsMetrics() || len(off.Metrics) != 0 {
 		t.Errorf("an empty list turns stats off, got %+v", off)
 	}
-	if declared := find(t, targets, "declared"); declared.Stats.Builtin || len(declared.Stats.Metrics) != 1 {
+	if declared := find(t, targets, "declared"); declared.DetectsMetrics() || len(declared.Metrics) != 1 {
 		t.Errorf("declared stats are used as written, got %+v", declared)
 	}
 }
@@ -508,7 +507,7 @@ targets:
   - { name: one, stats: *linux, modes: [{ name: shell }] }
   - { name: two, stats: *linux, modes: [{ name: shell }] }
 `)
-	if len(find(t, targets, "one").Stats.Metrics) != 2 || len(find(t, targets, "two").Stats.Metrics) != 2 {
+	if len(find(t, targets, "one").Metrics) != 2 || len(find(t, targets, "two").Metrics) != 2 {
 		t.Errorf("an anchored list should reach every target, got %+v", targets)
 	}
 }
@@ -564,8 +563,8 @@ targets:`+host+`
 	if err == nil || !strings.Contains(err.Error(), `"typo": stats: unknown preset "linx"`) {
 		t.Errorf("an unknown preset should be reported on its target, got %v", err)
 	}
-	linux, _ := stats.Preset(stats.PresetLinux)
-	box := find(t, targets, "box").Stats.Metrics
+	linux, _ := target.Preset(target.PresetLinux)
+	box := find(t, targets, "box").Metrics
 	if len(box) != len(linux)+1 || box[0] != linux[0] || box[len(box)-1].Label != "gpu" {
 		t.Errorf("want the linux preset followed by gpu, got %+v", box)
 	}

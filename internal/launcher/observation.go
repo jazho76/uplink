@@ -180,15 +180,25 @@ func (s *State) observeReported(now time.Time, d inventory.Discovered) {
 	s.entries[d.Target.ID] = current
 }
 
-func (s *State) inspectionDone(now time.Time, e Inspected) []Effect {
-	s.inspected(now, e)
-	if e.ID == s.selected {
-		return s.peekSelectedIfStale(now)
-	}
-	return nil
+func (s State) awaitingMetrics(id target.ID) bool {
+	t, ok := s.targetByID(id)
+	return ok && t.DetectsMetrics()
 }
 
-func (s *State) inspected(now time.Time, e Inspected) {
+func (s *State) inspectionDone(now time.Time, e Inspected) []Effect {
+	ranWithoutMetrics := s.awaitingMetrics(e.ID)
+	s.inspected(now, e, ranWithoutMetrics)
+	if e.ID != s.selected {
+		return nil
+	}
+	effects := s.peekSelectedIfStale(now)
+	if t, ok := s.targetByID(e.ID); ok && ranWithoutMetrics && !t.DetectsMetrics() {
+		effects = append(effects, s.inspect(t)...)
+	}
+	return effects
+}
+
+func (s *State) inspected(now time.Time, e Inspected, ranWithoutMetrics bool) {
 	current := s.entries[e.ID]
 	current.checking = false
 	if e.Epoch == current.epoch && current.Status == target.StatusUp {
@@ -196,7 +206,9 @@ func (s *State) inspected(now time.Time, e Inspected) {
 			current.failInspection(e.Err, now)
 		} else {
 			record(&current.Profile, e.Env.Profile, e.Env.Missing.Profile, now)
-			record(&current.Stats, e.Env.Readings, e.Env.Missing.Stats, now)
+			if !ranWithoutMetrics {
+				record(&current.Stats, e.Env.Readings, e.Env.Missing.Stats, now)
+			}
 			record(&current.Tools, e.Env.Tools, e.Env.Missing.Tools, now)
 			record(&current.Sessions, e.Env.Sessions, e.Env.Missing.Sessions, now)
 		}

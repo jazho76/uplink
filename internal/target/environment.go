@@ -1,7 +1,6 @@
 package target
 
 type Environment struct {
-	OS       string
 	Profile  Profile
 	Readings []Reading
 	Tools    []string

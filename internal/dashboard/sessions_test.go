@@ -66,7 +66,7 @@ func TestNoSessionsMeansNoSection(t *testing.T) {
 func TestSessionsShowWithoutStats(t *testing.T) {
 	m, _ := newTestModel()
 	quiet := remote("dojo")
-	quiet.Stats = target.StatsPolicy{}
+	quiet.Metrics = []target.Metric{}
 	m = focus(sized(withTargets(m, quiet)), "dojo")
 
 	if got := preview(m); strings.Contains(got, sessionsRule) {

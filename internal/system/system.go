@@ -35,7 +35,7 @@ type Backend interface {
 type Commands struct{}
 
 func (Commands) Inspect(ctx context.Context, t target.Target) (target.Environment, error) {
-	return inspection.Run(ctx, probeCeiling, t.Stats, t.Reach.Probe("sh"))
+	return inspection.Run(ctx, probeCeiling, t.Metrics, t.Reach.Probe("sh"))
 }
 
 func (Commands) Status(ctx context.Context, t target.Target) (target.Status, error) {

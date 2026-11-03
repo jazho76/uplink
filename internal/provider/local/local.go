@@ -25,11 +25,11 @@ func (Provider) Discover(context.Context) ([]inventory.Discovered, error) {
 	return []inventory.Discovered{{
 		Status: target.StatusUp,
 		Target: target.Target{
-			ID:    target.ID{Key: key},
-			Name:  display,
-			Group: group,
-			Logs:  target.DetectedLogs(),
-			Stats: target.StatsPolicy{Builtin: true},
+			ID:      target.ID{Key: key},
+			Name:    display,
+			Group:   group,
+			Logs:    target.DetectedLogs(),
+			Metrics: target.DetectedMetrics(),
 		},
 	}}, nil
 }

@@ -12,7 +12,7 @@ import (
 var clock = time.Unix(1000, 0)
 
 func box(name string) target.Target {
-	return target.Target{ID: target.ID{Source: target.ConfigSource, Key: name}, Name: name, Modes: []target.Mode{{Name: "shell", Argv: []string{"sh"}}}}
+	return target.Target{ID: target.ID{Source: target.ConfigSource, Key: name}, Name: name, Metrics: []target.Metric{}, Modes: []target.Mode{{Name: "shell", Argv: []string{"sh"}}}}
 }
 
 func selected(t target.Target, others ...target.Target) State {

@@ -35,17 +35,19 @@ func ValidateKey(key string) error {
 }
 
 type Target struct {
-	ID    ID
-	Name  string
-	Group string
-	Reach Reach
-	Check string
-	Power *Power
-	Logs  LogSource
-	Watch bool
-	Stats StatsPolicy
-	Modes []Mode
+	ID      ID
+	Name    string
+	Group   string
+	Reach   Reach
+	Check   string
+	Power   *Power
+	Logs    LogSource
+	Watch   bool
+	Metrics []Metric
+	Modes   []Mode
 }
+
+func (t Target) DetectsMetrics() bool { return t.Metrics == nil }
 
 func (t Target) Discovered() bool { return t.ID.Source != ConfigSource }
 
@@ -66,9 +68,4 @@ func (t Target) StopCommand() string {
 type Power struct {
 	Up   string
 	Down string
-}
-
-type StatsPolicy struct {
-	Builtin bool
-	Metrics []Metric
 }

@@ -20,21 +20,21 @@ const (
 type section struct {
 	name    string
 	missing func(*target.MissingSections)
-	script  func(target.StatsPolicy) string
-	parse   func(policy target.StatsPolicy, out string, environment *target.Environment)
+	script  func([]target.Metric) string
+	parse   func(metrics []target.Metric, out string, environment *target.Environment)
 }
 
 var sections = []section{osSection, logsSection, toolsSection, sessionsSection, statsSection}
 
-func Run(ctx context.Context, limit time.Duration, policy target.StatsPolicy, argv []string) (target.Environment, error) {
+func Run(ctx context.Context, limit time.Duration, metrics []target.Metric, argv []string) (target.Environment, error) {
 	if len(argv) == 0 {
 		return target.Environment{}, errors.New("inspection: no command to run")
 	}
-	out, err := process.NonInteractive(ctx, limit, script(policy), argv[0], argv[1:]...)
+	out, err := process.NonInteractive(ctx, limit, script(metrics), argv[0], argv[1:]...)
 	if err != nil && !anySectionEnded(out) {
 		return target.Environment{}, err
 	}
-	return Parse(out, policy), nil
+	return Parse(out, metrics), nil
 }
 
 func anySectionEnded(out string) bool {
@@ -49,21 +49,21 @@ func (s section) endLine() string {
 	return endTag + " " + s.name + " end"
 }
 
-func script(policy target.StatsPolicy) string {
+func script(metrics []target.Metric) string {
 	lines := []string{shell.Preamble(commandTimeout)}
 	for _, s := range sections {
-		lines = append(lines, s.script(policy), "echo "+shell.SingleQuote(s.endLine()))
+		lines = append(lines, s.script(metrics), "echo "+shell.SingleQuote(s.endLine()))
 	}
 	return strings.Join(append(lines, "true"), "\n")
 }
 
-func Parse(out string, policy target.StatsPolicy) target.Environment {
+func Parse(out string, metrics []target.Metric) target.Environment {
 	out = strings.ReplaceAll(out, "\r", "")
 	var environment target.Environment
 	for _, s := range sections {
 		switch {
 		case s.ended(out):
-			s.parse(policy, out, &environment)
+			s.parse(metrics, out, &environment)
 		case s.missing != nil:
 			s.missing(&environment.Missing)
 		}

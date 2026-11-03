@@ -81,8 +81,8 @@ func TestInstanceDefaults(t *testing.T) {
 	targets := resolved(t)
 	dev := targets[1]
 
-	if dev.Group != "vms" || !dev.Watch || !dev.Stats.Builtin {
-		t.Errorf("want a watched vms target with built-in stats, got %q %v %v", dev.Group, dev.Watch, dev.Stats.Builtin)
+	if dev.Group != "vms" || !dev.Watch || !dev.DetectsMetrics() {
+		t.Errorf("want a watched vms target with built-in stats, got %q %v %v", dev.Group, dev.Watch, dev.DetectsMetrics())
 	}
 }
 

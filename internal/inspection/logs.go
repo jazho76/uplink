@@ -12,13 +12,13 @@ var systemdMarker = "/run/systemd/system"
 var logsSection = section{
 	name:    "logs",
 	missing: func(missing *target.MissingSections) { missing.Profile = true },
-	script: func(target.StatsPolicy) string {
+	script: func([]target.Metric) string {
 		return `case "$os" in
 Linux) [ -d ` + shell.SingleQuote(systemdMarker) + ` ] && command -v journalctl >/dev/null 2>&1 && echo "` + logSystemTag + ` ` + string(target.LogSystemJournal) + `" ;;
 Darwin) command -v log >/dev/null 2>&1 && echo "` + logSystemTag + ` ` + string(target.LogSystemUnified) + `" ;;
 esac`
 	},
-	parse: func(_ target.StatsPolicy, out string, environment *target.Environment) {
+	parse: func(_ []target.Metric, out string, environment *target.Environment) {
 		lines := tagged(out, logSystemTag)
 		if len(lines) == 0 {
 			return

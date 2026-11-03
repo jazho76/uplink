@@ -83,16 +83,16 @@ func TestDefaultsFollowThePeerOS(t *testing.T) {
 	targets := resolved(t)
 	mac, berlin := targets[0], targets[1]
 
-	if berlin.Group != "machines" || !berlin.Watch || !berlin.Stats.Builtin {
-		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.Stats.Builtin)
+	if berlin.Group != "machines" || !berlin.Watch || !berlin.DetectsMetrics() {
+		t.Errorf("want a watched machine with built-in stats, got %q %v %v", berlin.Group, berlin.Watch, berlin.DetectsMetrics())
 	}
 	for _, peer := range []target.Target{berlin, mac} {
 		if peer.Logs != target.DetectedLogs() {
 			t.Errorf("%s: the core decides on guest logs, got %+v", peer.Name, peer.Logs)
 		}
 	}
-	if !mac.Stats.Builtin {
-		t.Errorf("want built-in stats, got %v", mac.Stats.Builtin)
+	if !mac.DetectsMetrics() {
+		t.Errorf("want built-in stats, got %v", mac.DetectsMetrics())
 	}
 }
 

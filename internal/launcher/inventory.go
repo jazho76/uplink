@@ -50,8 +50,8 @@ func (s *State) invalidateChangedStats() {
 	merged, _ := s.inventory.Merged()
 	for _, d := range merged {
 		t := d.Target
-		previous, ok := s.targetByID(t.ID)
-		if ok && (!slices.Equal(previous.Stats.Metrics, t.Stats.Metrics) || previous.Stats.Builtin != t.Stats.Builtin) {
+		previous, ok := s.declared(t.ID)
+		if ok && (!slices.Equal(previous.Metrics, t.Metrics) || previous.DetectsMetrics() != t.DetectsMetrics()) {
 			current := s.entries[t.ID]
 			current.Stats.Value, current.Stats.Err = nil, errStale
 			current.Sessions.Err = errStale

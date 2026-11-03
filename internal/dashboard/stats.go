@@ -17,8 +17,8 @@ const (
 )
 
 func (m model) showsStats(t target.Target) bool {
-	if !t.Stats.Builtin {
-		return len(t.Stats.Metrics) > 0
+	if !t.DetectsMetrics() {
+		return len(t.Metrics) > 0
 	}
 	stats := m.state.Observation(t.ID).Stats
 	if stats.Known {

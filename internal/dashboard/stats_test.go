@@ -16,13 +16,15 @@ const liveRule = "live ─"
 
 func focusedOnBuiltin() model {
 	box := remote("box")
-	box.Stats = target.StatsPolicy{Builtin: true}
+	box.Metrics = target.DetectedMetrics()
 	m, _ := newTestModel()
 	return focus(sized(withTargets(m, box)), "box")
 }
 
 func inspectedWith(m model, readings []target.Reading) model {
-	return reported(m, configID("box"), target.Environment{OS: "Linux", Readings: readings})
+	linux := target.Profile{OS: "Linux"}
+	m = reported(m, configID("box"), target.Environment{Profile: linux})
+	return reported(m, configID("box"), target.Environment{Profile: linux, Readings: readings})
 }
 
 func TestPreviewLeadsWithLiveData(t *testing.T) {
@@ -103,7 +105,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 
 	m, _ := newTestModel()
 	box := vm("box")
-	box.Stats = target.StatsPolicy{Metrics: []target.Metric{gpu, cache, agents, broken}}
+	box.Metrics = []target.Metric{gpu, cache, agents, broken}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
 	m = observed(m, "box", target.Environment{Readings: []target.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}})
@@ -167,7 +169,7 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 	m = probed(probed(m, "forge", true), "tokyo", true)
 
 	changed := vm("forge")
-	changed.Stats = target.StatsPolicy{Metrics: linuxMetrics[1:2]}
+	changed.Metrics = linuxMetrics[1:2]
 	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
@@ -185,7 +187,7 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 	m = probed(sized(m), "forge", true)
 
 	changed := vm("forge")
-	changed.Stats = target.StatsPolicy{Builtin: true}
+	changed.Metrics = target.DetectedMetrics()
 	m.runner.(*system.Runner).Catalog = planOf([]target.Target{hostTarget(), changed, vm("tokyo")}, nil)
 
 	next, _ := reload(m, "")
@@ -221,11 +223,11 @@ func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 func TestNaNFromATargetShowsAQuestionMark(t *testing.T) {
 	metric := target.Metric{Type: target.TypeGauge, Label: "gpu", Value: "x", Max: "10"}
 	box := vm("box")
-	box.Stats = target.StatsPolicy{Metrics: []target.Metric{metric}}
+	box.Metrics = []target.Metric{metric}
 	m, _ := newTestModel()
 	m = focus(sized(withTargets(m, box)), "box")
 
-	readings := stats.Parse("0 value NaN\n", box.Stats.Metrics)
+	readings := stats.Parse("0 value NaN\n", box.Metrics)
 	m = reported(m, configID("box"), target.Environment{Readings: readings})
 	if got := preview(m); !strings.Contains(got, "gpu") || !strings.Contains(got, "?") {
 		t.Errorf("want the gauge marked missing, got:\n%s", got)
@@ -237,12 +239,34 @@ func TestNaNFromATargetShowsAQuestionMark(t *testing.T) {
 
 func TestMissingStatsShowUnavailableNotNothing(t *testing.T) {
 	box := vm("box")
-	box.Stats = target.StatsPolicy{Builtin: true}
+	box.Metrics = target.DetectedMetrics()
 	m, _ := newTestModel()
 	m = focus(sized(withTargets(m, box)), "box")
-	m = reported(m, configID("box"), target.Environment{Readings: []target.Reading{reading(linuxMetrics[0], 1, 4)}})
-	m = reported(m, configID("box"), target.Environment{Missing: target.MissingSections{Stats: true}})
+	m = reported(m, configID("box"), target.Environment{Profile: target.Profile{OS: "Linux"}})
+	m = reported(m, configID("box"), target.Environment{Profile: target.Profile{OS: "Linux"}, Readings: []target.Reading{reading(linuxMetrics[0], 1, 4)}})
+	m = reported(m, configID("box"), target.Environment{Profile: target.Profile{OS: "Linux"}, Missing: target.MissingSections{Stats: true}})
 	if got := preview(m); !strings.Contains(got, liveRule) || !strings.Contains(got, "unavailable") {
 		t.Errorf("the block stays and says so, got:\n%s", got)
+	}
+}
+
+func TestDetectedStatsWaitBetweenPasses(t *testing.T) {
+	m := focusedOnBuiltin()
+	m = reported(m, configID("box"), target.Environment{Profile: target.Profile{OS: "Linux"}})
+	if got := preview(m); !strings.Contains(got, liveRule) || !strings.Contains(got, "…") {
+		t.Errorf("the block holds its place until the metrics report, got:\n%s", got)
+	}
+	m = reported(m, configID("box"), target.Environment{Profile: target.Profile{OS: "Linux"}, Readings: []target.Reading{reading(linuxMetrics[0], 1, 4)}})
+	if got := preview(m); !strings.Contains(got, "load") || strings.Contains(got, "…") {
+		t.Errorf("want the gauge, got:\n%s", got)
+	}
+}
+
+func TestUnknownKernelHidesTheLiveBlock(t *testing.T) {
+	m := focusedOnBuiltin()
+	plan9 := target.Environment{Profile: target.Profile{OS: "Plan9"}}
+	m = reported(reported(m, configID("box"), plan9), configID("box"), plan9)
+	if got := preview(m); strings.Contains(got, liveRule) {
+		t.Errorf("no metrics for this kernel, got:\n%s", got)
 	}
 }

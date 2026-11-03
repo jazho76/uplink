@@ -14,7 +14,7 @@ const multiplexerTag = "mux"
 var sessionsSection = section{
 	name:    "sessions",
 	missing: func(missing *target.MissingSections) { missing.Sessions = true },
-	script: func(target.StatsPolicy) string {
+	script: func([]target.Metric) string {
 		blocks := make([]string, len(multiplexer.All))
 		for i, m := range multiplexer.All {
 			blocks[i] = fmt.Sprintf(`if command -v %[1]s >/dev/null 2>&1; then
@@ -24,7 +24,7 @@ fi`, m.Tool(), m.Script(), rowTag(m))
 		}
 		return strings.Join(blocks, "\n")
 	},
-	parse: func(_ target.StatsPolicy, out string, environment *target.Environment) {
+	parse: func(_ []target.Metric, out string, environment *target.Environment) {
 		for _, m := range multiplexer.All {
 			environment.Sessions = append(environment.Sessions, clean(m.Tool(), m.Parse(tagged(out, rowTag(m))))...)
 		}

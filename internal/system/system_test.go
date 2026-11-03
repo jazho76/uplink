@@ -81,10 +81,10 @@ func TestHookFailureCarriesItsStderr(t *testing.T) {
 }
 
 func TestStatsFlowThroughExec(t *testing.T) {
-	stats := target.StatsPolicy{Metrics: []target.Metric{{Type: target.TypeGauge, Label: "where", Value: "echo 1", Max: "2"}}}
+	metrics := []target.Metric{{Type: target.TypeGauge, Label: "where", Value: "echo 1", Max: "2"}}
 	for name, found := range map[string]target.Target{
-		"local": {Stats: stats},
-		"via":   {Stats: stats, Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c", "exec sh"}}},
+		"local": {Metrics: metrics},
+		"via":   {Metrics: metrics, Reach: target.Reach{Interactive: []string{"false"}, Background: []string{"sh", "-c", "exec sh"}}},
 	} {
 		snapshot, err := Commands{}.Inspect(context.Background(), found)
 		if err != nil {

@@ -111,8 +111,8 @@ func (p peer) target(magicDNS bool) (target.Target, bool) {
 			Interactive: []string{"ssh", "-t", "-o", "ConnectTimeout=2", address},
 			Background:  []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=2", address},
 		},
-		Logs:  target.DetectedLogs(),
-		Watch: true,
-		Stats: target.StatsPolicy{Builtin: true},
+		Logs:    target.DetectedLogs(),
+		Watch:   true,
+		Metrics: target.DetectedMetrics(),
 	}, true
 }
