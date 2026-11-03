@@ -27,6 +27,7 @@ type model struct {
 	startup []launcher.Effect
 	panes   []pane
 	focus   int
+	pinned  target.ID
 	width   int
 	height  int
 	edit    func() (*exec.Cmd, error)
@@ -75,6 +76,23 @@ func (m *model) rebuild(targets []target.Target) {
 	previouslyFocused := m.focusedGroup()
 	m.panes = carryOverCursors(panes, m.panes)
 	m.focus = paneToFocus(m.panes, previouslyFocused)
+	m.settleSelection()
+}
+
+func (m *model) settleSelection() {
+	if m.pinned == (target.ID{}) {
+		m.focus = 0
+		if len(m.panes) > 0 {
+			m.panes[0].cursor = 0
+		}
+		return
+	}
+	for i := range m.panes {
+		if at := slices.IndexFunc(m.panes[i].items, func(it item) bool { return it.id() == m.pinned }); at >= 0 {
+			m.focus, m.panes[i].cursor = i, at
+			return
+		}
+	}
 }
 
 func (m model) statusOf(t target.Target) string {
@@ -153,7 +171,8 @@ func (m *model) focusItem(inPane, cursor int) tea.Cmd {
 	m.panes = append([]pane(nil), m.panes...)
 	m.panes[inPane] = landed
 	m.focus = inPane
-	return m.send(launcher.Selected{ID: m.selected().id()})
+	m.pinned = m.selected().id()
+	return m.send(launcher.Selected{ID: m.pinned})
 }
 
 func wrap(i, n int) int {

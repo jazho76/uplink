@@ -1502,6 +1502,7 @@ func focus(m model, name string) model {
 		for j, it := range p.items {
 			if it.name() == name {
 				m.focus, m.panes[i].cursor = i, j
+				m.pinned = it.id()
 				m.state = m.state.Select(it.id())
 				return m
 			}
@@ -1891,5 +1892,47 @@ func TestSelectionMovesWhenItsTargetVanishes(t *testing.T) {
 	m = arrive(m, "lima")
 	if m.selected().id() != (target.ID{}) || m.state.Selection() != (target.ID{}) {
 		t.Errorf("nothing is left to select, got %v and %v", m.selected().id(), m.state.Selection())
+	}
+}
+
+func TestSelectionStaysOnTheFirstRowUntilYouMove(t *testing.T) {
+	m := startedWithProviders(t, "local", "lima")
+	here := discovered("here", target.StatusUp)
+	here.Target.Group = "local"
+	m = arrive(m, "lima", discovered("dev", target.StatusUp))
+	if got := m.selected().name(); got != "dev" {
+		t.Fatalf("only dev is here, got %q", got)
+	}
+	m = arrive(m, "local", here)
+	if got := m.selected().name(); got != "here" || m.state.Selection() != m.selected().id() {
+		t.Errorf("the first row stays selected as providers answer, got %q", got)
+	}
+
+	m = key(m, "down")
+	m = arrive(m, "lima", discovered("aaa", target.StatusUp), discovered("dev", target.StatusUp))
+	if got := m.selected().name(); got == "here" {
+		t.Errorf("once you move, arrivals must not take you back, got %q", got)
+	}
+}
+
+func TestPinnedTargetComesBackAfterVanishing(t *testing.T) {
+	web := discovered("web", target.StatusUp)
+	web.Target.Group = "containers"
+	other := discovered("other", target.StatusUp)
+	m := startedWithProviders(t, "lima", "docker")
+	m = arrive(m, "lima", other)
+	m = arrive(m, "docker", web)
+	m = key(m, "down")
+	if got := m.selected().name(); got != "web" {
+		t.Fatalf("want web, got %q", got)
+	}
+
+	m = arrive(m, "docker")
+	if got := m.selected().name(); got != "other" {
+		t.Fatalf("with its group gone, selection falls back, got %q", got)
+	}
+	m = arrive(m, "docker", web)
+	if got := m.selected().name(); got != "web" || m.state.Selection() != m.selected().id() {
+		t.Errorf("a docker restart brings you back, got %q", got)
 	}
 }
