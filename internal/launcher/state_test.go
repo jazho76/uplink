@@ -33,24 +33,26 @@ func TestApplyDoesNotChangeTheOriginalState(t *testing.T) {
 	}
 }
 
-func TestFactsFollowEachCheck(t *testing.T) {
+func TestFactsFollowEachResult(t *testing.T) {
 	vm := box("vm")
 	boom := errors.New("boom")
 	env := target.Environment{Tools: []string{"tmux"}}
 	later := clock.Add(time.Minute)
-	observed, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true, Env: env})
+	observed, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	observed, _ = observed.Apply(clock, Inspected{ID: vm.ID, Env: env})
 
 	for name, c := range map[string]struct {
-		event     Checked
+		event     Event
 		current   bool
 		at        time.Time
 		wantState target.Status
 	}{
-		"up full success": {Checked{ID: vm.ID, Up: true, Full: true, Env: env}, true, later, target.StatusUp},
-		"up full failure": {Checked{ID: vm.ID, Up: true, Full: true, InspectErr: boom}, false, later, target.StatusUp},
-		"down full":       {Checked{ID: vm.ID, Full: true}, false, later, target.StatusDown},
-		"down not full":   {Checked{ID: vm.ID}, false, clock, target.StatusDown},
-		"up not full":     {Checked{ID: vm.ID, Up: true}, true, clock, target.StatusUp},
+		"inspected":         {Inspected{ID: vm.ID, Env: env}, true, later, target.StatusUp},
+		"inspection failed": {Inspected{ID: vm.ID, Err: boom}, false, later, target.StatusUp},
+		"down full":         {Checked{ID: vm.ID, Full: true}, false, later, target.StatusDown},
+		"down not full":     {Checked{ID: vm.ID}, false, clock, target.StatusDown},
+		"up":                {Checked{ID: vm.ID, Up: true}, true, clock, target.StatusUp},
+		"up full":           {Checked{ID: vm.ID, Up: true, Full: true}, true, clock, target.StatusUp},
 	} {
 		next, _ := observed.Apply(later, c.event)
 		got := next.Observation(vm.ID)
@@ -63,6 +65,25 @@ func TestFactsFollowEachCheck(t *testing.T) {
 		if !got.Tools.Known {
 			t.Errorf("%s: what inspection learned stays known", name)
 		}
+	}
+}
+
+func TestStatusArrivesBeforeInspection(t *testing.T) {
+	vm := box("vm")
+	state, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	if state.Observation(vm.ID).Status != target.StatusUp {
+		t.Error("status is known at once")
+	}
+	if countEffects[Inspect](effects) != 1 {
+		t.Errorf("an up target is inspected next, got %+v", effects)
+	}
+	if _, effects := selected(vm).Apply(clock, Checked{ID: vm.ID, Full: true}); countEffects[Inspect](effects) != 0 {
+		t.Errorf("a down target is not inspected, got %+v", effects)
+	}
+	other := box("other")
+	moved := selected(other, vm)
+	if _, effects := moved.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true}); countEffects[Inspect](effects) != 0 {
+		t.Errorf("only the selected target is inspected, got %+v", effects)
 	}
 }
 
@@ -114,7 +135,8 @@ func TestOlderConfigReadIsIgnored(t *testing.T) {
 
 func TestReloadWithChangedStatsInvalidatesThem(t *testing.T) {
 	vm := box("vm")
-	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true, Env: target.Environment{Readings: []target.Reading{{}}, Sessions: []target.Session{{Name: "s"}}}})
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID, Env: target.Environment{Readings: []target.Reading{{}}, Sessions: []target.Session{{Name: "s"}}}})
 	state, _ = state.Apply(clock, ReloadRequested{})
 
 	changed := vm
@@ -253,6 +275,7 @@ func TestChecksNeverStack(t *testing.T) {
 	}
 
 	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
 	if _, effects := state.Apply(clock.Add(time.Second), Selected{ID: vm.ID}); countEffects[Check](effects) != 0 {
 		t.Error("a selection change right after a check should not repeat it")
 	}
@@ -280,6 +303,7 @@ func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
 	}
 
 	state, _ = state.Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
 	state, _ = state.Apply(clock, Checked{ID: watched.ID})
 	if got := state.Observation(watched.ID).Status; got != target.StatusDown {
 		t.Errorf("a watched target resolves without being selected, got %q", got)
@@ -332,6 +356,7 @@ func TestOpenLogScreenStopsPreviewPeeks(t *testing.T) {
 func TestReloadChecksTheSelectionAgainAtOnce(t *testing.T) {
 	vm := box("vm")
 	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID, Up: true, Full: true})
+	state, _ = state.Apply(clock, Inspected{ID: vm.ID})
 	state, _ = state.Apply(clock, ReloadRequested{})
 	_, effects := state.Apply(clock, ConfigRead{Generation: 1, Plan: inventory.Plan{Declared: []target.Target{vm}}})
 	if countEffects[Check](effects) != 1 {

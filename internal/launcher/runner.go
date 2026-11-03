@@ -80,12 +80,7 @@ func (r *Runner) operate(ctx context.Context, e Power) Event {
 func (r *Runner) probe(ctx context.Context, effect Effect) Event {
 	switch e := effect.(type) {
 	case Check:
-		checked := Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full}
-		checked.Up = r.Backend.Status(ctx, e.Target) == nil
-		if checked.Up && e.Full {
-			checked.Env, checked.InspectErr = r.Backend.Inspect(ctx, e.Target)
-		}
-		return checked
+		return Checked{ID: e.Target.ID, Epoch: e.Epoch, Full: e.Full, Up: r.Backend.Status(ctx, e.Target) == nil}
 
 	case PeekLogs:
 		return LogsPeeked{ID: e.Target.ID, Text: r.Backend.Logs(ctx, e.Target, maxLogPeek)}

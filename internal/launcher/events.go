@@ -40,12 +40,10 @@ type (
 	}
 
 	Checked struct {
-		ID         target.ID
-		Epoch      int
-		Up         bool
-		Full       bool
-		Env        target.Environment
-		InspectErr error
+		ID    target.ID
+		Epoch int
+		Up    bool
+		Full  bool
 	}
 
 	Inspected struct {

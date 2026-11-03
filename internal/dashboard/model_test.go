@@ -179,7 +179,18 @@ func replaceTargets(m model, targets []target.Target) model {
 }
 
 func observed(m model, name string, env target.Environment) model {
-	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true, Env: env})
+	return reported(m, configID(name), env)
+}
+
+func reported(m model, id target.ID, env target.Environment) model {
+	up, _ := m.Update(launcher.Checked{ID: id, Up: true, Full: true})
+	next, _ := up.(model).Update(launcher.Inspected{ID: id, Env: env})
+	return next.(model)
+}
+
+func failedInspection(m model, id target.ID) model {
+	up, _ := m.Update(launcher.Checked{ID: id, Up: true, Full: true})
+	next, _ := up.(model).Update(launcher.Inspected{ID: id, Err: errBoom{}})
 	return next.(model)
 }
 
@@ -225,7 +236,10 @@ func probing(m model) bool {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: up, Full: true, Env: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)}})
+	if up {
+		return reported(m, configID(name), target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)})
+	}
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Full: true})
 	return next.(model)
 }
 
@@ -380,8 +394,7 @@ func focusedOn(name string) (model, *fakeBackend) {
 }
 
 func inspected(m model, name string, tools ...string) model {
-	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true, Env: target.Environment{Tools: tools}})
-	return next.(model)
+	return reported(m, configID(name), target.Environment{Tools: tools})
 }
 
 func TestUninspectedTargetOffersTmux(t *testing.T) {
@@ -449,8 +462,7 @@ func TestStoppedTargetKeepsItsLastAnswer(t *testing.T) {
 
 func TestFailedInspectionStaysOptimistic(t *testing.T) {
 	m, _ := focusedOn("box")
-	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}})
-	if got := next.(model).state.Mode().Name; got != "tmux" {
+	if got := failedInspection(m, configID("box")).state.Mode().Name; got != "tmux" {
 		t.Errorf("a failed inspection knows nothing about tmux, got %q", got)
 	}
 }
@@ -528,17 +540,20 @@ func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
 }
 
 func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
-	for name, msg := range map[string]*launcher.Checked{
-		"never checked":     nil,
-		"down":              {ID: configID("box"), Full: true},
-		"up, not inspected": {ID: configID("box"), Up: true},
-		"failed inspection": {ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}},
-	} {
-		m := focusedOnAutomaticModes("tmux", "zellij", "shell")
-		if msg != nil {
-			next, _ := m.Update(*msg)
-			m = next.(model)
+	box := configID("box")
+	send := func(event launcher.Event) func(model) model {
+		return func(m model) model {
+			next, _ := m.Update(event)
+			return next.(model)
 		}
+	}
+	for name, arrange := range map[string]func(model) model{
+		"never checked":     func(m model) model { return m },
+		"down":              send(launcher.Checked{ID: box, Full: true}),
+		"up, not inspected": send(launcher.Checked{ID: box, Up: true}),
+		"failed inspection": func(m model) model { return failedInspection(m, box) },
+	} {
+		m := arrange(focusedOnAutomaticModes("tmux", "zellij", "shell"))
 		if got := offered(m); !slices.Equal(got, []string{"tmux", "shell"}) {
 			t.Errorf("%s: want tmux and shell, got %q", name, got)
 		}
@@ -1527,8 +1542,11 @@ func applyCmd(m model, cmd tea.Cmd) model {
 			m = applyCmd(m, queued)
 		}
 	default:
-		next, _ := m.Update(msg)
+		next, followUp := m.Update(msg)
 		m = next.(model)
+		if !m.state.LogsOpen() {
+			m = applyCmd(m, followUp)
+		}
 	}
 	return m
 }

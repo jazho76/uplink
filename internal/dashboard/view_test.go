@@ -20,9 +20,7 @@ func withSessions(m model, name string, sessions ...target.Session) model {
 	for i := range owned {
 		owned[i].Tool = cmp.Or(owned[i].Tool, "tmux")
 	}
-	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true,
-		Env: target.Environment{Tools: []string{"tmux"}, Sessions: owned}})
-	return next.(model)
+	return reported(m, configID(name), target.Environment{Tools: []string{"tmux"}, Sessions: owned})
 }
 
 func focusedPreview(t *testing.T, sessions ...target.Session) model {
@@ -155,8 +153,7 @@ func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
 		t.Errorf("a stopped target has no current sessions, got:\n%s", got)
 	}
 
-	next, _ := m.Update(launcher.Checked{ID: configID("forge"), Up: true, Full: true, InspectErr: errBoom{}})
-	failed := next.(model)
+	failed := failedInspection(m, configID("forge"))
 	if got := preview(failed); strings.Contains(got, sessionsRule) {
 		t.Errorf("a failed inspection has no current sessions, got:\n%s", got)
 	}
@@ -272,8 +269,7 @@ func focusedOnBuiltin() model {
 }
 
 func inspectedWith(m model, readings []target.Reading) model {
-	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, Env: target.Environment{OS: "Linux", Readings: readings}})
-	return next.(model)
+	return reported(m, configID("box"), target.Environment{OS: "Linux", Readings: readings})
 }
 
 func TestBuiltinStatsWaitForTheFirstCheck(t *testing.T) {
@@ -309,8 +305,7 @@ func TestBuiltinStatsStayHiddenWhenNeverInspected(t *testing.T) {
 	if got := preview(probed(focusedOnBuiltin(), "box", false)); strings.Contains(got, liveRule) {
 		t.Errorf("a stopped target of unknown kernel has nothing to promise, got:\n%s", got)
 	}
-	next, _ := focusedOnBuiltin().Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}})
-	if got := preview(next.(model)); strings.Contains(got, liveRule) {
+	if got := preview(failedInspection(focusedOnBuiltin(), configID("box"))); strings.Contains(got, liveRule) {
 		t.Errorf("a failed first inspection has nothing to promise, got:\n%s", got)
 	}
 }
@@ -338,7 +333,8 @@ func focusedOnGuestLogs() (model, *fakeBackend) {
 }
 
 func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
-	next, cmd := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, Env: target.Environment{Tools: tools}})
+	up, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true})
+	next, cmd := up.(model).Update(launcher.Inspected{ID: configID("box"), Env: target.Environment{Tools: tools}})
 	return next.(model), cmd
 }
 

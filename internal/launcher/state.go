@@ -188,10 +188,15 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 		}
 
 	case Checked:
-		s.settle(now, e)
-		if e.ID == s.selected {
-			return s.peekSelectedIfStale(now)
+		accepted := s.settle(now, e)
+		if e.ID != s.selected {
+			return nil
 		}
+		var effects []Effect
+		if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Up {
+			effects = s.inspect(t)
+		}
+		return append(effects, s.peekSelectedIfStale(now)...)
 
 	case Inspected:
 		s.inspected(now, e)
@@ -255,6 +260,10 @@ func (s *State) checkSelected() []Effect {
 	if s.Observation(t.ID).Status != target.StatusUp {
 		return nil
 	}
+	return s.inspect(t)
+}
+
+func (s *State) inspect(t target.Target) []Effect {
 	current := s.entries[t.ID]
 	current.checking = true
 	s.entries[t.ID] = current
@@ -329,10 +338,10 @@ func (s *State) openLogs() []Effect {
 	return []Effect{ViewLogs{Target: t, Round: s.logRound}}
 }
 
-func (s *State) settle(now time.Time, e Checked) {
+func (s *State) settle(now time.Time, e Checked) bool {
 	current := s.entries[e.ID]
 	if e.Epoch != current.epoch {
-		return
+		return false
 	}
 	current.checking, current.checkedAt = false, now
 	current.Status = target.StatusDown
@@ -340,18 +349,14 @@ func (s *State) settle(now time.Time, e Checked) {
 		current.Status = target.StatusUp
 	}
 	switch {
-	case e.Full && e.Up && e.InspectErr == nil:
-		current.Stats.Observe(e.Env.Readings, now)
-		current.Tools.Observe(e.Env.Tools, now)
-		current.Sessions.Observe(e.Env.Sessions, now)
-	case e.Full && e.Up:
-		current.failInspection(e.InspectErr, now)
+	case e.Up:
 	case e.Full:
 		current.failInspection(errDown, now)
-	case !e.Up:
+	default:
 		current.failInspection(errDown, current.Stats.At)
 	}
 	s.entries[e.ID] = current
+	return true
 }
 
 func (e *entry) failInspection(err error, at time.Time) {
