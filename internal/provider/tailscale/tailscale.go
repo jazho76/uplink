@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -23,10 +23,10 @@ const (
 var (
 	lookPath = exec.LookPath
 	ping     = func() (string, error) {
-		return run.NonInteractive(pingTimeout, "", "tailscale", "status", "--json", "--peers=false")
+		return shell.NonInteractive(pingTimeout, "", "tailscale", "status", "--json", "--peers=false")
 	}
 	list = func() (string, error) {
-		return run.NonInteractive(listTimeout, "", "tailscale", "status", "--json")
+		return shell.NonInteractive(listTimeout, "", "tailscale", "status", "--json")
 	}
 )
 

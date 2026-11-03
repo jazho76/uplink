@@ -1,13 +1,13 @@
-package inspect
+package inspection
 
 import (
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/run"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
+	"github.com/jazho76/uplink/internal/shell"
 )
 
 type Request struct {
@@ -33,7 +33,7 @@ func Run(limit time.Duration, request Request, argv []string) (Snapshot, error) 
 	if len(argv) == 0 {
 		return Snapshot{}, errors.New("inspect: no command to run")
 	}
-	out, err := run.NonInteractive(limit, script(request), argv[0], argv[1:]...)
+	out, err := shell.NonInteractive(limit, script(request), argv[0], argv[1:]...)
 	if err != nil {
 		return Snapshot{}, err
 	}

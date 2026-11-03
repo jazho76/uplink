@@ -1,4 +1,4 @@
-package inspect
+package inspection
 
 import (
 	"os"
@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 )
 
 var uptime = stats.Metric{Type: stats.TypeText, Label: "up", Value: "echo 42"}

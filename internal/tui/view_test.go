@@ -9,9 +9,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspect"
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -23,7 +23,7 @@ func withSessions(m model, name string, sessions ...multiplexer.Session) model {
 		owned[i].Tool = cmp.Or(owned[i].Tool, "tmux")
 	}
 	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
-		snapshot: inspect.Snapshot{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
+		snapshot: inspection.Snapshot{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
 	return next.(model)
 }
 
@@ -271,7 +271,7 @@ func focusedOnBuiltin() model {
 }
 
 func inspectedWith(m model, readings []stats.Reading) model {
-	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspect.Snapshot{OS: "Linux", Readings: readings}, inspectOK: true})
+	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspection.Snapshot{OS: "Linux", Readings: readings}, inspectOK: true})
 	return next.(model)
 }
 
@@ -336,7 +336,7 @@ func focusedOnGuestLogs() (model, *fakeBackend) {
 }
 
 func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
-	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspect.Snapshot{Tools: tools}, inspectOK: true})
+	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: inspection.Snapshot{Tools: tools}, inspectOK: true})
 	return next.(model), cmd
 }
 
@@ -359,7 +359,7 @@ func TestGuestLogsWaitForTheJournalToBeReported(t *testing.T) {
 
 func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m, cmd := inspectedTools(m, inspection.ToolJournal)
 	m = applyCmd(m, cmd)
 
 	if backend.logCalls != 1 || !strings.Contains(preview(m), "journal line") {
@@ -372,7 +372,7 @@ func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 
 func TestGuestLogsStopWhileDown(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m, cmd := inspectedTools(m, inspection.ToolJournal)
 	m = applyCmd(m, cmd)
 
 	m = probed(m, "box", false)
@@ -398,7 +398,7 @@ func TestNoLogsOffersNothing(t *testing.T) {
 	box := m.selected().target
 	box.GuestLogs = false
 	m = focus(withTargets(m, box), "box")
-	m, cmd := inspectedTools(m, inspect.ToolJournal)
+	m, cmd := inspectedTools(m, inspection.ToolJournal)
 	m = applyCmd(m, cmd)
 	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf(`logs: "" reads nothing: %d calls, footer %s`, backend.logCalls, m.renderFooter())

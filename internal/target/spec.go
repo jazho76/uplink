@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 )
 
 const (

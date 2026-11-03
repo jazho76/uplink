@@ -1,11 +1,11 @@
-package inspect
+package inspection
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
 )
 
 const multiplexerTag = "mux"

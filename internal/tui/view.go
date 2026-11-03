@@ -11,8 +11,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 

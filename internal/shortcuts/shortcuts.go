@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/shell"
 )
 
 const (
@@ -47,7 +47,7 @@ func Uninstall() error {
 func remove(id string) error {
 	path := fmt.Sprintf("%s/%s/", base, id)
 	for _, key := range []string{"name", "command", "binding"} {
-		_ = run.Silent("gsettings", "reset", fmt.Sprintf("%s:%s", item, path), key)
+		_ = shell.Silent("gsettings", "reset", fmt.Sprintf("%s:%s", item, path), key)
 	}
 	return listRemove(path)
 }
@@ -55,20 +55,20 @@ func remove(id string) error {
 func set(s shortcut) error {
 	path := fmt.Sprintf("%s/%s/", base, s.id)
 	target := fmt.Sprintf("%s:%s", item, path)
-	if err := run.Silent("gsettings", "set", target, "name", s.name); err != nil {
+	if err := shell.Silent("gsettings", "set", target, "name", s.name); err != nil {
 		return err
 	}
-	if err := run.Silent("gsettings", "set", target, "command", s.command); err != nil {
+	if err := shell.Silent("gsettings", "set", target, "command", s.command); err != nil {
 		return err
 	}
-	if err := run.Silent("gsettings", "set", target, "binding", s.binding); err != nil {
+	if err := shell.Silent("gsettings", "set", target, "binding", s.binding); err != nil {
 		return err
 	}
 	return listAdd(path)
 }
 
 func listAdd(path string) error {
-	list, err := run.Output("gsettings", "get", schema, "custom-keybindings")
+	list, err := shell.Output("gsettings", "get", schema, "custom-keybindings")
 	if err != nil {
 		return err
 	}
@@ -82,11 +82,11 @@ func listAdd(path string) error {
 	default:
 		next = strings.TrimSuffix(list, "]") + fmt.Sprintf(", '%s']", path)
 	}
-	return run.Silent("gsettings", "set", schema, "custom-keybindings", next)
+	return shell.Silent("gsettings", "set", schema, "custom-keybindings", next)
 }
 
 func listRemove(path string) error {
-	list, err := run.Output("gsettings", "get", schema, "custom-keybindings")
+	list, err := shell.Output("gsettings", "get", schema, "custom-keybindings")
 	if err != nil {
 		return err
 	}
@@ -97,5 +97,5 @@ func listRemove(path string) error {
 	if next == list {
 		return nil
 	}
-	return run.Silent("gsettings", "set", schema, "custom-keybindings", next)
+	return shell.Silent("gsettings", "set", schema, "custom-keybindings", next)
 }

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -22,7 +22,7 @@ const (
 var (
 	lookPath = exec.LookPath
 	list     = func() (string, error) {
-		return run.NonInteractive(listTimeout, "", "limactl", "list", "--json")
+		return shell.NonInteractive(listTimeout, "", "limactl", "list", "--json")
 	}
 )
 

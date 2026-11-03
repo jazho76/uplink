@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jazho76/uplink/internal/multiplexer"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 )
 
 const host = `
@@ -141,7 +141,7 @@ func TestDefaultsFillWhatFactsLeaveOut(t *testing.T) {
 		Name:     "dev",
 		Display:  "Dev box",
 		Group:    "work",
-		Defaults: &Spec{Group: "vms", Logs: new("tail {name}.log"), Modes: shell},
+		Defaults: &Spec{Group: "vms", Logs: new("tail {name}.log"), Modes: shellOnly},
 	}}}
 
 	targets, err := Merge(discovered)
@@ -180,11 +180,11 @@ type fakeSource struct {
 func (f fakeSource) Name() string           { return f.name }
 func (f fakeSource) Specs() ([]Spec, error) { return f.specs, f.err }
 
-var shell = []ModeSpec{{Name: "shell"}}
+var shellOnly = []ModeSpec{{Name: "shell"}}
 
 func TestSourcesMergeInOrderWithDistinctIDs(t *testing.T) {
-	config := configSource{{Name: "box", Modes: shell}}
-	lima := fakeSource{name: "lima", specs: []Spec{{Name: "box", Modes: shell}, {Name: "dev", Modes: shell}}}
+	config := configSource{{Name: "box", Modes: shellOnly}}
+	lima := fakeSource{name: "lima", specs: []Spec{{Name: "box", Modes: shellOnly}, {Name: "dev", Modes: shellOnly}}}
 
 	targets, err := Merge(config, lima)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestSourcesMergeInOrderWithDistinctIDs(t *testing.T) {
 }
 
 func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
-	config := configSource{{Name: "host", Modes: shell}}
+	config := configSource{{Name: "host", Modes: shellOnly}}
 	lima := fakeSource{name: "lima", err: errors.New("limactl not found")}
 
 	targets, err := Merge(config, lima)
@@ -213,8 +213,8 @@ func TestFailingSourceOnlyLosesItsOwnTargets(t *testing.T) {
 }
 
 func TestDuplicateSourcesAndBrokenSpecsAreReported(t *testing.T) {
-	first := fakeSource{name: "lima", specs: []Spec{{Name: "x", Modes: []ModeSpec{{}}}, {Modes: shell}}}
-	second := fakeSource{name: "lima", specs: []Spec{{Name: "y", Modes: shell}}}
+	first := fakeSource{name: "lima", specs: []Spec{{Name: "x", Modes: []ModeSpec{{}}}, {Modes: shellOnly}}}
+	second := fakeSource{name: "lima", specs: []Spec{{Name: "y", Modes: shellOnly}}}
 
 	targets, err := Merge(first, second)
 	if len(targets) != 0 {

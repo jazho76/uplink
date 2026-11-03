@@ -11,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspect"
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -27,16 +27,16 @@ type fakeBackend struct {
 	logCalls    int
 }
 
-func (f *fakeBackend) Inspect(t target.Target) (inspect.Snapshot, error) {
+func (f *fakeBackend) Inspect(t target.Target) (inspection.Snapshot, error) {
 	f.inspections++
 	if f.down[t.Name] {
-		return inspect.Snapshot{}, errBoom{}
+		return inspection.Snapshot{}, errBoom{}
 	}
 	readings := make([]stats.Reading, len(t.Stats))
 	for i, m := range t.Stats {
 		readings[i] = reading(m, 0.1, 4)
 	}
-	return inspect.Snapshot{Readings: readings, Tools: f.tools[t.Name]}, nil
+	return inspection.Snapshot{Readings: readings, Tools: f.tools[t.Name]}, nil
 }
 
 var linuxMetrics = []stats.Metric{
@@ -153,7 +153,7 @@ func withTargets(m model, targets ...target.Target) model {
 }
 
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: inspect.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
+	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: inspection.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
 	return next.(model)
 }
 
@@ -303,7 +303,7 @@ func focusedOn(name string) (model, *fakeBackend) {
 }
 
 func inspected(m model, name string, tools ...string) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: inspect.Snapshot{Tools: tools}, inspectOK: true})
+	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: inspection.Snapshot{Tools: tools}, inspectOK: true})
 	return next.(model)
 }
 
@@ -1233,7 +1233,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspect.Snapshot{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspection.Snapshot{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -1250,7 +1250,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspect.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
+	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: inspection.Snapshot{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1641,7 +1641,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
 	m.live[configID("box")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true,
-		snapshot: inspect.Snapshot{Readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
+		snapshot: inspection.Snapshot{Readings: []stats.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}

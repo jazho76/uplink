@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/jazho76/uplink/internal/inspect"
+	"github.com/jazho76/uplink/internal/inspection"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -77,7 +77,7 @@ type peek struct {
 type liveEntry struct {
 	state       status
 	action      status
-	snapshot    inspect.Snapshot
+	snapshot    inspection.Snapshot
 	inspected   bool
 	inspectOK   bool
 	inspectedAt time.Time
@@ -276,7 +276,7 @@ type liveMsg struct {
 	epoch     int
 	up        bool
 	full      bool
-	snapshot  inspect.Snapshot
+	snapshot  inspection.Snapshot
 	inspectOK bool
 }
 
@@ -448,7 +448,7 @@ func (m model) hasLogs(t target.Target) bool {
 	}
 	e := m.live[t.ID]
 	return t.GuestLogs && e.inspected && e.state != statusDown &&
-		slices.Contains(e.snapshot.Tools, inspect.ToolJournal)
+		slices.Contains(e.snapshot.Tools, inspection.ToolJournal)
 }
 
 func peekLogsCmd(backend target.Backend, t target.Target) tea.Cmd {

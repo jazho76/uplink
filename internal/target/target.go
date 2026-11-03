@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jazho76/uplink/internal/stats"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 )
 
 const (

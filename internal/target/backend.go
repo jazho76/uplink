@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/inspect"
-	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/inspection"
+	"github.com/jazho76/uplink/internal/shell"
 )
 
 const (
@@ -21,7 +21,7 @@ const (
 )
 
 type Backend interface {
-	Inspect(Target) (inspect.Snapshot, error)
+	Inspect(Target) (inspection.Snapshot, error)
 	Status(Target) error
 	Up(Target) error
 	Down(Target) error
@@ -30,8 +30,8 @@ type Backend interface {
 
 type System struct{}
 
-func (System) Inspect(t Target) (inspect.Snapshot, error) {
-	return inspect.Run(probeCeiling, inspect.Request{Metrics: t.Stats, BuiltinStats: t.BuiltinStats}, t.ExecArgvFor("sh"))
+func (System) Inspect(t Target) (inspection.Snapshot, error) {
+	return inspection.Run(probeCeiling, inspection.Request{Metrics: t.Stats, BuiltinStats: t.BuiltinStats}, t.ExecArgvFor("sh"))
 }
 
 func (System) Status(t Target) error {
@@ -39,7 +39,7 @@ func (System) Status(t Target) error {
 		return hook(statusTimeout, t.Status)
 	}
 	argv := t.ExecArgvFor("true")
-	_, err := run.NonInteractive(probeCeiling, "", argv[0], argv[1:]...)
+	_, err := shell.NonInteractive(probeCeiling, "", argv[0], argv[1:]...)
 	return err
 }
 
@@ -51,8 +51,8 @@ func hook(limit time.Duration, command string) error {
 	if command == "" {
 		return errors.New("no hook configured")
 	}
-	_, err := run.NonInteractive(limit, "", "sh", "-c", command)
-	if reason := run.StderrTail(err); reason != "" {
+	_, err := shell.NonInteractive(limit, "", "sh", "-c", command)
+	if reason := shell.StderrTail(err); reason != "" {
 		return errors.New(reason)
 	}
 	return err
@@ -65,10 +65,10 @@ func (System) Logs(t Target, lines int) string {
 	)
 	switch {
 	case t.Logs != "":
-		out, err = run.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs)
+		out, err = shell.NonInteractive(logsTimeout, "", "sh", "-c", t.Logs)
 	case t.GuestLogs:
 		argv := t.ExecArgvFor(journalCommand)
-		out, err = run.NonInteractive(guestLogsTimeout, "", argv[0], argv[1:]...)
+		out, err = shell.NonInteractive(guestLogsTimeout, "", argv[0], argv[1:]...)
 	default:
 		return ""
 	}

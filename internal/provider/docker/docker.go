@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jazho76/uplink/internal/run"
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -23,11 +23,11 @@ const (
 var (
 	lookPath = exec.LookPath
 	ping     = func() error {
-		_, err := run.NonInteractive(pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
+		_, err := shell.NonInteractive(pingTimeout, "", "docker", "version", "--format", "{{.Server.Version}}")
 		return err
 	}
 	list = func() (string, error) {
-		return run.NonInteractive(listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
+		return shell.NonInteractive(listTimeout, "", "docker", "ps", "-a", "--format", "{{json .}}")
 	}
 )
 
