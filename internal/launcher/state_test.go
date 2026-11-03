@@ -783,3 +783,14 @@ func TestDiscoveredTargetWaitsOnItsProvider(t *testing.T) {
 		t.Errorf("a vanished target cancels and says so, got %+v and %q", gone.Connection(), gone.Notice())
 	}
 }
+
+func TestNoticeIsOneCleanLine(t *testing.T) {
+	state, _ := selected(box("vm")).Apply(clock, NoticeSet{Text: "first\n\x1b[31msecond\x1b[0m\n"})
+	if got := state.Notice(); got != "first; second" {
+		t.Errorf("got %q", got)
+	}
+	errs := New(nil, errors.New("line\x1b]0;x\x07")).Notice()
+	if errs != "line" {
+		t.Errorf("problems are cleaned too, got %q", errs)
+	}
+}

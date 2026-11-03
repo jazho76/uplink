@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/inspection"
 	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
@@ -100,7 +99,7 @@ func (System) Logs(ctx context.Context, t target.Target, lines int) string {
 	if err != nil && out == "" {
 		return ""
 	}
-	return ansi.Strip(lastLines(out, lines))
+	return shell.PlainLines(lastLines(out, lines))
 }
 
 func lastLines(s string, n int) string {

@@ -7,9 +7,11 @@ import (
 	"maps"
 	"os/exec"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jazho76/uplink/internal/inventory"
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -117,7 +119,10 @@ func (s State) Selection() target.ID { return s.selected }
 
 func (s State) Connection() Connection { return s.connection }
 
-func (s State) Notice() string { return cmp.Or(s.notice, problemsNotice(s.problems)) }
+func (s State) Notice() string {
+	text := cmp.Or(s.notice, problemsNotice(s.problems))
+	return shell.Plain(strings.ReplaceAll(strings.TrimRight(text, "\n"), "\n", "; "))
+}
 
 func (s State) Observation(id target.ID) Observation {
 	observation := s.entries[id].Observation
@@ -396,7 +401,7 @@ func (s *State) settle(now time.Time, e Checked) bool {
 
 func reasonFor(status target.Status, reason string) string {
 	if status == target.StatusUnknown {
-		return reason
+		return shell.Plain(reason)
 	}
 	return ""
 }

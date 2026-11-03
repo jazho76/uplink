@@ -1301,11 +1301,8 @@ func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 }
 
 func TestClipMeasuresDisplayWidth(t *testing.T) {
-	if got := clip("日本語テスト", 4); lipgloss.Width(got) != 4 {
+	if got := truncate("日本語テスト", 4); lipgloss.Width(got) != 4 {
 		t.Errorf("clip should count display cells, got %q spanning %d", got, lipgloss.Width(got))
-	}
-	if got := clip("a\tb\x00c", 10); got != "a bc" {
-		t.Errorf("clip should flatten tabs and drop control bytes, got %q", got)
 	}
 }
 

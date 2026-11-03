@@ -110,7 +110,7 @@ func (m model) previewBody(width, height int) string {
 	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + m.statusOf(it.target)
 	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
 	if observation := m.state.Observation(it.id()); observation.Status == target.StatusUnknown && observation.Reason != "" {
-		b.WriteString(labelStyle.Render(clip(observation.Reason, width)) + "\n")
+		b.WriteString(labelStyle.Render(truncate(observation.Reason, width)) + "\n")
 	}
 	if connection := m.state.Connection(); connection.Target == it.id() && connection.Cancellable() {
 		b.WriteString(modeMarker.Render("connecting") + "  " + keyStyle.Render("esc") + " " + labelStyle.Render("cancel") + "\n")
@@ -136,7 +136,7 @@ func (m model) previewBody(width, height int) string {
 			}
 			b.WriteString("\n" + rule("logs", width))
 			for _, line := range lines {
-				b.WriteString(detailLogStyle.Render(clip(line, width)) + "\n")
+				b.WriteString(detailLogStyle.Render(truncate(line, width)) + "\n")
 			}
 		}
 	}
@@ -209,7 +209,7 @@ func (m model) renderSessions(id target.ID, width int) string {
 	}
 	fields := make([]field, len(sessions))
 	for i, s := range sessions {
-		fields[i].key = sessionMargin(s.Attached) + valueStyle.Render(clip(s.Name, width/2))
+		fields[i].key = sessionMargin(s.Attached) + valueStyle.Render(truncate(s.Name, width/2))
 	}
 	room := width - widestKey(fields) - fieldGap
 	for i, s := range sessions {
@@ -248,7 +248,7 @@ func windowLabel(w target.Window, width int) string {
 	if w.Panes > 1 {
 		suffix = labelStyle.Render(fmt.Sprintf(" (%d)", w.Panes))
 	}
-	name := clip(w.Name, min(maxWindowName, width-lipgloss.Width(suffix)))
+	name := truncate(w.Name, min(maxWindowName, width-lipgloss.Width(suffix)))
 	return valueStyle.Render(name) + suffix
 }
 
@@ -400,7 +400,7 @@ func (m model) renderLogs() string {
 			lines = lines[len(lines)-bodyH:]
 		}
 		for i, line := range lines {
-			lines[i] = detailLogStyle.Render(clip(line, m.width))
+			lines[i] = detailLogStyle.Render(truncate(line, m.width))
 		}
 		body = strings.Join(lines, "\n")
 	}
@@ -433,34 +433,13 @@ func (m model) renderFooter() string {
 		parts = append(parts, keyStyle.Render(p[0])+" "+footerStyle.Render(p[1]))
 	}
 	keys := truncate(strings.Join(parts, footerStyle.Render("  ")), m.width)
-	return keys + "\n" + truncate(noticeStyle.Render(oneLine(m.state.Notice())), m.width)
+	return keys + "\n" + truncate(noticeStyle.Render(m.state.Notice()), m.width)
 }
 
 func rule(title string, width int) string {
 	head := ruleStyle.Render(title) + " "
 	dashes := max(width-lipgloss.Width(head), 0)
 	return head + footerStyle.Render(strings.Repeat("─", dashes)) + "\n"
-}
-
-func oneLine(s string) string {
-	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "; ")
-}
-
-func clip(s string, width int) string {
-	return truncate(stripControl(s), width)
-}
-
-func stripControl(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch {
-		case r == '\t':
-			return ' '
-		case r < 0x20 || r == 0x7f:
-			return -1
-		default:
-			return r
-		}
-	}, s)
 }
 
 func visible(s string) bool { return lipgloss.Width(s) > 0 }

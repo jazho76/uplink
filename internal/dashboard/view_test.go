@@ -522,8 +522,8 @@ func TestPreviewExplainsUnknown(t *testing.T) {
 	if got := preview(m); !strings.Contains(got, "Permission denied") {
 		t.Errorf("want the reason, got:\n%s", got)
 	}
-	if got := m.previewBody(60, 30); strings.Contains(got, "\x1b[31mPermission") {
-		t.Errorf("a target must not be able to style the dashboard through it:\n%q", got)
+	if got := next.(model).state.Observation(configID("forge")).Reason; got != "Permission denied" {
+		t.Errorf("a target must not be able to style the dashboard through it, got %q", got)
 	}
 	next, _ = m.Update(launcher.Checked{ID: configID("forge"), Status: target.StatusDown})
 	if got := preview(next.(model)); strings.Contains(got, "Permission denied") {

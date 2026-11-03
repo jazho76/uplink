@@ -12,7 +12,7 @@ import (
 
 func TestLogsDropEscapesAndKeepTheTail(t *testing.T) {
 	out := System{}.Logs(context.Background(), target.Target{Logs: target.LogSource{Command: `printf 'one\n\033[31mtwo\033[0m\tx\nthree\n'`}}, 2)
-	if out != "two\tx\nthree" {
+	if out != "two x\nthree" {
 		t.Errorf("logs = %q", out)
 	}
 	if got := (System{}).Logs(context.Background(), target.Target{}, 5); got != "" {

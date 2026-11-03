@@ -57,7 +57,7 @@ func Parse(out string, metrics []target.Metric) []target.Reading {
 
 	readings := make([]target.Reading, len(metrics))
 	for i, m := range metrics {
-		r := target.Reading{Metric: m, Text: values[i]}
+		r := target.Reading{Metric: m, Text: shell.Plain(values[i])}
 		value, valueErr := strconv.ParseFloat(values[i], 64)
 		switch {
 		case m.Type == target.TypeText && m.Unit == "":

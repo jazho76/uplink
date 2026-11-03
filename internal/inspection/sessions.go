@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/shell"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -36,13 +36,13 @@ func rowTag(m multiplexer.Multiplexer) string {
 func clean(tool string, sessions []target.Session) []target.Session {
 	var kept []target.Session
 	for _, s := range sessions {
-		s.Tool, s.Name = tool, ansi.Strip(s.Name)
+		s.Tool, s.Name = tool, shell.Plain(s.Name)
 		if s.Name == "" {
 			continue
 		}
 		var windows []target.Window
 		for _, w := range s.Windows {
-			if w.Name = ansi.Strip(w.Name); w.Name != "" {
+			if w.Name = shell.Plain(w.Name); w.Name != "" {
 				windows = append(windows, w)
 			}
 		}

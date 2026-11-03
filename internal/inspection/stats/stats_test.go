@@ -161,3 +161,11 @@ func TestParseIgnoresNoise(t *testing.T) {
 		t.Errorf("an unparsable value is missing, got %+v", readings[1])
 	}
 }
+
+func TestTextIsCleanedAtTheBoundary(t *testing.T) {
+	metrics := []target.Metric{{Type: target.TypeText, Label: "t", Value: "x"}}
+	readings := Parse("0 value \x1b]0;pwned\x07hi\x1b[31m there\n", metrics)
+	if got := readings[0].Text; got != "hi there" {
+		t.Errorf("got %q", got)
+	}
+}
