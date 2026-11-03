@@ -50,7 +50,7 @@ Targets that define it can be started and stopped from the dashboard.
 
 ### Connection
 
-Your stay in a target, through one of its modes. Connecting to a stopped target that can be started starts it first, then connects if the start succeeded. If its status is still unknown, uplink finds out before deciding. A connection ending always returns to the dashboard.
+Your stay in a target, through one of its modes. Connecting to a stopped target that can be started starts it first, then connects if the start succeeded. If its status is still unknown, uplink finds out before deciding, and if it still can't tell, it connects without starting. A target that can't be started has nothing to decide, and connects right away. A connection ending always returns to the dashboard.
 
 ## Dashboard
 
