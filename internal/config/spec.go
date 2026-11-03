@@ -75,10 +75,8 @@ func (s Spec) resolve() (target.Target, error) {
 	if err != nil {
 		return target.Target{}, err
 	}
-	for i, m := range metrics {
-		if err := m.Validate(); err != nil {
-			return target.Target{}, fmt.Errorf("stats #%d: %w", i+1, err)
-		}
+	if err := validateMetrics(metrics); err != nil {
+		return target.Target{}, err
 	}
 
 	t := target.Target{
@@ -99,6 +97,15 @@ func (s Spec) resolve() (target.Target, error) {
 		return target.Target{}, err
 	}
 	return t, nil
+}
+
+func validateMetrics(metrics []target.Metric) error {
+	for i, m := range metrics {
+		if err := m.Validate(); err != nil {
+			return fmt.Errorf("stats #%d: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 func (s Spec) logSource(fill func(string) string) target.LogSource {
