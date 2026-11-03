@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -61,13 +62,13 @@ func (m model) glyph(it item, base lipgloss.Style) string {
 	return base.Foreground(color).Render(mark)
 }
 
-func glyphOf(s status) (string, lipgloss.TerminalColor) {
-	switch s {
-	case statusUp:
+func glyphOf(label string) (string, lipgloss.TerminalColor) {
+	switch label {
+	case string(target.StatusUp):
 		return "●", colorGreen
-	case statusDown:
+	case string(target.StatusDown):
 		return "○", colorComment
-	case statusStarting, statusStopping:
+	case string(launcher.OperationStarting), string(launcher.OperationStopping):
 		return "◐", colorYellow
 	default:
 		return "◌", colorComment
@@ -82,7 +83,7 @@ func (m model) View() string {
 		return fmt.Sprintf("terminal too small (min %d×%d)", minWidth, minHeight)
 	}
 
-	if m.screen == screenLogs {
+	if m.state.LogsOpen() {
 		return m.renderLogs()
 	}
 
@@ -106,7 +107,7 @@ func (m model) previewBody(width, height int) string {
 	}
 
 	var b strings.Builder
-	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + string(m.statusOf(it.target))
+	header := titleStyle.Render(it.name()) + "  " + m.glyph(it, plainStyle) + " " + m.statusOf(it.target)
 	b.WriteString(spread(header, m.modeTag(it), width, plainStyle) + "\n")
 
 	if m.showsLive(it.target) {
@@ -119,7 +120,7 @@ func (m model) previewBody(width, height int) string {
 		b.WriteString(sessions)
 	}
 
-	if logs := m.logsFor(it); logs != "" {
+	if logs := m.state.Logs(it.target); logs != "" {
 		used := strings.Count(b.String(), "\n")
 		fit := height - used - 2
 		if fit > 0 {
@@ -136,36 +137,29 @@ func (m model) previewBody(width, height int) string {
 	return clampBlock(b.String(), width, height)
 }
 
-func (m model) logsFor(it item) string {
-	if m.logPeek.id != it.id() || !m.hasLogs(it.target) {
-		return ""
-	}
-	return m.logPeek.text
-}
-
 func (m model) showsLive(t target.Target) bool {
 	if !t.Stats.Builtin {
 		return len(t.Stats.Metrics) > 0
 	}
-	e := m.live[t.ID]
-	if e.inspected {
-		return len(e.snapshot.Readings) > 0
+	stats := m.state.Observation(t.ID).Stats
+	if m.state.Observation(t.ID).Tools.Known {
+		return len(stats.Value) > 0
 	}
-	return e.inspectedAt.IsZero()
+	return stats.At.IsZero()
 }
 
 func (m model) renderLive(id target.ID, width int) string {
-	e := m.live[id]
-	if e.inspectedAt.IsZero() {
+	stats := m.state.Observation(id).Stats
+	if stats.At.IsZero() {
 		return labelStyle.Render("…") + "\n"
 	}
-	if !e.inspectOK {
+	if stats.Err != nil {
 		return labelStyle.Render("unavailable") + "\n"
 	}
 
 	var gauges []gaugeRow
 	var labels []string
-	for _, r := range e.snapshot.Readings {
+	for _, r := range stats.Value {
 		if r.Metric.Gauge() {
 			gauges = append(gauges, gaugeOf(r))
 		}
@@ -175,7 +169,7 @@ func (m model) renderLive(id target.ID, width int) string {
 	indent := labelIndent(labels)
 	gaugeRows := gaugeFields(gauges, width-indent)
 	var fields []field
-	for _, r := range e.snapshot.Readings {
+	for _, r := range stats.Value {
 		switch {
 		case r.Metric.Gauge():
 			fields, gaugeRows = append(fields, gaugeRows[0]), gaugeRows[1:]
@@ -188,16 +182,13 @@ func (m model) renderLive(id target.ID, width int) string {
 }
 
 func (m model) modeSessions(id target.ID) []target.Session {
-	e := m.live[id]
-	if !e.inspectOK {
-		return nil
-	}
-	tool := m.mode().Multiplexer
-	if tool == "" {
+	found := m.state.Observation(id).Sessions
+	tool := m.state.Mode().Multiplexer
+	if !found.Current() || tool == "" {
 		return nil
 	}
 	var sessions []target.Session
-	for _, s := range e.snapshot.Sessions {
+	for _, s := range found.Value {
 		if s.Tool == tool {
 			sessions = append(sessions, s)
 		}
@@ -355,19 +346,19 @@ func unitOf(size string) string {
 }
 
 func (m model) modeTag(it item) string {
-	n := len(m.modes(it.target))
+	n := len(m.state.Modes(it.target))
 	if n < 2 {
 		return ""
 	}
-	name := m.mode().Name
+	name := m.state.Mode().Name
 	if m.modeUnconfirmed(it.target) {
 		name += "?"
 	}
-	return modeMarker.Render(name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.modeIndex()+1, n))
+	return modeMarker.Render(name) + "  " + labelStyle.Render(fmt.Sprintf("%d/%d", m.state.ModeIndex()+1, n))
 }
 
 func (m model) modeUnconfirmed(t target.Target) bool {
-	return m.mode().Requires != "" && !m.live[t.ID].inspected && m.statusOf(t) == statusDown
+	return m.state.Mode().Requires != "" && !m.state.Observation(t.ID).Tools.Known && m.statusOf(t) == string(target.StatusDown)
 }
 
 type field struct{ key, value string }
@@ -392,13 +383,13 @@ func renderFields(fields []field, width int) string {
 }
 
 func (m model) renderLogs() string {
-	header := titleStyle.Render("logs: " + m.logTarget.Name)
+	header := titleStyle.Render("logs: " + m.state.LogTarget().Name)
 	footer := keyStyle.Render("esc") + " " + footerStyle.Render("back")
 
 	body := labelStyle.Render("no log output")
-	if m.logView != "" {
+	if m.state.LogText() != "" {
 		bodyH := max(m.height-2, 1)
-		lines := strings.Split(m.logView, "\n")
+		lines := strings.Split(m.state.LogText(), "\n")
 		if len(lines) > bodyH {
 			lines = lines[len(lines)-bodyH:]
 		}
@@ -417,16 +408,16 @@ func (m model) renderFooter() string {
 	if !it.empty() {
 		pairs = append(pairs, [2]string{"↵", "connect"})
 	}
-	if len(m.modes(it.target)) > 1 {
+	if len(m.state.Modes(it.target)) > 1 {
 		pairs = append(pairs, [2]string{"tab", "mode"})
 	}
-	if m.hasLogs(it.target) {
+	if m.state.HasLogs(it.target) {
 		pairs = append(pairs, [2]string{"^l", "logs"})
 	}
-	if m.canHook(it.target, statusStarting) {
+	if m.state.CanPower(it.target, launcher.OperationStarting) {
 		pairs = append(pairs, [2]string{"^s", "start"})
 	}
-	if m.canHook(it.target, statusStopping) {
+	if m.state.CanPower(it.target, launcher.OperationStopping) {
 		pairs = append(pairs, [2]string{"^x", "stop"})
 	}
 	pairs = append(pairs, [2]string{"^e", "config"}, [2]string{"q", "quit"})
@@ -436,7 +427,7 @@ func (m model) renderFooter() string {
 		parts = append(parts, keyStyle.Render(p[0])+" "+footerStyle.Render(p[1]))
 	}
 	keys := truncate(strings.Join(parts, footerStyle.Render("  ")), m.width)
-	return keys + "\n" + truncate(noticeStyle.Render(oneLine(m.notice)), m.width)
+	return keys + "\n" + truncate(noticeStyle.Render(oneLine(m.state.Notice())), m.width)
 }
 
 func rule(title string, width int) string {

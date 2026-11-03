@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -146,13 +147,94 @@ func newTestModel() (model, *fakeBackend) {
 }
 
 func withTargets(m model, targets ...target.Target) model {
-	m.targets = append([]target.Target{hostTarget()}, targets...)
-	m.rebuild()
+	return replaceTargets(m, append([]target.Target{hostTarget()}, targets...))
+}
+
+func replaceTargets(m model, targets []target.Target) model {
+	m.state = m.state.WithTargets(targets)
+	m.rebuild(targets)
+	m.state = m.state.Select(m.selected().id())
 	return m
 }
 
+func observed(m model, name string, env target.Environment) model {
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true, Env: env})
+	return next.(model)
+}
+
+func withLogs(m model, id target.ID, text string) model {
+	next, _ := m.Update(launcher.LogsPeeked{ID: id, Text: text})
+	return next.(model)
+}
+
+func withNotice(m model, text string) model {
+	next, _ := m.Update(launcher.NoticeSet{Text: text})
+	return next.(model)
+}
+
+func reload(m model, notice string) (tea.Model, tea.Cmd) {
+	next, load := m.Update(launcher.ReloadRequested{Notice: notice})
+	return next.(model).Update(load())
+}
+
+func runCmd(m model, make func(*model) tea.Cmd) model {
+	cmd := make(&m)
+	return applyCmd(m, cmd)
+}
+
+func only[E launcher.Effect](effects []launcher.Effect) []launcher.Effect {
+	var kept []launcher.Effect
+	for _, effect := range effects {
+		if _, ok := effect.(E); ok {
+			kept = append(kept, effect)
+		}
+	}
+	return kept
+}
+
+func peekCmd(m *model) tea.Cmd {
+	state, effects := m.state.Apply(time.Now(), launcher.Ticked{})
+	m.state = state
+	return m.perform(only[launcher.PeekLogs](effects))
+}
+
+func peekIfStaleCmd(m *model) tea.Cmd {
+	state, effects := m.state.Apply(time.Now(), launcher.Selected{ID: m.selected().id()})
+	m.state = state
+	return m.perform(only[launcher.PeekLogs](effects))
+}
+
+func watchCmd(m *model) tea.Cmd {
+	state, effects := m.state.Apply(time.Now(), launcher.Ticked{})
+	m.state = state
+	var watched []launcher.Effect
+	for _, effect := range only[launcher.Check](effects) {
+		if !effect.(launcher.Check).Full {
+			watched = append(watched, effect)
+		}
+	}
+	return m.perform(watched)
+}
+
+func probeIfStale(m *model, now time.Time) bool {
+	state, effects := m.state.Apply(now, launcher.Selected{ID: m.selected().id()})
+	m.state = state
+	return len(only[launcher.Check](effects)) > 0
+}
+
+func probeOnTick(m *model) bool {
+	state, effects := m.state.Apply(time.Now(), launcher.Ticked{})
+	m.state = state
+	return len(only[launcher.Check](effects)) > 0
+}
+
+func probing(m model) bool {
+	_, effects := m.state.Apply(time.Now(), launcher.Ticked{})
+	return len(only[launcher.Check](effects)) == 0
+}
+
 func probed(m model, name string, up bool) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: up, full: true, snapshot: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)}, inspectOK: up})
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: up, Full: true, Env: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 0)}})
 	return next.(model)
 }
 
@@ -204,7 +286,7 @@ func TestCapabilitiesFollowTheConfig(t *testing.T) {
 	if strings.Contains(m.renderFooter(), "logs") || strings.Contains(ansi.Strip(m.previewBody(60, 30)), "live") {
 		t.Errorf("a target without logs or stats offers neither")
 	}
-	if m.checkSelectedIfStale() == nil {
+	if !probeIfStale(&m, time.Now()) {
 		t.Errorf("a target without stats is still checked for reachability")
 	}
 }
@@ -275,12 +357,20 @@ func TestReachabilityStandsInForStats(t *testing.T) {
 	}
 
 	backend.down["dojo"] = true
-	m.live = map[target.ID]liveEntry{}
+	m.state = launcher.New(m.state.Targets(), nil).Select(m.selected().id())
 	m = m.withSelectionRefreshed()
 	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusDown {
 		t.Errorf("an unreachable target is down, got %q", got)
 	}
 }
+
+const (
+	statusUnknown  = string(target.StatusUnknown)
+	statusUp       = string(target.StatusUp)
+	statusDown     = string(target.StatusDown)
+	statusStarting = string(launcher.OperationStarting)
+	statusStopping = string(launcher.OperationStopping)
+)
 
 type errBoom struct{}
 
@@ -302,13 +392,13 @@ func focusedOn(name string) (model, *fakeBackend) {
 }
 
 func inspected(m model, name string, tools ...string) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true, snapshot: target.Environment{Tools: tools}, inspectOK: true})
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true, Env: target.Environment{Tools: tools}})
 	return next.(model)
 }
 
 func TestUninspectedTargetOffersTmux(t *testing.T) {
 	m, backend := focusedOn("box")
-	if got := m.mode().Name; got != "tmux" {
+	if got := m.state.Mode().Name; got != "tmux" {
 		t.Errorf("want tmux before anything is known, got %q", got)
 	}
 	key(m, "enter")
@@ -321,7 +411,7 @@ func TestTargetWithoutTmuxOffersOnlyTheShell(t *testing.T) {
 	m, backend := focusedOn("box")
 	m = inspected(m, "box")
 
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("want shell as the default, got %q", got)
 	}
 	if got := m.modeTag(m.selected()); got != "" {
@@ -340,7 +430,7 @@ func TestTargetWithTmuxDefaultsToIt(t *testing.T) {
 	m, _ := focusedOn("box")
 	m = inspected(m, "box", "tmux")
 
-	if got := m.mode().Name; got != "tmux" {
+	if got := m.state.Mode().Name; got != "tmux" {
 		t.Errorf("want tmux as the default, got %q", got)
 	}
 	if got := ansi.Strip(m.modeTag(m.selected())); !strings.Contains(got, "1/2") {
@@ -351,12 +441,12 @@ func TestTargetWithTmuxDefaultsToIt(t *testing.T) {
 func TestInspectionRunsAndFiltersThroughTheBackend(t *testing.T) {
 	m, backend := focusedOn("box")
 	backend.tools = map[string][]string{"box": {"tmux"}}
-	if got := m.withSelectionRefreshed().mode().Name; got != "tmux" {
+	if got := m.withSelectionRefreshed().state.Mode().Name; got != "tmux" {
 		t.Errorf("a reported tool keeps its mode, got %q", got)
 	}
 
 	m, _ = focusedOn("box")
-	if got := m.withSelectionRefreshed().mode().Name; got != "shell" {
+	if got := m.withSelectionRefreshed().state.Mode().Name; got != "shell" {
 		t.Errorf("no reported tool drops its mode, got %q", got)
 	}
 }
@@ -364,15 +454,15 @@ func TestInspectionRunsAndFiltersThroughTheBackend(t *testing.T) {
 func TestStoppedTargetKeepsItsLastAnswer(t *testing.T) {
 	m, _ := focusedOn("box")
 	m = probed(inspected(m, "box"), "box", false)
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("a stopped target still has no tmux, got %q", got)
 	}
 }
 
 func TestFailedInspectionStaysOptimistic(t *testing.T) {
 	m, _ := focusedOn("box")
-	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true})
-	if got := next.(model).mode().Name; got != "tmux" {
+	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}})
+	if got := next.(model).state.Mode().Name; got != "tmux" {
 		t.Errorf("a failed inspection knows nothing about tmux, got %q", got)
 	}
 }
@@ -381,7 +471,7 @@ func TestDeclaredModesAreNeverFiltered(t *testing.T) {
 	m, _ := newTestModel()
 	m = focus(sized(m), "forge")
 	m = inspected(m, "forge")
-	if got := m.modes(m.selected().target); len(got) != 3 {
+	if got := m.state.Modes(m.selected().target); len(got) != 3 {
 		t.Errorf("modes from the config always stay, got %d", len(got))
 	}
 }
@@ -389,12 +479,12 @@ func TestDeclaredModesAreNeverFiltered(t *testing.T) {
 func TestModeChosenBeforeFilteringLeavesNoBadge(t *testing.T) {
 	m, _ := focusedOn("box")
 	m = key(m, "tab")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Fatalf("tab should reach shell, got %q", got)
 	}
 
 	m = inspected(m, "box")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("want shell, got %q", got)
 	}
 	if row := ansi.Strip(m.paneRow(m.selected(), true, true, 40)); strings.Contains(row, "[") {
@@ -418,7 +508,7 @@ func focusedOnAutomaticModes(names ...string) model {
 
 func offered(m model) []string {
 	var names []string
-	for _, mode := range m.modes(m.selected().target) {
+	for _, mode := range m.state.Modes(m.selected().target) {
 		names = append(names, mode.Name)
 	}
 	return names
@@ -426,12 +516,12 @@ func offered(m model) []string {
 
 func TestSelectedModeSurvivesTheListChanging(t *testing.T) {
 	m := key(focusedOnAutomaticModes("tmux", "zellij", "shell"), "tab")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Fatalf("tab should reach shell, got %q", got)
 	}
 
 	m = inspected(m, "box", "zellij")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("shell is still there, want it selected, got %q", got)
 	}
 }
@@ -439,22 +529,22 @@ func TestSelectedModeSurvivesTheListChanging(t *testing.T) {
 func TestSelectedModeFallsBackToTheFirstWhenItDisappears(t *testing.T) {
 	m := inspected(focusedOnAutomaticModes("tmux", "zellij", "shell"), "box", "tmux", "zellij")
 	m = key(m, "tab")
-	if got := m.mode().Name; got != "zellij" {
+	if got := m.state.Mode().Name; got != "zellij" {
 		t.Fatalf("tab should reach zellij, got %q", got)
 	}
 
 	m = inspected(m, "box", "tmux")
-	if got := m.mode().Name; got != "tmux" {
+	if got := m.state.Mode().Name; got != "tmux" {
 		t.Errorf("zellij is gone, want the first mode, got %q", got)
 	}
 }
 
 func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
-	for name, msg := range map[string]*liveMsg{
+	for name, msg := range map[string]*launcher.Checked{
 		"never checked":     nil,
-		"down":              {id: configID("box"), up: false, full: true},
-		"up, not inspected": {id: configID("box"), up: true},
-		"failed inspection": {id: configID("box"), up: true, full: true},
+		"down":              {ID: configID("box"), Full: true},
+		"up, not inspected": {ID: configID("box"), Up: true},
+		"failed inspection": {ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}},
 	} {
 		m := focusedOnAutomaticModes("tmux", "zellij", "shell")
 		if msg != nil {
@@ -464,7 +554,7 @@ func TestUndiscoveredTargetOffersOnlyTheDefaultAndShell(t *testing.T) {
 		if got := offered(m); !slices.Equal(got, []string{"tmux", "shell"}) {
 			t.Errorf("%s: want tmux and shell, got %q", name, got)
 		}
-		if got := key(key(m, "tab"), "tab").mode().Name; got != "tmux" {
+		if got := key(key(m, "tab"), "tab").state.Mode().Name; got != "tmux" {
 			t.Errorf("%s: two tabs should wrap to tmux, got %q", name, got)
 		}
 	}
@@ -517,10 +607,10 @@ func TestMissingDefaultFallsToShellBeforeOtherMultiplexers(t *testing.T) {
 	m = focus(sized(withTargets(m, box)), "box")
 
 	m = inspected(m, "box", "zellij")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("the default is missing, want shell first, got %q", got)
 	}
-	if got := key(m, "tab").mode().Name; got != "zellij" {
+	if got := key(m, "tab").state.Mode().Name; got != "zellij" {
 		t.Errorf("zellij is one tab away, got %q", got)
 	}
 }
@@ -530,25 +620,25 @@ func TestModeCycling(t *testing.T) {
 	m = sized(m)
 	m = focus(m, "forge")
 
-	if got := m.mode().Name; got != "tmux" {
+	if got := m.state.Mode().Name; got != "tmux" {
 		t.Fatalf("a fresh row starts on its default mode, got %q", got)
 	}
 
 	m = key(m, "tab")
-	if got := m.mode().Name; got != "shell" {
+	if got := m.state.Mode().Name; got != "shell" {
 		t.Errorf("tab should advance to shell, got %q", got)
 	}
 	m = key(m, "tab")
-	if got := m.mode().Name; got != "top" {
+	if got := m.state.Mode().Name; got != "top" {
 		t.Errorf("tab should advance to top, got %q", got)
 	}
 	m = key(m, "tab")
-	if got := m.mode().Name; got != "tmux" {
+	if got := m.state.Mode().Name; got != "tmux" {
 		t.Errorf("tab should wrap around to tmux, got %q", got)
 	}
 
 	m = key(m, "shift+tab")
-	if got := m.mode().Name; got != "top" {
+	if got := m.state.Mode().Name; got != "top" {
 		t.Errorf("shift+tab should wrap backwards to top, got %q", got)
 	}
 }
@@ -559,19 +649,19 @@ func TestModeResetsWhenCursorMoves(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
-	if m.modeName == "" {
+	if m.state.ModeIndex() == 0 {
 		t.Fatal("tab should leave the row off-default")
 	}
 
 	m = key(m, "down")
-	if m.modeName != "" {
-		t.Errorf("moving the cursor must reset the mode, got %q", m.modeName)
+	if m.state.ModeIndex() != 0 {
+		t.Errorf("moving the cursor must reset the mode, got index %d", m.state.ModeIndex())
 	}
 
 	m = key(m, "tab")
 	m = key(m, "up")
-	if m.modeName != "" {
-		t.Errorf("moving back must also reset, got %q", m.modeName)
+	if m.state.ModeIndex() != 0 {
+		t.Errorf("moving back must also reset, got index %d", m.state.ModeIndex())
 	}
 }
 
@@ -600,7 +690,7 @@ func TestModeSurfacedInListAndPreview(t *testing.T) {
 }
 
 func TestGlyphDistinguishesState(t *testing.T) {
-	shape := func(s status) string {
+	shape := func(s string) string {
 		mark, _ := glyphOf(s)
 		return mark
 	}
@@ -655,37 +745,15 @@ func TestWatchedTargetsAreCheckedInTheBackground(t *testing.T) {
 	m = withTargets(m, watched, remote("dojo"))
 	backend.down["nakama"] = true
 
-	m = applyCmd(m, m.checkWatched())
+	m = runCmd(m, watchCmd)
 	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("a watched target resolves without being selected, got %q", got)
 	}
 	if got := m.statusOf(itemNamed(m, "dojo").target); got != statusUnknown {
 		t.Errorf("an unwatched target waits for selection, got %q", got)
 	}
-	if m.checkWatched() != nil {
+	if watchCmd(&m) != nil {
 		t.Errorf("a fresh check should not repeat before the watch interval")
-	}
-}
-
-func TestWatchChecksAreCapped(t *testing.T) {
-	m, _ := newTestModel()
-	var many []target.Target
-	for _, name := range []string{"a", "b", "c", "d", "e", "f"} {
-		t := vm(name)
-		t.Watch = true
-		many = append(many, t)
-	}
-	m = withTargets(m, many...)
-
-	m.checkWatched()
-	pending := 0
-	for _, e := range m.live {
-		if e.pending {
-			pending++
-		}
-	}
-	if pending != maxWatchChecks {
-		t.Errorf("at most %d checks may be in flight, got %d", maxWatchChecks, pending)
 	}
 }
 
@@ -708,7 +776,7 @@ func TestStartAndStopRunTheHooks(t *testing.T) {
 	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusStopping {
 		t.Errorf("a running hook shows its transition, got %q", got)
 	}
-	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).live[configID("nakama")].action != statusStopping {
+	if again, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX}); again.(model).state.Observation(configID("nakama")).Operation != launcher.OperationStopping {
 		t.Errorf("a second press must not stack hooks")
 	}
 	if footer := m.renderFooter(); strings.Contains(footer, "start") || strings.Contains(footer, "stop") {
@@ -789,9 +857,6 @@ func TestEnterStartsADownTargetThenConnects(t *testing.T) {
 	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-nakama tmux" {
 		t.Errorf("once started, the selected mode runs once, ran %q", got)
 	}
-	if m.connectAfterStart != (target.ID{}) {
-		t.Errorf("a finished start forgets the pending connect, got %q", m.connectAfterStart)
-	}
 }
 
 func TestMovingAwayCancelsTheConnect(t *testing.T) {
@@ -815,11 +880,11 @@ func TestFailedStartConnectsNothing(t *testing.T) {
 
 	next, start := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = finishHook(next.(model), start)
-	if len(backend.sessions) != 0 || m.connectAfterStart != (target.ID{}) {
-		t.Errorf("a failed start connects nothing and forgets the intent, ran %v, pending %q", backend.sessions, m.connectAfterStart)
+	if len(backend.sessions) != 0 {
+		t.Errorf("a failed start connects nothing, ran %v", backend.sessions)
 	}
-	if !strings.Contains(m.notice, "start jammed failed") {
-		t.Errorf("the failure reaches the status line, got %q", m.notice)
+	if !strings.Contains(m.state.Notice(), "start jammed failed") {
+		t.Errorf("the failure reaches the status line, got %q", m.state.Notice())
 	}
 }
 
@@ -867,10 +932,9 @@ func TestResultsFromBeforeAHookAreDropped(t *testing.T) {
 	m = sized(withTargets(m, box))
 	m = focus(m, "nakama").withSelectionRefreshed()
 
-	stale := m.check(box, false)
 	m = pressHook(m, tea.KeyCtrlX)
 	backend.down["nakama"] = false
-	next, _ := m.Update(stale())
+	next, _ := m.Update(launcher.Checked{ID: box.ID, Epoch: 0, Up: true})
 	m = next.(model)
 	if got := m.statusOf(itemNamed(m, "nakama").target); got != statusDown {
 		t.Errorf("a check issued before the hook must not overwrite its outcome, got %q", got)
@@ -885,8 +949,8 @@ func TestFailedHookReportsAndRechecks(t *testing.T) {
 	m = focus(m, "stuck").withSelectionRefreshed()
 
 	m = pressHook(m, tea.KeyCtrlX)
-	if !strings.Contains(m.notice, "stop stuck failed") {
-		t.Errorf("a failed hook should be reported, got %q", m.notice)
+	if !strings.Contains(m.state.Notice(), "stop stuck failed") {
+		t.Errorf("a failed hook should be reported, got %q", m.state.Notice())
 	}
 	if got := m.statusOf(itemNamed(m, "stuck").target); got != statusUp {
 		t.Errorf("a failed stop leaves the target as it is, got %q", got)
@@ -899,13 +963,12 @@ func TestEveryStatusIsProbed(t *testing.T) {
 	m = probed(m, "tokyo", false)
 
 	m = focus(m, "forge")
-	if m.checkSelectedIfStale() == nil {
+	if !probeIfStale(&m, time.Now()) {
 		t.Error("an unknown target must be probed, or its status can never resolve")
 	}
 
 	m = focus(m, "tokyo")
-	m.live = map[target.ID]liveEntry{}
-	if m.checkSelectedIfStale() == nil {
+	if !probeIfStale(&m, time.Now().Add(launcher.LiveInterval)) {
 		t.Error("a down target must be probed again, or it can never come back up")
 	}
 }
@@ -915,18 +978,15 @@ func TestSlowProbesNeverStack(t *testing.T) {
 	m = sized(m)
 	m = focus(m, "forge")
 
-	if m.checkSelectedIfStale() == nil {
+	if !probeIfStale(&m, time.Now()) {
 		t.Fatal("the first probe should go out")
 	}
-	if m.checkSelectedIfStale() != nil {
+	if probeIfStale(&m, time.Now()) {
 		t.Error("a probe still running must not be joined by another")
 	}
 
 	m = probed(m, "forge", true)
-	landed := m.live[configID("forge")]
-	landed.inspectedAt = time.Now().Add(-liveInterval)
-	m.live[configID("forge")] = landed
-	if m.checkSelectedIfStale() == nil {
+	if !probeIfStale(&m, time.Now().Add(launcher.LiveInterval)) {
 		t.Error("once the result lands and goes stale, the next probe may go out")
 	}
 }
@@ -935,7 +995,7 @@ func TestPendingProbeShowsNoReadings(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(m, "forge")
-	m.checkSelectedIfStale()
+	probeIfStale(&m, time.Now())
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if strings.Contains(preview, "0.00") || !strings.Contains(preview, "…") {
@@ -953,15 +1013,15 @@ func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = key(m, "ctrl+l")
-	stale := m.logRound
+	stale := 1
 	m = key(key(m, "esc"), "ctrl+l")
 
-	next, tick := m.Update(logViewMsg{round: stale, text: "stale"})
+	next, tick := m.Update(launcher.LogsViewed{Round: stale, Text: "stale"})
 	m = next.(model)
-	if m.logView == "stale" || tick != nil {
+	if m.state.LogText() == "stale" || tick != nil {
 		t.Errorf("a reply from a closed log view must neither land nor reschedule")
 	}
-	if _, tick = m.Update(logTickMsg{round: stale}); tick != nil {
+	if _, tick = m.Update(launcher.LogTicked{Round: stale}); tick != nil {
 		t.Errorf("a tick from a closed log view must not fetch again")
 	}
 }
@@ -969,7 +1029,7 @@ func TestReopenedLogsDropTheEarlierRound(t *testing.T) {
 func TestMultiLineStatusStaysOnOneRow(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
-	m.notice = errors.Join(errBoom{}, errBoom{}).Error()
+	m = withNotice(m, errors.Join(errBoom{}, errBoom{}).Error())
 
 	if lines := strings.Count(m.renderFooter(), "\n"); lines != 1 {
 		t.Errorf("footer must stay two rows regardless of error count, got %d newlines", lines)
@@ -1013,7 +1073,7 @@ func TestSpillResetsTheMode(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = key(m, "tab")
-	if m.modeName == "" {
+	if m.state.ModeIndex() == 0 {
 		t.Fatal("tab should leave the row off-default")
 	}
 
@@ -1021,8 +1081,8 @@ func TestSpillResetsTheMode(t *testing.T) {
 	if got := m.selected().name(); got != "host" {
 		t.Fatalf("up should spill to host, got %q", got)
 	}
-	if m.modeName != "" {
-		t.Errorf("landing on another pane must reset the mode, got %q", m.modeName)
+	if m.state.ModeIndex() != 0 {
+		t.Errorf("landing on another pane must reset the mode, got index %d", m.state.ModeIndex())
 	}
 }
 
@@ -1232,7 +1292,7 @@ func TestPreviewLeadsWithLiveData(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: target.Environment{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)}}
+	m = observed(m, "forge", target.Environment{Readings: linuxReadings(1, 4, 1<<30, 4<<30, 0)})
 
 	preview := ansi.Strip(m.previewBody(60, 30))
 	if !strings.Contains(preview, "live") {
@@ -1249,7 +1309,7 @@ func TestDownTargetShowsNoStaleUptime(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = focus(probed(m, "forge", true), "forge")
-	m.live[configID("forge")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true, snapshot: target.Environment{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)}}
+	m = observed(m, "forge", target.Environment{Readings: linuxReadings(0, 4, 0, 0, 76*time.Hour)})
 
 	if preview := ansi.Strip(m.previewBody(60, 30)); !strings.Contains(preview, "3d 4h") {
 		t.Fatalf("a reachable target should report uptime in seconds as a duration:\n%s", preview)
@@ -1317,8 +1377,8 @@ func TestPaneLetterThenItemLetterSelects(t *testing.T) {
 	if got := m.selected().name(); got != "tokyo" {
 		t.Fatalf("a letter no item holds must change nothing, got %q", got)
 	}
-	if m.notice != "" {
-		t.Errorf("a miss must stay silent, got status %q", m.notice)
+	if m.state.Notice() != "" {
+		t.Errorf("a miss must stay silent, got status %q", m.state.Notice())
 	}
 }
 
@@ -1429,18 +1489,18 @@ func TestLogsScreenToggle(t *testing.T) {
 	m = focus(m, "forge")
 
 	m = keyThenApply(m, "ctrl+l")
-	if m.screen != screenLogs {
+	if !m.state.LogsOpen() {
 		t.Fatalf("ctrl+l on a vm should open the log pager")
 	}
-	if m.logTarget.Name != "forge" {
-		t.Fatalf("log pager should target forge, got %q", m.logTarget.Name)
+	if m.state.LogTarget().Name != "forge" {
+		t.Fatalf("log pager should target forge, got %q", m.state.LogTarget().Name)
 	}
 	if !strings.Contains(m.View(), "boot line") {
 		t.Errorf("log pager should render the tail")
 	}
 
 	m = key(m, "esc")
-	if m.screen != screenList {
+	if m.state.LogsOpen() {
 		t.Fatalf("esc should close the log pager")
 	}
 
@@ -1507,6 +1567,7 @@ func focus(m model, name string) model {
 		for j, it := range p.items {
 			if it.name() == name {
 				m.focus, m.panes[i].cursor = i, j
+				m.state = m.state.Select(it.id())
 				return m
 			}
 		}
@@ -1515,7 +1576,8 @@ func focus(m model, name string) model {
 }
 
 func (m model) withSelectionRefreshed() model {
-	return applyCmd(m, m.refreshSelected())
+	cmd := m.send(launcher.Selected{ID: m.selected().id()})
+	return applyCmd(m, cmd)
 }
 
 func applyCmd(m model, cmd tea.Cmd) model {
@@ -1591,14 +1653,14 @@ func TestLogPeekBelongsToItsTarget(t *testing.T) {
 	m = sized(m)
 	m = focus(m, "forge")
 
-	next, _ := m.Update(logPeekMsg{id: configID("tokyo"), text: "tokyo boot"})
-	if m = next.(model); m.logPeek.text != "" {
-		t.Errorf("a tail for another target must be dropped, got %q", m.logPeek.text)
+	next, _ := m.Update(launcher.LogsPeeked{ID: configID("tokyo"), Text: "tokyo boot"})
+	if m = next.(model); m.state.Logs(m.selected().target) != "" {
+		t.Errorf("a tail for another target must be dropped, got %q", m.state.Logs(m.selected().target))
 	}
 
-	next, _ = m.Update(logPeekMsg{id: configID("forge"), text: "forge boot"})
-	if m = next.(model); m.logPeek.text != "forge boot" {
-		t.Errorf("the selected target's tail should land, got %q", m.logPeek.text)
+	next, _ = m.Update(launcher.LogsPeeked{ID: configID("forge"), Text: "forge boot"})
+	if m = next.(model); m.state.Logs(m.selected().target) != "forge boot" {
+		t.Errorf("the selected target's tail should land, got %q", m.state.Logs(m.selected().target))
 	}
 }
 
@@ -1606,11 +1668,11 @@ func TestLogPeekIsThrottled(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 
-	if cmd := m.peekSelectedLogsIfStale(); cmd == nil {
+	if cmd := peekIfStaleCmd(&m); cmd == nil {
 		t.Fatalf("the first peek should fetch")
 	}
-	m.logPeek = peek{id: m.selected().id(), text: "journal line", at: time.Now()}
-	if cmd := m.peekSelectedLogsIfStale(); cmd != nil {
+	m = withLogs(m, m.selected().id(), "journal line")
+	if cmd := peekIfStaleCmd(&m); cmd != nil {
 		t.Errorf("a fresh peek should not refetch on every poll")
 	}
 }
@@ -1639,8 +1701,7 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 	box.Stats = target.StatsPolicy{Metrics: []target.Metric{gpu, cache, agents, broken}}
 	m = sized(withTargets(m, box))
 	m = focus(m, "box")
-	m.live[configID("box")] = liveEntry{inspectedAt: time.Now(), state: statusUp, inspectOK: true,
-		snapshot: target.Environment{Readings: []target.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}}}
+	m = observed(m, "box", target.Environment{Readings: []target.Reading{reading(gpu, 37, 100), reading(cache, 1<<30, 4<<30), {Metric: agents, Text: "3", OK: true}, {Metric: broken}}})
 
 	preview := ansi.Strip(m.previewBody(70, 40))
 	order := []string{"gpu", "37 / 100", "cache", "1/4GiB", "agents", "3", "broken", "?"}
@@ -1660,22 +1721,22 @@ func TestLiveBlockFollowsTheDeclaredMetrics(t *testing.T) {
 func TestTickRefreshesLogsInPlace(t *testing.T) {
 	m, backend := newTestModel()
 	m = sized(m)
-	m = applyCmd(m, m.peekSelectedLogsIfStale())
-	if got := m.logsFor(m.selected()); got != "journal line" {
+	m = runCmd(m, peekIfStaleCmd)
+	if got := m.state.Logs(m.selected().target); got != "journal line" {
 		t.Fatalf("the first peek should land, got %q", got)
 	}
 
 	backend.logs["host"] = "journal line\nnew line"
-	if m.peekSelectedLogsIfStale() != nil {
+	if peekIfStaleCmd(&m) != nil {
 		t.Fatalf("a selection change right after a peek should not refetch")
 	}
-	m = applyCmd(m, m.peekSelectedLogs())
-	if got := m.logsFor(m.selected()); !strings.HasSuffix(got, "new line") {
+	m = runCmd(m, peekCmd)
+	if got := m.state.Logs(m.selected().target); !strings.HasSuffix(got, "new line") {
 		t.Errorf("the tick should refresh the tail while staying on a target, got %q", got)
 	}
 
-	m.screen = screenLogs
-	if m.peekSelectedLogs() != nil {
+	m = key(m, "ctrl+l")
+	if peekCmd(&m) != nil {
 		t.Errorf("the full log screen polls on its own, the preview should not")
 	}
 }
@@ -1685,27 +1746,14 @@ func TestTickProbesOnCadenceButNeverStacks(t *testing.T) {
 	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
 
-	if m.checkSelectedIfStale() != nil {
+	if probeIfStale(&m, time.Now()) {
 		t.Fatalf("a selection change right after a probe should not refetch")
 	}
-	if m.checkSelected() == nil {
+	if !probeOnTick(&m) {
 		t.Errorf("the tick should probe even when the last result just landed")
 	}
-	if m.checkSelected() != nil {
+	if probeOnTick(&m) {
 		t.Errorf("a probe still in flight must not be joined by another")
-	}
-}
-
-func TestSessionEndReportsWithoutBlame(t *testing.T) {
-	exitErr := exec.Command("sh", "-c", "exit 3").Run()
-	for err, want := range map[error]string{
-		nil:                     "",
-		exitErr:                 "forge: session ended with exit 3",
-		errors.New("not found"): "forge: not found",
-	} {
-		if got := sessionEnded("forge", err).notice; got != want {
-			t.Errorf("sessionEnded(%v) = %q, want %q", err, got, want)
-		}
 	}
 }
 
@@ -1713,37 +1761,27 @@ func TestEveryEndedSessionReturnsToTheDashboard(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
-	m.notice = "stale message"
+	m = withNotice(m, "stale message")
 
-	for _, ended := range []execDoneMsg{{}, {notice: "forge: session ended with exit 255"}} {
-		next, cmd := m.Update(ended)
+	exitErr := exec.Command("sh", "-c", "exit 255").Run()
+	for _, c := range []struct {
+		err  error
+		want string
+	}{{nil, ""}, {exitErr, "forge: session ended with exit 255"}} {
+		next, cmd := m.Update(launcher.ConnectionEnded{Name: "forge", Err: c.err})
 		m = next.(model)
 		if cmd != nil {
 			if _, quit := cmd().(tea.QuitMsg); quit {
 				t.Fatalf("a session ending must never close the dashboard")
 			}
 		}
-		if m.notice != ended.notice {
-			t.Errorf("status = %q, want %q", m.notice, ended.notice)
+		if m.state.Notice() != c.want {
+			t.Errorf("status = %q, want %q", m.state.Notice(), c.want)
 		}
-		if !m.live[configID("forge")].pending {
+		if !probing(m) {
 			t.Errorf("the target should be checked again right away")
 		}
 		m = probed(m, "forge", true)
-	}
-}
-
-func TestConfigStatusSummarizesProblems(t *testing.T) {
-	one := errors.New(`target "box": no modes`)
-	nested := errors.Join(errors.Join(one, errors.New("b")), errors.New("c"))
-	for err, want := range map[error]string{
-		nil:    "",
-		one:    `config: target "box": no modes`,
-		nested: "config: 3 problems, see uplink config check",
-	} {
-		if got := configNotice(err); got != want {
-			t.Errorf("configNotice(%v) = %q, want %q", err, got, want)
-		}
 	}
 }
 
@@ -1755,14 +1793,14 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	moved := vm("tokyo")
 	moved.Group = "far"
 	broken := errors.Join(errors.New(`target "x": no modes`), errors.New(`target "y": no modes`))
-	m.load = func() ([]target.Target, error) {
+	m.runner.Load = func() ([]target.Target, error) {
 		return []target.Target{hostTarget(), moved, remote("berlin")}, broken
 	}
 
 	if footer := m.renderFooter(); !strings.Contains(footer, "config") {
 		t.Errorf("the footer should offer the config editor: %s", footer)
 	}
-	next, _ := m.Update(configEditedMsg{})
+	next, _ := reload(m, "")
 	m = next.(model)
 
 	var groups []string
@@ -1778,12 +1816,12 @@ func TestEditedConfigReloadsInPlace(t *testing.T) {
 	if itemNamed(m, "forge").name() != "" {
 		t.Errorf("a removed target should disappear")
 	}
-	if m.notice != "config: 2 problems, see uplink config check" {
-		t.Errorf("problems should be summarized, got %q", m.notice)
+	if m.state.Notice() != "config: 2 problems, see uplink config check" {
+		t.Errorf("problems should be summarized, got %q", m.state.Notice())
 	}
 
-	next, _ = m.Update(configEditedMsg{notice: "config edit: no such file"})
-	if got := next.(model).notice; got != "config edit: no such file" {
+	next, _ = reload(m, "config edit: no such file")
+	if got := next.(model).state.Notice(); got != "config edit: no such file" {
 		t.Errorf("a failure to open the editor wins over the reload summary, got %q", got)
 	}
 }
@@ -1792,11 +1830,11 @@ func TestReloadProbesTheSelectionAgainAtOnce(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(m)
 	m = probed(focus(m, "forge"), "forge", true)
-	m.load = func() ([]target.Target, error) { return m.targets, nil }
+	m.runner.Load = func() ([]target.Target, error) { return m.state.Targets(), nil }
 
-	next, _ := m.Update(configEditedMsg{})
+	next, _ := reload(m, "")
 	m = next.(model)
-	if !m.live[configID("forge")].pending {
+	if !probing(m) {
 		t.Errorf("a reload must not leave the selection on readings from the old config")
 	}
 }
@@ -1808,14 +1846,14 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Metrics: linuxMetrics[1:2]}
-	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+	m.runner.Load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
 
-	next, _ := m.Update(configEditedMsg{})
+	next, _ := reload(m, "")
 	m = next.(model)
-	if forge := m.live[configID("forge")]; forge.snapshot.Readings != nil || forge.state != statusUp {
+	if forge := m.state.Observation(configID("forge")); forge.Stats.Value != nil || forge.Status != target.StatusUp {
 		t.Errorf("changed stats drop their readings but keep the status, got %+v", forge)
 	}
-	if m.live[configID("tokyo")].snapshot.Readings == nil {
+	if m.state.Observation(configID("tokyo")).Stats.Value == nil {
 		t.Errorf("unchanged stats keep their readings")
 	}
 }
@@ -1823,11 +1861,11 @@ func TestReloadDropsReadingsOfChangedStats(t *testing.T) {
 func TestReloadKeepsTheSelectionOnTheSameTarget(t *testing.T) {
 	m, _ := newTestModel()
 	m = sized(focus(m, "tokyo"))
-	m.load = func() ([]target.Target, error) {
+	m.runner.Load = func() ([]target.Target, error) {
 		return []target.Target{hostTarget(), vm("forge"), vm("berlin"), vm("tokyo")}, nil
 	}
 
-	next, _ := m.Update(configEditedMsg{})
+	next, _ := reload(m, "")
 	if got := next.(model).selected().name(); got != "tokyo" {
 		t.Errorf("a target added above the selection must not move it, got %q", got)
 	}
@@ -1843,13 +1881,14 @@ func TestSameNameFromAnotherSourceKeepsItsOwnState(t *testing.T) {
 	m = probed(m, "box", true)
 
 	m.focus = slices.IndexFunc(m.panes, func(p pane) bool { return p.group == "lima" })
+	m.state = m.state.Select(m.selected().id())
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
 	m = next.(model)
 
-	if got := m.live[theirs.ID]; got.action != statusStopping || got.state != "" {
+	if got := m.state.Observation(theirs.ID); got.Operation != launcher.OperationStopping || got.Status != target.StatusUnknown {
 		t.Errorf("the lima box should be stopping with no borrowed status, got %+v", got)
 	}
-	if got := m.live[configID("box")]; got.action != "" || got.state != statusUp {
+	if got := m.state.Observation(configID("box")); got.Operation != launcher.OperationNone || got.Status != target.StatusUp {
 		t.Errorf("the config box should be untouched, got %+v", got)
 	}
 }
@@ -1861,7 +1900,7 @@ func TestConfigEditedReportsOnlyFailuresToStart(t *testing.T) {
 		exitErr:                 "",
 		errors.New("not found"): "config edit: not found",
 	} {
-		if got := configEdited(err).(configEditedMsg).notice; got != want {
+		if got := configEdited(err).(launcher.ReloadRequested).Notice; got != want {
 			t.Errorf("configEdited(%v) = %q, want %q", err, got, want)
 		}
 	}
@@ -1869,14 +1908,13 @@ func TestConfigEditedReportsOnlyFailuresToStart(t *testing.T) {
 
 func TestNoTargetsPointsAtTheConfig(t *testing.T) {
 	m, backend := newTestModel()
-	m.targets = nil
-	m.rebuild()
+	m = replaceTargets(m, nil)
 	m = sized(m)
 
 	for _, k := range []string{"j", "k", "tab", "enter", "ctrl+s", "ctrl+x", "ctrl+l"} {
 		m = key(m, k)
 	}
-	if len(backend.sessions) != 0 || len(backend.hooks) != 0 || m.screen != screenList {
+	if len(backend.sessions) != 0 || len(backend.hooks) != 0 || m.state.LogsOpen() {
 		t.Errorf("keys with no target do nothing, ran %v and hooks %v", backend.sessions, backend.hooks)
 	}
 
@@ -1904,7 +1942,7 @@ func TestCtrlEOpensTheEditorDirectly(t *testing.T) {
 	m, backend = newTestModel()
 	m.edit = func() (*exec.Cmd, error) { return nil, errors.New("read-only file system") }
 	m = key(m, "ctrl+e")
-	if len(backend.sessions) != 0 || m.notice != "config edit: read-only file system" {
-		t.Errorf("a failed edit runs nothing and says why, ran %v, notice %q", backend.sessions, m.notice)
+	if len(backend.sessions) != 0 || m.state.Notice() != "config edit: read-only file system" {
+		t.Errorf("a failed edit runs nothing and says why, ran %v, notice %q", backend.sessions, m.state.Notice())
 	}
 }

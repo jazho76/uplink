@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"errors"
+	"os/exec"
 	"testing"
 	"time"
 
@@ -157,5 +158,49 @@ func TestFailedStartDoesNotConnect(t *testing.T) {
 	}
 	if next.Notice() == "" {
 		t.Error("the failure is reported")
+	}
+}
+
+func TestFinishedStartForgetsThePendingConnection(t *testing.T) {
+	vm := box("vm")
+	vm.Power = &target.Power{Up: "start"}
+	state, _ := selected(vm).Apply(clock, Checked{ID: vm.ID})
+	state, _ = state.Apply(clock, ConnectRequested{})
+	state, _ = state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
+	if state.connectAfterStart != (target.ID{}) {
+		t.Errorf("got %q", state.connectAfterStart)
+	}
+	_, effects := state.Apply(clock, PowerDone{ID: vm.ID, Operation: OperationStarting})
+	for _, effect := range effects {
+		if _, ok := effect.(Connect); ok {
+			t.Error("a later start must not connect again")
+		}
+	}
+}
+
+func TestConnectionEndReportsWithoutBlame(t *testing.T) {
+	exitErr := exec.Command("sh", "-c", "exit 3").Run()
+	for err, want := range map[error]string{
+		nil:                     "",
+		exitErr:                 "forge: session ended with exit 3",
+		errors.New("not found"): "forge: not found",
+	} {
+		if got := connectionNotice(ConnectionEnded{Name: "forge", Err: err}); got != want {
+			t.Errorf("connectionNotice(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+func TestProblemsNoticeSummarizes(t *testing.T) {
+	one := errors.New(`target "box": no modes`)
+	nested := errors.Join(errors.Join(one, errors.New("b")), errors.New("c"))
+	for err, want := range map[error]string{
+		nil:    "",
+		one:    `config: target "box": no modes`,
+		nested: "config: 3 problems, see uplink config check",
+	} {
+		if got := problemsNotice(err); got != want {
+			t.Errorf("problemsNotice(%v) = %q, want %q", err, got, want)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jazho76/uplink/internal/target"
 )
 
 const (
@@ -151,10 +152,10 @@ func (m model) paneSummary(p pane) string {
 	}
 	running := 0
 	for _, it := range p.items {
-		switch m.statusOf(it.target) {
-		case statusUnknown:
+		switch m.state.Observation(it.id()).Status {
+		case target.StatusUnknown:
 			return ""
-		case statusUp:
+		case target.StatusUp:
 			running++
 		}
 	}
@@ -244,8 +245,8 @@ func (m model) paneRow(it item, selected, focused bool, width int) string {
 	left := m.glyph(it, base) + space + accentLetter(it.name(), key, name)
 
 	badge := ""
-	if selected && focused && m.modeIndex() != 0 {
-		badge = layer(base, modeMarker).Render("["+m.mode().Name+"]") + space
+	if selected && focused && m.state.ModeIndex() != 0 {
+		badge = layer(base, modeMarker).Render("["+m.state.Mode().Name+"]") + space
 	}
 
 	return spread(space+left, badge, width, base)

@@ -3,16 +3,14 @@ package dashboard
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/jazho76/uplink/internal/target"
 )
 
 func TestSelectedRowFillsEveryCell(t *testing.T) {
 	stylingEnabled(t)
 
-	m := model{live: map[target.ID]liveEntry{configID("kyoto"): {inspectedAt: time.Now()}}}
+	m := model{}
 	it := named("kyoto")
 	it.key = 'k'
 

@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -19,8 +20,8 @@ func withSessions(m model, name string, sessions ...target.Session) model {
 	for i := range owned {
 		owned[i].Tool = cmp.Or(owned[i].Tool, "tmux")
 	}
-	next, _ := m.Update(liveMsg{id: configID(name), up: true, full: true,
-		snapshot: target.Environment{Tools: []string{"tmux"}, Sessions: owned}, inspectOK: true})
+	next, _ := m.Update(launcher.Checked{ID: configID(name), Up: true, Full: true,
+		Env: target.Environment{Tools: []string{"tmux"}, Sessions: owned}})
 	return next.(model)
 }
 
@@ -35,7 +36,7 @@ func preview(m model) string { return ansi.Strip(m.previewBody(60, 30)) }
 
 func TestSessionsSitBetweenLiveAndLogs(t *testing.T) {
 	m := focusedPreview(t, target.Session{Name: "main"})
-	m.logPeek = peek{id: configID("forge"), text: "boot line"}
+	m = withLogs(m, configID("forge"), "boot line")
 
 	got := preview(m)
 	live, sessions, logs := strings.Index(got, "live ─"), strings.Index(got, sessionsRule), strings.Index(got, "logs ─")
@@ -137,7 +138,7 @@ func TestSessionsWithoutAMatchingModeShowNowhere(t *testing.T) {
 
 func TestHiddenSessionsGiveTheirLinesToLogs(t *testing.T) {
 	m := focusedPreview(t, target.Session{Name: "one"}, target.Session{Name: "two"})
-	m.logPeek = peek{id: configID("forge"), text: strings.TrimSuffix(strings.Repeat("log line\n", 40), "\n")}
+	m = withLogs(m, configID("forge"), strings.TrimSuffix(strings.Repeat("log line\n", 40), "\n"))
 
 	logLines := func(m model) int { return strings.Count(ansi.Strip(m.previewBody(60, 20)), "log line") }
 	if with, without := logLines(m), logLines(key(m, "tab")); without <= with {
@@ -154,7 +155,7 @@ func TestSessionsDisappearWhenTheyCannotBeTrusted(t *testing.T) {
 		t.Errorf("a stopped target has no current sessions, got:\n%s", got)
 	}
 
-	next, _ := m.Update(liveMsg{id: configID("forge"), up: true, full: true})
+	next, _ := m.Update(launcher.Checked{ID: configID("forge"), Up: true, Full: true, InspectErr: errBoom{}})
 	failed := next.(model)
 	if got := preview(failed); strings.Contains(got, sessionsRule) {
 		t.Errorf("a failed inspection has no current sessions, got:\n%s", got)
@@ -247,7 +248,7 @@ func TestNarrowSessionsStayInThePane(t *testing.T) {
 
 func TestLogsShrinkToFitSessions(t *testing.T) {
 	m := focusedPreview(t, target.Session{Name: "one"}, target.Session{Name: "two"})
-	m.logPeek = peek{id: configID("forge"), text: strings.Repeat("old line\n", 30) + "newest line"}
+	m = withLogs(m, configID("forge"), strings.Repeat("old line\n", 30)+"newest line")
 
 	const height = 16
 	got := ansi.Strip(m.previewBody(60, height))
@@ -271,7 +272,7 @@ func focusedOnBuiltin() model {
 }
 
 func inspectedWith(m model, readings []target.Reading) model {
-	next, _ := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: target.Environment{OS: "Linux", Readings: readings}, inspectOK: true})
+	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, Env: target.Environment{OS: "Linux", Readings: readings}})
 	return next.(model)
 }
 
@@ -297,7 +298,8 @@ func TestUnsupportedKernelHidesTheLiveBlock(t *testing.T) {
 	if got := preview(m); strings.Contains(got, liveRule) {
 		t.Errorf("no built-in stats for this kernel, got:\n%s", got)
 	}
-	m.markStale(configID("box"))
+	next, _ := m.Update(launcher.ConnectionEnded{})
+	m = next.(model)
 	if got := preview(m); strings.Contains(got, liveRule) {
 		t.Errorf("going stale must not flash the block back, got:\n%s", got)
 	}
@@ -307,7 +309,7 @@ func TestBuiltinStatsStayHiddenWhenNeverInspected(t *testing.T) {
 	if got := preview(probed(focusedOnBuiltin(), "box", false)); strings.Contains(got, liveRule) {
 		t.Errorf("a stopped target of unknown kernel has nothing to promise, got:\n%s", got)
 	}
-	next, _ := focusedOnBuiltin().Update(liveMsg{id: configID("box"), up: true, full: true})
+	next, _ := focusedOnBuiltin().Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, InspectErr: errBoom{}})
 	if got := preview(next.(model)); strings.Contains(got, liveRule) {
 		t.Errorf("a failed first inspection has nothing to promise, got:\n%s", got)
 	}
@@ -319,10 +321,10 @@ func TestReloadDropsReadingsWhenStatsBecomeBuiltin(t *testing.T) {
 
 	changed := vm("forge")
 	changed.Stats = target.StatsPolicy{Builtin: true}
-	m.load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
+	m.runner.Load = func() ([]target.Target, error) { return []target.Target{hostTarget(), changed, vm("tokyo")}, nil }
 
-	next, _ := m.Update(configEditedMsg{})
-	if got := next.(model).live[configID("forge")].snapshot.Readings; got != nil {
+	next, _ := reload(m, "")
+	if got := next.(model).state.Observation(configID("forge")).Stats.Value; got != nil {
 		t.Errorf("the old metrics no longer apply, got %+v", got)
 	}
 }
@@ -336,17 +338,17 @@ func focusedOnGuestLogs() (model, *fakeBackend) {
 }
 
 func inspectedTools(m model, tools ...string) (model, tea.Cmd) {
-	next, cmd := m.Update(liveMsg{id: configID("box"), up: true, full: true, snapshot: target.Environment{Tools: tools}, inspectOK: true})
+	next, cmd := m.Update(launcher.Checked{ID: configID("box"), Up: true, Full: true, Env: target.Environment{Tools: tools}})
 	return next.(model), cmd
 }
 
 func TestGuestLogsWaitForTheJournalToBeReported(t *testing.T) {
 	m, backend := focusedOnGuestLogs()
-	m = applyCmd(m, m.peekSelectedLogs())
+	m = runCmd(m, peekCmd)
 	if backend.logCalls != 0 || strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf("nothing is known yet: %d calls, footer %s", backend.logCalls, m.renderFooter())
 	}
-	if got := key(m, "ctrl+l"); got.screen == screenLogs {
+	if got := key(m, "ctrl+l"); got.state.LogsOpen() {
 		t.Error("ctrl+l has nothing to open")
 	}
 
@@ -365,7 +367,7 @@ func TestReportedJournalIsPeekedStraightAway(t *testing.T) {
 	if backend.logCalls != 1 || !strings.Contains(preview(m), "journal line") {
 		t.Errorf("want one peek landing with the snapshot, got %d calls:\n%s", backend.logCalls, preview(m))
 	}
-	if !strings.Contains(m.renderFooter(), "logs") || key(m, "ctrl+l").screen != screenLogs {
+	if !strings.Contains(m.renderFooter(), "logs") || !key(m, "ctrl+l").state.LogsOpen() {
 		t.Errorf("logs should now be offered: %s", m.renderFooter())
 	}
 }
@@ -377,7 +379,7 @@ func TestGuestLogsStopWhileDown(t *testing.T) {
 
 	m = probed(m, "box", false)
 	calls := backend.logCalls
-	m = applyCmd(m, m.peekSelectedLogs())
+	m = runCmd(m, peekCmd)
 	if backend.logCalls != calls || strings.Contains(preview(m), "journal line") || strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf("a stopped target has no journal to read, %d calls:\n%s", backend.logCalls-calls, preview(m))
 	}
@@ -386,7 +388,7 @@ func TestGuestLogsStopWhileDown(t *testing.T) {
 func TestHostSideLogsSurviveDown(t *testing.T) {
 	m, backend := newTestModel()
 	backend.logs["forge"] = "serial line"
-	next, cmd := focus(sized(m), "forge").Update(liveMsg{id: configID("forge"), up: false, full: true})
+	next, cmd := focus(sized(m), "forge").Update(launcher.Checked{ID: configID("forge"), Full: true})
 	m = applyCmd(next.(model), cmd)
 	if !strings.Contains(preview(m), "serial line") || !strings.Contains(m.renderFooter(), "logs") {
 		t.Errorf("host-side logs do not need the target up:\n%s", preview(m))
@@ -408,23 +410,23 @@ func TestNoLogsOffersNothing(t *testing.T) {
 func TestOnlyOneLogPeekRunsAtATime(t *testing.T) {
 	m, _ := newTestModel()
 	m = focus(sized(m), "forge")
-	if m.peekSelectedLogs() == nil {
+	if peekCmd(&m) == nil {
 		t.Fatal("the first peek should go out")
 	}
-	if m.peekSelectedLogs() != nil {
+	if peekCmd(&m) != nil {
 		t.Error("a slow host must not stack up peeks")
 	}
 
-	next, _ := m.Update(logPeekMsg{id: configID("forge")})
+	next, _ := m.Update(launcher.LogsPeeked{ID: configID("forge")})
 	m = next.(model)
-	if m.peekSelectedLogs() == nil {
+	if peekCmd(&m) == nil {
 		t.Error("the next peek may go out once the last one lands")
 	}
 
 	m = focus(m, "tokyo")
-	next, _ = m.Update(logPeekMsg{id: configID("forge")})
+	next, _ = m.Update(launcher.LogsPeeked{ID: configID("forge")})
 	m = focus(next.(model), "forge")
-	if m.peekSelectedLogs() == nil {
+	if peekCmd(&m) == nil {
 		t.Error("a result landing after moving away still frees its target")
 	}
 }
@@ -456,7 +458,7 @@ func TestNarrowLiveBlockDropsTheBarNotTheReading(t *testing.T) {
 func modeTagOf(m model) string { return ansi.Strip(m.modeTag(m.selected())) }
 
 func wentDown(m model, name string) model {
-	next, _ := m.Update(liveMsg{id: configID(name), up: false})
+	next, _ := m.Update(launcher.Checked{ID: configID(name)})
 	return next.(model)
 }
 
@@ -484,7 +486,7 @@ func TestDownTargetTagCountsOnlyWhatItOffers(t *testing.T) {
 
 func TestUpTargetStillBeingInspectedShowsNoDoubt(t *testing.T) {
 	m, _ := focusedOn("box")
-	next, _ := m.Update(liveMsg{id: configID("box"), up: true})
+	next, _ := m.Update(launcher.Checked{ID: configID("box"), Up: true})
 	if got := modeTagOf(next.(model)); !strings.Contains(got, "tmux") || strings.Contains(got, "?") {
 		t.Errorf("want plain tmux while up, got %q", got)
 	}
@@ -524,7 +526,7 @@ func TestAmountCollapsesASharedUnit(t *testing.T) {
 
 func TestSessionsFollowTheModesMultiplexerNotItsName(t *testing.T) {
 	m := focusedWithModes("placeholder")
-	box, _ := m.targetByID(configID("box"))
+	box := itemNamed(m, "box").target
 	box.Modes = []target.Mode{
 		{Name: "work", Argv: []string{"sh"}, Multiplexer: "tmux"},
 		{Name: "tmux", Argv: []string{"sh"}},
