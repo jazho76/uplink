@@ -21,7 +21,7 @@ type Document struct {
 	Targets     []Spec         `yaml:"targets"`
 	Discover    []string       `yaml:"discover"`
 	DefaultMode string         `yaml:"default_mode"`
-	Discovered  []Overlay      `yaml:"discovered"`
+	Discovered  []overlaySpec  `yaml:"discovered"`
 	Extra       map[string]any `yaml:",inline"`
 }
 

@@ -6,12 +6,13 @@ import (
 	"path"
 	"strings"
 
+	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/target"
 )
 
 const overlayValidationName = "validation"
 
-type Overlay struct {
+type overlaySpec struct {
 	Match string       `yaml:"match"`
 	Hide  *bool        `yaml:"hide"`
 	Group string       `yaml:"group"`
@@ -20,17 +21,7 @@ type Overlay struct {
 	Modes []modeSpec   `yaml:"modes"`
 }
 
-func (o Overlay) Matches(id target.ID) bool {
-	matched, err := path.Match(o.Match, id.String())
-	return err == nil && matched
-}
-
-func (o Overlay) Provider() string {
-	provider, _, _ := strings.Cut(o.Match, "/")
-	return provider
-}
-
-func (o Overlay) Apply(t target.Target) target.Target {
+func (o overlaySpec) adjust(t target.Target) target.Target {
 	spec, fill := o.specFor(t.ID.Key)
 	if o.Group != "" {
 		t.Group = o.Group
@@ -48,12 +39,12 @@ func (o Overlay) Apply(t target.Target) target.Target {
 	return t
 }
 
-func (o Overlay) specFor(name string) (Spec, func(string) string) {
+func (o overlaySpec) specFor(name string) (Spec, func(string) string) {
 	spec := Spec{Name: name, Logs: o.Logs, Stats: o.Stats, Modes: o.Modes}
 	return spec, func(v string) string { return strings.ReplaceAll(v, namePlaceholder, name) }
 }
 
-func (o Overlay) validate() error {
+func (o overlaySpec) validate() error {
 	if o.Match == "" {
 		return errors.New("no match")
 	}
@@ -75,9 +66,9 @@ func (o Overlay) validate() error {
 	return err
 }
 
-func (d Document) Overlays() ([]Overlay, error) {
+func (d Document) Overlays() ([]inventory.Overlay, error) {
 	var (
-		overlays []Overlay
+		overlays []inventory.Overlay
 		errs     []error
 	)
 	for i, o := range d.Discovered {
@@ -85,7 +76,7 @@ func (d Document) Overlays() ([]Overlay, error) {
 			errs = append(errs, fmt.Errorf("discovered #%d: %w", i+1, err))
 			continue
 		}
-		overlays = append(overlays, o)
+		overlays = append(overlays, inventory.Overlay{Match: o.Match, Hide: o.Hide, Adjust: o.adjust})
 	}
 	return overlays, errors.Join(errs...)
 }

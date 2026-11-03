@@ -56,7 +56,7 @@ func (c Catalog) knows(name string) bool {
 	return slices.ContainsFunc(c.Providers, func(p inventory.Provider) bool { return p.Name() == name })
 }
 
-func (c Catalog) unknownOverlayProviders(overlays []config.Overlay) []error {
+func (c Catalog) unknownOverlayProviders(overlays []inventory.Overlay) []error {
 	var errs []error
 	for _, overlay := range overlays {
 		name := overlay.Provider()

@@ -5,7 +5,6 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -102,7 +101,7 @@ func (i Inventory) Merged() ([]Discovered, error) {
 	return all, errors.Join(append(append([]error{i.plan.Problems}, errs...), append(declaredErrs, err)...)...)
 }
 
-func applyOverlays(discovered []Discovered, overlays []config.Overlay) []Discovered {
+func applyOverlays(discovered []Discovered, overlays []Overlay) []Discovered {
 	var kept []Discovered
 	for _, d := range discovered {
 		hidden := false
@@ -110,7 +109,9 @@ func applyOverlays(discovered []Discovered, overlays []config.Overlay) []Discove
 			if !overlay.Matches(d.Target.ID) {
 				continue
 			}
-			d.Target = overlay.Apply(d.Target)
+			if overlay.Adjust != nil {
+				d.Target = overlay.Adjust(d.Target)
+			}
 			if overlay.Hide != nil {
 				hidden = *overlay.Hide
 			}

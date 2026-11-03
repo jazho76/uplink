@@ -9,7 +9,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/system"
@@ -202,7 +201,7 @@ func TestHidingTheSelectedTargetMovesToANeighbor(t *testing.T) {
 	}
 
 	hide := true
-	plan := inventory.Plan{Providers: []string{"lima"}, Overlays: []config.Overlay{{Match: "lima/other", Hide: &hide}}}
+	plan := inventory.Plan{Providers: []string{"lima"}, Overlays: []inventory.Overlay{{Match: "lima/other", Hide: &hide}}}
 	m.runner.(*system.Runner).Catalog = &fakeCatalog{plan: plan}
 	next, _ := reload(m, "")
 	m = next.(model)

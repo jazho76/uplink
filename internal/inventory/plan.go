@@ -1,7 +1,6 @@
 package inventory
 
 import (
-	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/target"
 )
 
@@ -10,7 +9,7 @@ type Plan struct {
 	Explicit    bool
 	Invalid     bool
 	Declared    []target.Target
-	Overlays    []config.Overlay
+	Overlays    []Overlay
 	DefaultMode string
 	Problems    error
 }

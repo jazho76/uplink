@@ -40,7 +40,7 @@ discovered:
 	}
 	reach := target.Reach{Interactive: []string{"ssh", "nakama"}}
 	power := &target.Power{Up: "start"}
-	got := overlays[0].Apply(target.Target{
+	got := overlays[0].Adjust(target.Target{
 		ID:    target.ID{Source: "lima", Key: "nakama"},
 		Group: "vms",
 		Reach: reach,
@@ -62,7 +62,7 @@ discovered:
 		t.Errorf("what the provider owns stays, got %+v", got)
 	}
 
-	untouched := Overlay{Match: "lima/nakama", Group: "only"}.Apply(target.Target{Logs: target.LogSource{Journal: true}, Stats: target.StatsPolicy{Builtin: true}})
+	untouched := overlaySpec{Match: "lima/nakama", Group: "only"}.adjust(target.Target{Logs: target.LogSource{Journal: true}, Stats: target.StatsPolicy{Builtin: true}})
 	if !untouched.Logs.Journal || !untouched.Stats.Builtin || untouched.Modes != nil {
 		t.Errorf("fields left out stay as they were, got %+v", untouched)
 	}
@@ -71,28 +71,9 @@ discovered:
 func TestOverlayCanTurnThingsOff(t *testing.T) {
 	doc := read(t, "discovered:\n  - { match: lima/a, logs: \"\", stats: [] }\n")
 	overlays, _ := doc.Overlays()
-	got := overlays[0].Apply(target.Target{Logs: target.LogSource{Journal: true}, Stats: target.StatsPolicy{Builtin: true}})
+	got := overlays[0].Adjust(target.Target{Logs: target.LogSource{Journal: true}, Stats: target.StatsPolicy{Builtin: true}})
 	if got.Logs != (target.LogSource{}) || got.Stats.Builtin || len(got.Stats.Metrics) != 0 {
 		t.Errorf("got %+v", got)
-	}
-}
-
-func TestOverlayMatches(t *testing.T) {
-	for _, c := range []struct {
-		match string
-		id    target.ID
-		want  bool
-	}{
-		{"lima/nakama", target.ID{Source: "lima", Key: "nakama"}, true},
-		{"lima/nakama", target.ID{Source: "lima", Key: "tokyo"}, false},
-		{"tailscale/*", target.ID{Source: "tailscale", Key: "berlin"}, true},
-		{"tailscale/*", target.ID{Source: "lima", Key: "berlin"}, false},
-		{"docker/heap*", target.ID{Source: "docker", Key: "heaplab-2.35"}, true},
-		{"*/*", target.ID{Source: target.ConfigSource, Key: "mine"}, false},
-	} {
-		if got := (Overlay{Match: c.match}).Matches(c.id); got != c.want {
-			t.Errorf("%q against %v: got %v", c.match, c.id, got)
-		}
 	}
 }
 
@@ -109,7 +90,7 @@ discovered:
   - { match: lima/d, modes: [{ name: a, multiplexer: screen }] }
 `)
 	overlays, err := doc.Overlays()
-	if len(overlays) != 1 || overlays[0].Group != "work" {
+	if len(overlays) != 1 || overlays[0].Match != "lima/good" {
 		t.Errorf("the good one survives, got %+v", overlays)
 	}
 	for _, want := range []string{
