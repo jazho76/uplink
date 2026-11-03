@@ -16,7 +16,7 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # down    host-side stop, run by ctrl+x.
 # logs    host-side command whose output fills the log view (ctrl+l). Left
 #         out means the target's journal, when it has journalctl; "" means none.
-# watch   true polls status in the background, not only while selected.
+# watch   true checks status in the background, not only while selected.
 # stats   metrics shown while selected, measured in one probe through exec:
 #         gauge (label, value, max, unit) and text (label, value, unit).
 #         unit is bytes or seconds. A name instead of a metric adds a
@@ -31,11 +31,12 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # {name} in a command becomes the target's name. Top-level keys starting with
 # x- hold YAML anchors for values targets share.
 
-# Providers list machines that other tools already know about. Without a
-# discover section, local (this machine) runs, lima (its VMs) when limactl is
-# installed, docker (its containers) when the daemon is running, and tailscale
-# (its peers) when connected. A discover list runs exactly the providers it names; "discover: []" turns
-# discovery off.
+# Providers list machines that other tools already know about, and report
+# whether each is alive. Without a discover section every provider runs: local
+# (this machine), lima (its VMs), docker (its containers) and tailscale (its
+# peers). One that isn't available stays quiet until it is. A discover list runs
+# exactly the providers it names and reports the ones that aren't available;
+# "discover: []" turns discovery off.
 # discover: [local, lima]
 
 # default_mode is what targets without modes open by default: tmux, zellij, or
