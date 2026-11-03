@@ -1,4 +1,4 @@
-package tui
+package dashboard
 
 import "github.com/charmbracelet/lipgloss"
 
