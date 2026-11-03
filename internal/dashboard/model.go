@@ -37,6 +37,7 @@ func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), b
 	targets, problems := load()
 	m := newModel(targets, backend)
 	m.runner.Load, m.edit = load, edit
+	defer m.runner.Stop()
 	m.state, m.startup = launcher.New(targets, problems).Select(m.selected().id()).Apply(time.Now(), launcher.Started{})
 
 	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
@@ -46,7 +47,7 @@ func Run(load func() ([]target.Target, error), edit func() (*exec.Cmd, error), b
 func newModel(targets []target.Target, backend launcher.Backend) model {
 	m := model{
 		state:  launcher.New(targets, nil),
-		runner: &launcher.Runner{Backend: backend},
+		runner: launcher.NewRunner(backend, nil),
 		exec:   tea.ExecProcess,
 	}
 	m.rebuild(targets)
