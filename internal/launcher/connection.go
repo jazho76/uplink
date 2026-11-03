@@ -94,6 +94,15 @@ func (s *State) cancelConnection() {
 	}
 }
 
+func (s *State) connectionEnded(now time.Time, e ConnectionEnded) []Effect {
+	if s.connection.Phase == PhaseEntering {
+		s.connection = Connection{}
+	}
+	s.notice = connectionNotice(e)
+	s.markStale(s.selected)
+	return append(s.rediscover(now, s.selected.Source), s.refreshSelected(now)...)
+}
+
 func connectionNotice(e ConnectionEnded) string {
 	var exitErr *exec.ExitError
 	switch {

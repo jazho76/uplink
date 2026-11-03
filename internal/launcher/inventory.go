@@ -16,6 +16,11 @@ type discovery struct {
 	epoch    int
 }
 
+func (s *State) started() []Effect {
+	s.loading = true
+	return s.requestConfig("")
+}
+
 func (s *State) requestConfig(notice string) []Effect {
 	s.generation++
 	return []Effect{ReadConfig{Generation: s.generation, Notice: notice}}

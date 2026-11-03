@@ -75,106 +75,62 @@ func (s State) Apply(now time.Time, event Event) (State, []Effect) {
 func (s *State) apply(now time.Time, event Event) []Effect {
 	switch e := event.(type) {
 	case Started:
-		s.loading = true
-		return s.requestConfig("")
-
+		return s.started()
 	case Ticked:
-		effects := s.checkSelected()
-		effects = append(effects, s.peekSelected()...)
-		effects = append(effects, s.checkWatched(now)...)
-		return append(effects, s.dueDiscoveries(now)...)
-
+		return s.ticked(now)
 	case Selected:
-		if s.connection.Target != e.ID {
-			s.cancelConnection()
-		}
-		s.selected, s.modeName = e.ID, ""
-		return s.refreshSelected(now)
-
+		return s.selectTarget(now, e.ID)
 	case ModeCycled:
 		s.cycleMode(e.Delta)
-
 	case PowerRequested:
-		if s.connection.Phase == PhaseAwaitingStatus {
-			s.connection = Connection{}
-		}
-		return s.requestPower(e.Operation)
-
+		return s.powerRequested(e.Operation)
 	case PowerDone:
 		return s.powerDone(now, e)
-
 	case ConnectRequested:
 		return s.requestConnection(now)
-
 	case ConnectionCancelled:
 		s.cancelConnection()
-
 	case ConnectionEnded:
-		if s.connection.Phase == PhaseEntering {
-			s.connection = Connection{}
-		}
-		s.notice = connectionNotice(e)
-		s.markStale(s.selected)
-		return append(s.rediscover(now, s.selected.Source), s.refreshSelected(now)...)
-
+		return s.connectionEnded(now, e)
 	case LogsOpened:
 		return s.openLogs()
-
 	case LogsClosed:
 		s.logOpen = false
-
 	case LogTicked:
-		if s.logOpen && e.Round == s.logRound {
-			return []Effect{ViewLogs{Target: s.logTarget, Round: s.logRound}}
-		}
-
+		return s.logTicked(e)
 	case LogsPeeked:
-		current := s.entries[e.ID]
-		current.peeking = false
-		s.entries[e.ID] = current
-		if e.ID == s.selected {
-			s.peek = logPeek{id: e.ID, text: e.Text, at: now}
-		}
-
+		s.logsPeeked(now, e)
 	case LogsViewed:
-		if s.logOpen && e.Round == s.logRound {
-			s.logText = e.Text
-			return []Effect{ScheduleLogTick{Round: s.logRound}}
-		}
-
+		return s.logsViewed(e)
 	case Checked:
-		accepted := s.settle(now, e)
-		if e.ID != s.selected {
-			return nil
-		}
-		var effects []Effect
-		if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Status == target.StatusUp {
-			effects = s.inspect(t)
-		}
-		if accepted {
-			effects = append(effects, s.resolveConnection(e.ID)...)
-		}
-		return append(effects, s.peekSelectedIfStale(now)...)
-
+		return s.checked(now, e)
 	case Inspected:
-		s.inspected(now, e)
-		if e.ID == s.selected {
-			return s.peekSelectedIfStale(now)
-		}
-
+		return s.inspectionDone(now, e)
 	case ReloadRequested:
 		return s.requestConfig(e.Notice)
-
 	case ConfigRead:
 		return s.configRead(now, e)
-
 	case DiscoveryDone:
 		return s.discoveryDone(now, e)
-
 	case NoticeSet:
 		s.notice = e.Text
 	}
 	return nil
+}
+
+func (s *State) ticked(now time.Time) []Effect {
+	effects := s.checkSelected()
+	effects = append(effects, s.peekSelected()...)
+	effects = append(effects, s.checkWatched(now)...)
+	return append(effects, s.dueDiscoveries(now)...)
+}
+
+func (s *State) selectTarget(now time.Time, id target.ID) []Effect {
+	if s.connection.Target != id {
+		s.cancelConnection()
+	}
+	s.selected, s.modeName = id, ""
+	return s.refreshSelected(now)
 }
 
 func (s State) targetByID(id target.ID) (target.Target, bool) {

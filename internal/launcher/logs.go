@@ -69,3 +69,27 @@ func (s *State) openLogs() []Effect {
 	s.logRound++
 	return []Effect{ViewLogs{Target: t, Round: s.logRound}}
 }
+
+func (s *State) logTicked(e LogTicked) []Effect {
+	if s.logOpen && e.Round == s.logRound {
+		return []Effect{ViewLogs{Target: s.logTarget, Round: s.logRound}}
+	}
+	return nil
+}
+
+func (s *State) logsPeeked(now time.Time, e LogsPeeked) {
+	current := s.entries[e.ID]
+	current.peeking = false
+	s.entries[e.ID] = current
+	if e.ID == s.selected {
+		s.peek = logPeek{id: e.ID, text: e.Text, at: now}
+	}
+}
+
+func (s *State) logsViewed(e LogsViewed) []Effect {
+	if s.logOpen && e.Round == s.logRound {
+		s.logText = e.Text
+		return []Effect{ScheduleLogTick{Round: s.logRound}}
+	}
+	return nil
+}

@@ -28,6 +28,13 @@ func (s State) CanPower(t target.Target, operation Operation) bool {
 	return command != "" && observation.Operation == OperationNone && observation.Status != settled
 }
 
+func (s *State) powerRequested(operation Operation) []Effect {
+	if s.connection.Phase == PhaseAwaitingStatus {
+		s.connection = Connection{}
+	}
+	return s.requestPower(operation)
+}
+
 func (s *State) requestPower(operation Operation) []Effect {
 	t, ok := s.selectedTarget()
 	if !ok || !s.CanPower(t, operation) {

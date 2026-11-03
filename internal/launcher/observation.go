@@ -104,6 +104,21 @@ func (s *State) checkWatched(now time.Time) []Effect {
 	return effects
 }
 
+func (s *State) checked(now time.Time, e Checked) []Effect {
+	accepted := s.settle(now, e)
+	if e.ID != s.selected {
+		return nil
+	}
+	var effects []Effect
+	if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Status == target.StatusUp {
+		effects = s.inspect(t)
+	}
+	if accepted {
+		effects = append(effects, s.resolveConnection(e.ID)...)
+	}
+	return append(effects, s.peekSelectedIfStale(now)...)
+}
+
 func (s *State) settle(now time.Time, e Checked) bool {
 	current := s.entries[e.ID]
 	current.checking = false
@@ -157,6 +172,14 @@ func (s *State) observeReported(now time.Time, d inventory.Discovered) {
 		current.Stats.At, current.Tools.At, current.Sessions.At = time.Time{}, time.Time{}, time.Time{}
 	}
 	s.entries[d.Target.ID] = current
+}
+
+func (s *State) inspectionDone(now time.Time, e Inspected) []Effect {
+	s.inspected(now, e)
+	if e.ID == s.selected {
+		return s.peekSelectedIfStale(now)
+	}
+	return nil
 }
 
 func (s *State) inspected(now time.Time, e Inspected) {
