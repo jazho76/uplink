@@ -2,7 +2,12 @@ package dashboard
 
 import (
 	"fmt"
+	"math"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/jazho76/uplink/internal/target"
 )
 
 func formatBytes(n uint64) string {
@@ -33,4 +38,34 @@ func formatDuration(d time.Duration) string {
 	default:
 		return fmt.Sprintf("%ds", int(d.Seconds()))
 	}
+}
+
+func inUnit(r target.Reading, v float64) string {
+	switch r.Metric.Unit {
+	case target.UnitBytes:
+		return formatBytes(uint64(v))
+	case target.UnitSeconds:
+		return formatDuration(time.Duration(v * float64(time.Second)))
+	default:
+		return number(v)
+	}
+}
+
+func number(v float64) string {
+	if v == math.Trunc(v) {
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return fmt.Sprintf("%.2f", v)
+}
+
+func amount(used, total uint64) string {
+	u, t := formatBytes(used), formatBytes(total)
+	if unit := unitOf(t); unit != "" && strings.HasSuffix(u, unit) {
+		return strings.TrimSuffix(u, unit) + "/" + t
+	}
+	return u + "/" + t
+}
+
+func unitOf(size string) string {
+	return strings.TrimLeft(size, "0123456789.")
 }
