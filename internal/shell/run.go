@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const maxOutput = 4 << 20
+
 func Stream(bin string, args ...string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Stdout = os.Stdout
@@ -32,15 +34,42 @@ func NonInteractive(ctx context.Context, limit time.Duration, stdin, bin string,
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
+	stdout, stderr := &tailBuffer{limit: maxOutput}, &tailBuffer{limit: maxOutput}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitErr.Stderr = stderr.Bytes()
+	}
+	out := strings.TrimSpace(string(stdout.Bytes()))
 	switch {
 	case err == nil:
-		return strings.TrimSpace(string(out)), nil
+		return out, nil
 	case ctx.Err() != nil:
-		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w: %w", line(bin, args), ctx.Err(), err)
+		return out, fmt.Errorf("%s: %w: %w", line(bin, args), ctx.Err(), err)
 	default:
-		return strings.TrimSpace(string(out)), fmt.Errorf("%s: %w", line(bin, args), err)
+		return out, fmt.Errorf("%s: %w", line(bin, args), err)
 	}
+}
+
+type tailBuffer struct {
+	data  []byte
+	limit int
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.data = append(b.data, p...)
+	if len(b.data) > 2*b.limit {
+		b.data = append(b.data[:0], b.data[len(b.data)-b.limit:]...)
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) Bytes() []byte {
+	if len(b.data) > b.limit {
+		return b.data[len(b.data)-b.limit:]
+	}
+	return b.data
 }
 
 func ExitCode(err error) (int, bool) {

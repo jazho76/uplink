@@ -44,3 +44,23 @@ func TestTimeoutIsVisibleAndAFailureIsNot(t *testing.T) {
 		t.Errorf("a cancelled command should read as interrupted, got %v", err)
 	}
 }
+
+func TestOutputKeepsOnlyTheTailOfAFlood(t *testing.T) {
+	out, err := NonInteractive(context.Background(), 20*time.Second, "", "sh", "-c", "head -c 12000000 /dev/zero | tr '\\0' x; echo; echo the-end")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) > maxOutput || !strings.HasSuffix(out, "the-end") {
+		t.Errorf("want the last %d bytes with the end kept, got %d", maxOutput, len(out))
+	}
+}
+
+func TestFailureStillCarriesItsStderr(t *testing.T) {
+	_, err := NonInteractive(context.Background(), time.Second, "", "sh", "-c", "echo first >&2; echo why >&2; exit 3")
+	if got := StderrTail(err); got != "why" {
+		t.Errorf("got %q from %v", got, err)
+	}
+	if code, ok := ExitCode(err); !ok || code != 3 {
+		t.Errorf("got %d, %v", code, ok)
+	}
+}
