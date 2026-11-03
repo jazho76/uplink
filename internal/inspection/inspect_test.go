@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jazho76/uplink/internal/inspection/multiplexer"
+	"github.com/jazho76/uplink/internal/multiplexer"
 	"github.com/jazho76/uplink/internal/target"
 )
 

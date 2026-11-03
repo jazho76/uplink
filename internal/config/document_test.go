@@ -11,9 +11,9 @@ import (
 	"testing"
 
 	"github.com/jazho76/uplink/internal/config"
-	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/shell"
+	"github.com/jazho76/uplink/internal/stats"
 	"github.com/jazho76/uplink/internal/target"
 )
 
