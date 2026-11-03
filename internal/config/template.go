@@ -42,6 +42,16 @@ const template = `# uplink config. Each target is a machine you can open a shell
 # "discover: []" turns discovery off.
 # discover: [local, lima]
 
+# discovered adjusts or hides what providers find, in order, with later entries
+# winning field by field. match is provider/name and may use * and ?. An entry
+# can set hide, group, logs, stats and modes, in the same forms as targets.
+# How a discovered target is reached, its status and starting or stopping it
+# stay with its provider.
+# discovered:
+#   - { match: tailscale/*, hide: true }
+#   - { match: tailscale/box, hide: false }
+#   - { match: lima/dev, group: work, stats: [linux] }
+
 # default_mode is what targets without modes open by default: tmux, zellij, or
 # shell.
 # Left out means tmux. If a target lacks the tool, you get its shell instead.
