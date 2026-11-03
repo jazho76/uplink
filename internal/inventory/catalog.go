@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/jazho76/uplink/internal/config"
@@ -18,6 +19,7 @@ type Plan struct {
 	Explicit    bool
 	Invalid     bool
 	Declared    []target.Target
+	Overlays    []config.Overlay
 	DefaultMode string
 	Problems    error
 }
@@ -46,13 +48,30 @@ func (c Catalog) ReadPlan() Plan {
 		known = append(known, name)
 	}
 	declared, err := doc.Resolve()
+	errs = append(errs, err)
+	overlays, err := doc.Overlays()
+	errs = append(errs, err)
+	errs = append(errs, c.unknownOverlayProviders(overlays)...)
 	return Plan{
 		Providers:   known,
 		Explicit:    explicit,
 		Declared:    declared,
+		Overlays:    overlays,
 		DefaultMode: doc.DefaultMode,
-		Problems:    errors.Join(append(errs, err)...),
+		Problems:    errors.Join(errs...),
 	}
+}
+
+func (c Catalog) unknownOverlayProviders(overlays []config.Overlay) []error {
+	var errs []error
+	for _, overlay := range overlays {
+		name := overlay.Provider()
+		isPattern := strings.ContainsAny(name, `*?[\`)
+		if !isPattern && !slices.ContainsFunc(c.Providers, func(p Provider) bool { return p.Name() == name }) {
+			errs = append(errs, fmt.Errorf("discovered: unknown provider %q in %q", name, overlay.Match))
+		}
+	}
+	return errs
 }
 
 func (c Catalog) Discover(ctx context.Context, name string) ([]Discovered, error) {
@@ -142,9 +161,30 @@ func (i Inventory) Merged() ([]Discovered, error) {
 		found = append(found, Found{Source: name, Discovered: r.found, Err: r.err})
 	}
 	discovered, errs := collect(found...)
+	adjusted := applyOverlays(discovered, i.plan.Overlays)
 	declared, declaredErrs := collect(declaredFound(i.plan.Declared))
-	all, err := applyDefaults(append(discovered, declared...), i.plan.DefaultMode)
+	all, err := applyDefaults(append(adjusted, declared...), i.plan.DefaultMode)
 	return all, errors.Join(append(append([]error{i.plan.Problems}, errs...), append(declaredErrs, err)...)...)
+}
+
+func applyOverlays(discovered []Discovered, overlays []config.Overlay) []Discovered {
+	var kept []Discovered
+	for _, d := range discovered {
+		hidden := false
+		for _, overlay := range overlays {
+			if !overlay.Matches(d.Target.ID) {
+				continue
+			}
+			d.Target = overlay.Apply(d.Target)
+			if overlay.Hide != nil {
+				hidden = *overlay.Hide
+			}
+		}
+		if !hidden {
+			kept = append(kept, d)
+		}
+	}
+	return kept
 }
 
 func Load(ctx context.Context, catalog Catalog) ([]target.Target, error) {

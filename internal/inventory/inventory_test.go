@@ -395,3 +395,114 @@ func TestBadConfigStillRunsProviders(t *testing.T) {
 		t.Errorf("a bad config contributes nothing and providers still run, got %q and %v", ids(targets), err)
 	}
 }
+
+func discoveredBox(key string) Discovered {
+	return Discovered{Status: target.StatusDown, Target: target.Target{ID: target.ID{Key: key}, Reach: target.Reach{Interactive: []string{"ssh", key}}}}
+}
+
+func overlaid(t *testing.T, body string) []Discovered {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	catalog := Catalog{Path: path, Providers: []Provider{fakeProvider{name: "lima", available: true}, fakeProvider{name: "tailscale", available: true}}}
+	plan := catalog.ReadPlan()
+	if plan.Problems != nil {
+		t.Fatalf("got %v", plan.Problems)
+	}
+	inventory := Inventory{}.WithPlan(plan).
+		WithResult("lima", []Discovered{discoveredBox("nakama"), discoveredBox("tokyo")}, nil).
+		WithResult("tailscale", []Discovered{discoveredBox("berlin"), discoveredBox("phone")}, nil)
+	merged, err := inventory.Merged()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return merged
+}
+
+func TestHiddenTargetsLeaveAndLaterEntriesCanBringThemBack(t *testing.T) {
+	merged := overlaid(t, `
+discovered:
+  - { match: tailscale/*, hide: true }
+  - { match: tailscale/berlin, hide: false }
+`)
+	if got := ids(Targets(merged)); got != "lima/nakama lima/tokyo tailscale/berlin" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestLaterEntriesWinFieldByField(t *testing.T) {
+	merged := overlaid(t, `
+discovered:
+  - { match: lima/*, group: all, logs: "first" }
+  - { match: lima/nakama, group: mine }
+`)
+	nakama, tokyo := merged[0].Target, merged[1].Target
+	if nakama.Group != "mine" || nakama.Logs.Command != "first" {
+		t.Errorf("the later group wins and the earlier logs stay, got %+v", nakama)
+	}
+	if tokyo.Group != "all" {
+		t.Errorf("got %+v", tokyo)
+	}
+}
+
+func TestOverlaysKeepStatusAndModesKeepDefaults(t *testing.T) {
+	merged := overlaid(t, `
+default_mode: shell
+discovered:
+  - { match: lima/nakama, group: work }
+  - { match: lima/tokyo, modes: [{ name: mine }] }
+`)
+	if merged[0].Status != target.StatusDown {
+		t.Errorf("status stays the provider's, got %+v", merged[0])
+	}
+	if got := merged[0].Target.Modes[0].Name; got != "shell" {
+		t.Errorf("an adjusted target still gets default modes, got %q", got)
+	}
+	if got := modeNames(merged[1].Target); !slices.Equal(got, []string{"mine"}) {
+		t.Errorf("declared modes replace them, got %v", got)
+	}
+	if argv := merged[1].Target.Modes[0].Argv; argv[0] != "ssh" || argv[1] != "tokyo" {
+		t.Errorf("modes go through the discovered reach, got %q", argv)
+	}
+}
+
+func TestOverlaysLeaveDeclaredTargetsAlone(t *testing.T) {
+	merged := overlaid(t, `
+targets:
+  - { name: mine, group: own }
+discovered:
+  - { match: "*/*", hide: true }
+`)
+	if got := ids(Targets(merged)); got != "mine" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestUnknownProviderInAMatchIsReported(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	body := "discovered:\n  - { match: lim/nakama, hide: true }\n  - { match: \"*/x\", hide: true }\n  - { match: near/box, group: g }\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := Catalog{Path: path, Providers: providers}.ReadPlan()
+	if plan.Problems == nil || !strings.Contains(plan.Problems.Error(), `unknown provider "lim"`) {
+		t.Errorf("a typo must not be silently ignored, got %v", plan.Problems)
+	}
+	if strings.Contains(plan.Problems.Error(), "near") || strings.Contains(plan.Problems.Error(), "*") {
+		t.Errorf("only the typo is reported, got %v", plan.Problems)
+	}
+}
+
+func TestBadConfigDropsOverlays(t *testing.T) {
+	merged := overlaid(t, "discovered:\n  - { match: lima/nakama, hide: true }\n")
+	if len(merged) != 3 {
+		t.Fatalf("got %d", len(merged))
+	}
+	inventory := Inventory{}.WithPlan(Plan{Providers: []string{"lima"}, Overlays: nil, Invalid: true})
+	inventory = inventory.WithResult("lima", []Discovered{discoveredBox("nakama")}, nil)
+	if all, _ := inventory.Merged(); len(all) != 1 {
+		t.Errorf("a config that can't be read contributes nothing, got %v", all)
+	}
+}

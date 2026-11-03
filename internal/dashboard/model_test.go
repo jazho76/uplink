@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/config"
 	"github.com/jazho76/uplink/internal/inventory"
 	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
@@ -2043,5 +2044,27 @@ func TestEnterPinsTheSelection(t *testing.T) {
 	m = arrive(m, "a", first)
 	if got := m.selected().name(); got != "dev" {
 		t.Errorf("a provider answering must not move a target you chose, got %q", got)
+	}
+}
+
+func TestHidingTheSelectedTargetMovesToANeighbor(t *testing.T) {
+	m := startedWithProviders(t, "lima")
+	m = arrive(m, "lima", discovered("dev", target.StatusUp), discovered("other", target.StatusUp))
+	m = key(m, "down")
+	if got := m.selected().name(); got != "other" {
+		t.Fatalf("want other, got %q", got)
+	}
+
+	hide := true
+	plan := inventory.Plan{Providers: []string{"lima"}, Overlays: []config.Overlay{{Match: "lima/other", Hide: &hide}}}
+	m.runner.Catalog = &fakeCatalog{plan: plan}
+	next, _ := reload(m, "")
+	m = next.(model)
+	want := target.ID{Source: "lima", Key: "dev"}
+	if m.selected().id() != want || m.state.Selection() != want {
+		t.Errorf("selection and core must agree on the neighbor, got %v and %v", m.selected().id(), m.state.Selection())
+	}
+	if got := ansi.Strip(m.View()); strings.Contains(got, "other") {
+		t.Errorf("a hidden target is not listed, got:\n%s", got)
 	}
 }
