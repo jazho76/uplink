@@ -1300,9 +1300,9 @@ func TestPaneSummaryWaitsForKnownStatuses(t *testing.T) {
 	}
 }
 
-func TestClipMeasuresDisplayWidth(t *testing.T) {
+func TestTruncateMeasuresDisplayWidth(t *testing.T) {
 	if got := truncate("日本語テスト", 4); lipgloss.Width(got) != 4 {
-		t.Errorf("clip should count display cells, got %q spanning %d", got, lipgloss.Width(got))
+		t.Errorf("truncate should count display cells, got %q spanning %d", got, lipgloss.Width(got))
 	}
 }
 

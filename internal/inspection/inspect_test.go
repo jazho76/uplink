@@ -405,3 +405,17 @@ func TestRunNeedsACommand(t *testing.T) {
 		t.Error("no argv cannot run")
 	}
 }
+
+func TestOnlyKnownToolsAreReported(t *testing.T) {
+	got := Parse("tool tmux\ntool \x1b[31mevil\ntool journalctl\n", target.StatsPolicy{}).Tools
+	if want := []string{"tmux", target.ToolJournal}; !slices.Equal(got, want) {
+		t.Errorf("want %q, got %q", want, got)
+	}
+}
+
+func TestCarriageReturnsDoNotConfuseParsing(t *testing.T) {
+	got := Parse("tool tmux\r\nos Linux\r\n", target.StatsPolicy{})
+	if got.OS != "Linux" || !slices.Equal(got.Tools, []string{"tmux"}) {
+		t.Errorf("a pty adds carriage returns, got %+v", got)
+	}
+}

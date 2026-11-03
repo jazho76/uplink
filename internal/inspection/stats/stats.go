@@ -12,7 +12,15 @@ import (
 
 func constantMax(m target.Metric) (float64, bool) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(m.Max), 64)
-	return v, err == nil && !math.IsNaN(v)
+	return v, err == nil && !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+func number(text, unit string) (float64, bool) {
+	v, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || (unit != "" && v < 0) {
+		return 0, false
+	}
+	return v, true
 }
 
 func maxCommand(m target.Metric) string {
@@ -23,7 +31,8 @@ func maxCommand(m target.Metric) string {
 }
 
 func capture(tag, command string) string {
-	return fmt.Sprintf(`printf '%%s\n' %s"$($limit sh -c %s </dev/null 2>/dev/null | head -n 1)"`, shell.SingleQuote(tag+" "), shell.SingleQuote(command))
+	pipeline := "sh -c " + shell.SingleQuote(command) + " </dev/null 2>/dev/null | head -n 1"
+	return fmt.Sprintf(`printf '%%s\n' %s"$($limit sh -c %s </dev/null 2>/dev/null)"`, shell.SingleQuote(tag+" "), shell.SingleQuote(pipeline))
 }
 
 func Script(metrics []target.Metric) string {
@@ -58,19 +67,18 @@ func Parse(out string, metrics []target.Metric) []target.Reading {
 	readings := make([]target.Reading, len(metrics))
 	for i, m := range metrics {
 		r := target.Reading{Metric: m, Text: shell.Plain(values[i])}
-		value, valueErr := strconv.ParseFloat(values[i], 64)
+		value, valueOK := number(values[i], m.Unit)
 		switch {
 		case m.Type == target.TypeText && m.Unit == "":
 			r.OK = r.Text != ""
 		case m.Type == target.TypeText:
-			r.Value, r.OK = value, valueErr == nil
+			r.Value, r.OK = value, valueOK
 		default:
-			ceiling, constant := constantMax(m)
-			var maxErr error
-			if !constant {
-				ceiling, maxErr = strconv.ParseFloat(maxes[i], 64)
+			ceiling, ceilingOK := constantMax(m)
+			if !ceilingOK {
+				ceiling, ceilingOK = number(maxes[i], m.Unit)
 			}
-			r.Value, r.Max, r.OK = value, ceiling, valueErr == nil && maxErr == nil
+			r.Value, r.Max, r.OK = value, ceiling, valueOK && ceilingOK
 		}
 		readings[i] = r
 	}

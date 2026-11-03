@@ -1,6 +1,7 @@
 package inspection
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/jazho76/uplink/internal/inspection/multiplexer"
@@ -18,6 +19,9 @@ var toolsSection = section{
 		return `for tool in ` + strings.Join(tools(), " ") + `; do command -v "$tool" >/dev/null 2>&1 && echo "` + toolTag + ` $tool"; done`
 	},
 	parse: func(_ target.StatsPolicy, out string, environment *target.Environment) {
-		environment.Tools = tagged(out, toolTag)
+		known := tools()
+		environment.Tools = slices.DeleteFunc(tagged(out, toolTag), func(tool string) bool {
+			return !slices.Contains(known, tool)
+		})
 	},
 }

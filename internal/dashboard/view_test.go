@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jazho76/uplink/internal/inspection/stats"
 	"github.com/jazho76/uplink/internal/launcher"
 	"github.com/jazho76/uplink/internal/target"
 )
@@ -546,5 +547,22 @@ func TestPaneSummaryOnlyHidesForNeverChecked(t *testing.T) {
 	}
 	if got := m.paneSummary(vms); got != "0 up" {
 		t.Errorf("a stuck unknown must not hide the summary, got %q", got)
+	}
+}
+
+func TestNaNFromATargetShowsAQuestionMark(t *testing.T) {
+	metric := target.Metric{Type: target.TypeGauge, Label: "gpu", Value: "x", Max: "10"}
+	box := vm("box")
+	box.Stats = target.StatsPolicy{Metrics: []target.Metric{metric}}
+	m, _ := newTestModel()
+	m = focus(sized(withTargets(m, box)), "box")
+
+	readings := stats.Parse("0 value NaN\n", box.Stats.Metrics)
+	m = reported(m, configID("box"), target.Environment{Readings: readings})
+	if got := preview(m); !strings.Contains(got, "gpu") || !strings.Contains(got, "?") {
+		t.Errorf("want the gauge marked missing, got:\n%s", got)
+	}
+	if got := m.View(); got == "" {
+		t.Error("the dashboard must survive it")
 	}
 }

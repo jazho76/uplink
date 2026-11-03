@@ -39,6 +39,7 @@ func script(policy target.StatsPolicy) string {
 }
 
 func Parse(out string, policy target.StatsPolicy) target.Environment {
+	out = strings.ReplaceAll(out, "\r", "")
 	var environment target.Environment
 	for _, s := range sections {
 		s.parse(policy, out, &environment)

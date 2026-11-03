@@ -169,3 +169,68 @@ func TestTextIsCleanedAtTheBoundary(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestValuesThatCannotBeShownAreMissing(t *testing.T) {
+	gauge := target.Metric{Type: target.TypeGauge, Label: "g", Value: "x", Max: "10"}
+	bytes := target.Metric{Type: target.TypeGauge, Label: "b", Value: "x", Max: "10", Unit: target.UnitBytes}
+	up := target.Metric{Type: target.TypeText, Label: "u", Value: "x", Unit: target.UnitSeconds}
+	for _, c := range []struct {
+		metric target.Metric
+		value  string
+		ok     bool
+	}{
+		{gauge, "5", true},
+		{gauge, "-1", true},
+		{gauge, "NaN", false},
+		{gauge, "nan", false},
+		{gauge, "Inf", false},
+		{gauge, "-Inf", false},
+		{gauge, "1e999", false},
+		{bytes, "-1", false},
+		{bytes, "1024", true},
+		{up, "-5", false},
+		{up, "NaN", false},
+		{up, "60", true},
+	} {
+		r := Parse("0 value "+c.value+"\n", []target.Metric{c.metric})[0]
+		if r.OK != c.ok {
+			t.Errorf("%s %q: want ok %v, got %+v", c.metric.Label, c.value, c.ok, r)
+		}
+	}
+
+	computed := target.Metric{Type: target.TypeGauge, Label: "g", Value: "x", Max: "y"}
+	for _, ceiling := range []string{"NaN", "Inf"} {
+		if r := Parse("0 value 1\n0 max "+ceiling+"\n", []target.Metric{computed})[0]; r.OK {
+			t.Errorf("max %q should be missing, got %+v", ceiling, r)
+		}
+	}
+	constantInf := target.Metric{Type: target.TypeGauge, Label: "g", Value: "x", Max: "Inf"}
+	if _, constant := constantMax(constantInf); constant {
+		t.Error("Inf is no constant to divide by")
+	}
+}
+
+func TestBackgroundedMetricCannotStallTheScript(t *testing.T) {
+	previous := metricTimeout
+	metricTimeout = time.Second
+	t.Cleanup(func() { metricTimeout = previous })
+
+	start := time.Now()
+	readings := runLocally(t, []target.Metric{
+		{Type: target.TypeText, Label: "silent", Value: "sleep 30 &"},
+		{Type: target.TypeText, Label: "chatty", Value: "sleep 30 & echo early"},
+		{Type: target.TypeText, Label: "after", Value: "echo fine"},
+	})
+	if readings[0].OK {
+		t.Errorf("nothing came out, got %+v", readings[0])
+	}
+	if r := readings[1]; !r.OK || r.Text != "early" {
+		t.Errorf("got %+v", r)
+	}
+	if r := readings[2]; !r.OK || r.Text != "fine" {
+		t.Errorf("got %+v", r)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("a backgrounded child held the probe for %s", elapsed)
+	}
+}
