@@ -136,14 +136,15 @@ func unknownStatus(found []Discovered, reason string) []Discovered {
 }
 
 func (i Inventory) Merged() ([]Discovered, error) {
-	found := make([]Found, 0, len(i.plan.Providers)+1)
+	found := make([]Found, 0, len(i.plan.Providers))
 	for _, name := range i.plan.Providers {
 		r := i.results[name]
 		found = append(found, Found{Source: name, Discovered: r.found, Err: r.err})
 	}
-	found = append(found, declaredFound(i.plan.Declared))
-	merged, err := Merge(i.plan.DefaultMode, found...)
-	return merged, errors.Join(i.plan.Problems, err)
+	discovered, errs := collect(found...)
+	declared, declaredErrs := collect(declaredFound(i.plan.Declared))
+	all, err := applyDefaults(append(discovered, declared...), i.plan.DefaultMode)
+	return all, errors.Join(append(append([]error{i.plan.Problems}, errs...), append(declaredErrs, err)...)...)
 }
 
 func Load(ctx context.Context, catalog Catalog) ([]target.Target, error) {

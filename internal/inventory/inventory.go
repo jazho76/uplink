@@ -62,16 +62,18 @@ func Targets(merged []Discovered) []target.Target {
 }
 
 func Merge(defaultMode string, found ...Found) ([]Discovered, error) {
+	merged, errs := collect(found...)
+	all, err := applyDefaults(merged, defaultMode)
+	return all, errors.Join(append(errs, err)...)
+}
+
+func collect(found ...Found) ([]Discovered, []error) {
 	var (
-		merged  []Discovered
-		errs    []error
-		sources = map[string]bool{}
-		seen    = map[target.ID]bool{}
+		collected []Discovered
+		errs      []error
+		sources   = map[string]bool{}
+		seen      = map[target.ID]bool{}
 	)
-	if choices := modeChoices(); defaultMode != "" && !slices.Contains(choices, defaultMode) {
-		errs = append(errs, fmt.Errorf("default_mode: unknown mode %q; use one of %s", defaultMode, strings.Join(choices, ", ")))
-		defaultMode = ""
-	}
 	for _, source := range found {
 		if sources[source.Source] {
 			errs = append(errs, fmt.Errorf("duplicate source %q", source.Source))
@@ -82,21 +84,34 @@ func Merge(defaultMode string, found ...Found) ([]Discovered, error) {
 			errs = append(errs, fmt.Errorf("%s: %w", source.Source, source.Err))
 		}
 		for i, d := range source.Discovered {
-			t := d.Target
-			t.ID.Source = source.Source
-			if err := target.ValidateKey(t.ID.Key); err != nil {
-				errs = append(errs, fmt.Errorf("target %s: %w", label(t, i), err))
+			d.Target.ID.Source = source.Source
+			if err := target.ValidateKey(d.Target.ID.Key); err != nil {
+				errs = append(errs, fmt.Errorf("target %s: %w", label(d.Target, i), err))
 				continue
 			}
-			if seen[t.ID] {
-				errs = append(errs, fmt.Errorf("duplicate target %q", t.ID))
+			if seen[d.Target.ID] {
+				errs = append(errs, fmt.Errorf("duplicate target %q", d.Target.ID))
 				continue
 			}
-			seen[t.ID] = true
-			merged = append(merged, Discovered{Target: withDefaults(t, defaultMode), Status: d.Status, Reason: d.Reason})
+			seen[d.Target.ID] = true
+			collected = append(collected, d)
 		}
 	}
-	return merged, errors.Join(errs...)
+	return collected, errs
+}
+
+func applyDefaults(merged []Discovered, defaultMode string) ([]Discovered, error) {
+	var err error
+	if choices := modeChoices(); defaultMode != "" && !slices.Contains(choices, defaultMode) {
+		err = fmt.Errorf("default_mode: unknown mode %q; use one of %s", defaultMode, strings.Join(choices, ", "))
+		defaultMode = ""
+	}
+	all := make([]Discovered, len(merged))
+	for i, d := range merged {
+		d.Target = withDefaults(d.Target, defaultMode)
+		all[i] = d
+	}
+	return all, err
 }
 
 func withDefaults(t target.Target, defaultMode string) target.Target {
