@@ -40,14 +40,19 @@ const (
 type ConnectionPhase string
 
 const (
-	PhaseNone     ConnectionPhase = ""
-	PhaseStarting ConnectionPhase = "starting"
-	PhaseEntering ConnectionPhase = "entering"
+	PhaseNone           ConnectionPhase = ""
+	PhaseAwaitingStatus ConnectionPhase = "awaiting status"
+	PhaseStarting       ConnectionPhase = "starting"
+	PhaseEntering       ConnectionPhase = "entering"
 )
 
 type Connection struct {
 	Target target.ID
 	Phase  ConnectionPhase
+}
+
+func (c Connection) Cancellable() bool {
+	return c.Phase == PhaseAwaitingStatus || c.Phase == PhaseStarting
 }
 
 type Observation struct {
@@ -168,13 +173,19 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 		s.cycleMode(e.Delta)
 
 	case PowerRequested:
+		if s.connection.Phase == PhaseAwaitingStatus {
+			s.connection = Connection{}
+		}
 		return s.requestPower(e.Operation)
 
 	case PowerDone:
 		return s.powerDone(now, e)
 
 	case ConnectRequested:
-		return s.requestConnection()
+		return s.requestConnection(now)
+
+	case ConnectionCancelled:
+		s.cancelConnection()
 
 	case ConnectionEnded:
 		if s.connection.Phase == PhaseEntering {
@@ -217,6 +228,9 @@ func (s *State) apply(now time.Time, event Event) []Effect {
 		var effects []Effect
 		if t, ok := s.targetByID(e.ID); ok && accepted && e.Full && e.Status == target.StatusUp {
 			effects = s.inspect(t)
+		}
+		if accepted {
+			effects = append(effects, s.resolveConnection(e.ID)...)
 		}
 		return append(effects, s.peekSelectedIfStale(now)...)
 
@@ -351,7 +365,7 @@ func (s State) Logs(t target.Target) string {
 
 func (s *State) openLogs() []Effect {
 	t, ok := s.selectedTarget()
-	if !ok || !s.HasLogs(t) {
+	if !ok || !s.HasLogs(t) || s.connection.Phase != PhaseNone {
 		return nil
 	}
 	s.logText = s.Logs(t)
@@ -362,10 +376,12 @@ func (s *State) openLogs() []Effect {
 
 func (s *State) settle(now time.Time, e Checked) bool {
 	current := s.entries[e.ID]
+	current.checking = false
 	if e.Epoch != current.epoch {
+		s.entries[e.ID] = current
 		return false
 	}
-	current.checking, current.checkedAt = false, now
+	current.checkedAt = now
 	current.Status, current.Reason = e.Status, reasonFor(e.Status, e.Reason)
 	switch {
 	case e.Status == target.StatusUp:
@@ -453,20 +469,52 @@ func verb(operation Operation) string {
 	return "stop"
 }
 
-func (s *State) requestConnection() []Effect {
+func (s *State) requestConnection(now time.Time) []Effect {
 	t, ok := s.selectedTarget()
 	if !ok || s.connection.Phase != PhaseNone {
 		return nil
 	}
 	observation := s.Observation(t.ID)
+	startable := t.StartCommand() != ""
 	switch {
 	case observation.Operation != OperationNone:
 		return nil
-	case observation.Status == target.StatusDown && t.StartCommand() != "":
-		s.connection = Connection{Target: t.ID, Phase: PhaseStarting}
-		return s.requestPower(OperationStarting)
+	case observation.Status == target.StatusDown && startable:
+		return s.start(t.ID)
+	case observation.Status == target.StatusUnknown && startable:
+		s.connection = Connection{Target: t.ID, Phase: PhaseAwaitingStatus}
+		return s.askStatus(now, t)
 	}
 	return s.enter(t.ID)
+}
+
+func (s *State) start(id target.ID) []Effect {
+	s.connection = Connection{Target: id, Phase: PhaseStarting}
+	return s.requestPower(OperationStarting)
+}
+
+func (s *State) askStatus(now time.Time, t target.Target) []Effect {
+	if t.Discovered() {
+		if !s.inventory.Plans(t.ID.Source) || s.discoveries[t.ID.Source].inFlight {
+			return nil
+		}
+		return []Effect{s.discover(now, t.ID.Source)}
+	}
+	if s.entries[t.ID].checking {
+		return nil
+	}
+	return []Effect{s.check(t, true)}
+}
+
+func (s *State) resolveConnection(id target.ID) []Effect {
+	if s.connection != (Connection{Target: id, Phase: PhaseAwaitingStatus}) {
+		return nil
+	}
+	t, ok := s.targetByID(id)
+	if ok && s.Observation(id).Status == target.StatusDown && t.StartCommand() != "" {
+		return s.start(id)
+	}
+	return s.enter(id)
 }
 
 func (s *State) enter(id target.ID) []Effect {
@@ -481,7 +529,7 @@ func (s *State) enter(id target.ID) []Effect {
 }
 
 func (s *State) cancelConnection() {
-	if s.connection.Phase != PhaseEntering {
+	if s.connection.Cancellable() {
 		s.connection = Connection{}
 	}
 }
@@ -549,7 +597,11 @@ func (s *State) discoveryDone(now time.Time, e DiscoveryDone) []Effect {
 	}
 	s.inventory = s.inventory.WithResult(e.Provider, e.Found, e.Err)
 	s.adopt(now)
-	return s.refreshSelected(now)
+	effects := s.refreshSelected(now)
+	if s.connection.Target.Source == e.Provider {
+		effects = append(effects, s.resolveConnection(s.connection.Target)...)
+	}
+	return effects
 }
 
 func (s *State) adopt(now time.Time) {
@@ -563,6 +615,10 @@ func (s *State) adopt(now time.Time) {
 	s.loading = s.loading && !s.inventory.Answered()
 	if _, ok := s.targetByID(s.logTarget.ID); s.logOpen && !ok {
 		s.logOpen = false
+	}
+	if _, ok := s.targetByID(s.connection.Target); s.connection.Cancellable() && !ok {
+		s.notice = fmt.Sprintf("%s is gone", s.connection.Target)
+		s.connection = Connection{}
 	}
 }
 

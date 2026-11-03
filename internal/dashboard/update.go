@@ -50,8 +50,14 @@ func (m model) inventoryChanged(event launcher.Event) (tea.Model, tea.Cmd) {
 func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg.String() {
-	case "ctrl+c", "q", "esc":
+	case "ctrl+c", "q":
 		return m, tea.Quit
+
+	case "esc":
+		if !m.state.Connection().Cancellable() {
+			return m, tea.Quit
+		}
+		cmd = m.send(launcher.ConnectionCancelled{})
 
 	case "up", "k":
 		cmd = m.moveCursor(-1)
@@ -64,6 +70,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd = m.send(launcher.ModeCycled{Delta: -1})
 
 	case "enter":
+		m.pinned = m.selected().id()
 		cmd = m.send(launcher.ConnectRequested{})
 
 	case "ctrl+s":
@@ -72,6 +79,9 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd = m.send(launcher.PowerRequested{Operation: launcher.OperationStopping})
 
 	case "ctrl+e":
+		if m.state.Connection().Phase != launcher.PhaseNone {
+			break
+		}
 		editor, err := m.edit()
 		if err != nil {
 			cmd = m.send(launcher.NoticeSet{Text: fmt.Sprintf("config edit: %v", err)})

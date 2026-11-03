@@ -1958,3 +1958,93 @@ func TestPinnedTargetComesBackAfterVanishing(t *testing.T) {
 		t.Errorf("a docker restart brings you back, got %q", got)
 	}
 }
+
+func waitingOnStartable(t *testing.T) (model, *fakeBackend) {
+	t.Helper()
+	m, backend := newTestModel()
+	box := startable("nakama")
+	box.Check = "true"
+	box.Logs = target.LogSource{Command: "tail"}
+	m = focus(sized(withTargets(m, box, vm("plain"))), "nakama")
+	m = key(m, "enter")
+	if got := m.state.Connection().Phase; got != launcher.PhaseAwaitingStatus {
+		t.Fatalf("want waiting, got %q", got)
+	}
+	return m, backend
+}
+
+func TestPreviewShowsConnectingWithAWayOut(t *testing.T) {
+	m, _ := waitingOnStartable(t)
+	if got := preview(m); !strings.Contains(got, "connecting") || !strings.Contains(got, "cancel") {
+		t.Errorf("want connecting and its hint, got:\n%s", got)
+	}
+}
+
+func TestEscCancelsTheWaitThenQuits(t *testing.T) {
+	m, _ := waitingOnStartable(t)
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatal("the first esc cancels the wait and must not quit")
+		}
+	}
+	m = next.(model)
+	if m.state.Connection().Phase != launcher.PhaseNone {
+		t.Errorf("got %+v", m.state.Connection())
+	}
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("the second esc should quit")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Error("the second esc should quit")
+	}
+}
+
+func TestQStillQuitsWhileWaiting(t *testing.T) {
+	m, _ := waitingOnStartable(t)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	if cmd == nil {
+		t.Fatal("q should quit")
+	}
+	if _, quit := cmd().(tea.QuitMsg); !quit {
+		t.Error("q should quit")
+	}
+}
+
+func TestEditorStaysShutWhileConnecting(t *testing.T) {
+	m, backend := waitingOnStartable(t)
+	key(m, "ctrl+e")
+	if len(backend.sessions) != 0 {
+		t.Errorf("a session must not launch on editor exit, ran %v", backend.sessions)
+	}
+}
+
+func TestWaitResolvesThroughTheRealPath(t *testing.T) {
+	m, backend := newTestModel()
+	box := startable("nakama")
+	box.Check = "check"
+	m = focus(sized(withTargets(m, box)), "nakama")
+	backend.down["nakama"] = true
+
+	next, ask := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = applyCmd(next.(model), ask)
+	if got := strings.Join(backend.hooks, ", "); !strings.Contains(got, "nakama") {
+		t.Errorf("a down answer starts it, ran hooks %q", got)
+	}
+	if got := strings.Join(backend.sessions, ", "); got != "ssh lima-nakama tmux" {
+		t.Errorf("then it connects, ran %q", got)
+	}
+}
+
+func TestEnterPinsTheSelection(t *testing.T) {
+	first := discovered("first", target.StatusUp)
+	first.Target.Group = "first"
+	m := startedWithProviders(t, "a", "b")
+	m = arrive(m, "b", discovered("dev", target.StatusUnknown))
+	m = key(m, "enter")
+	m = arrive(m, "a", first)
+	if got := m.selected().name(); got != "dev" {
+		t.Errorf("a provider answering must not move a target you chose, got %q", got)
+	}
+}

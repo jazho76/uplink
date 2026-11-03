@@ -112,6 +112,9 @@ func (m model) previewBody(width, height int) string {
 	if observation := m.state.Observation(it.id()); observation.Status == target.StatusUnknown && observation.Reason != "" {
 		b.WriteString(labelStyle.Render(clip(observation.Reason, width)) + "\n")
 	}
+	if connection := m.state.Connection(); connection.Target == it.id() && connection.Cancellable() {
+		b.WriteString(modeMarker.Render("connecting") + "  " + keyStyle.Render("esc") + " " + labelStyle.Render("cancel") + "\n")
+	}
 
 	if m.showsLive(it.target) {
 		b.WriteString("\n" + rule("live", width))

@@ -21,8 +21,9 @@ type (
 		Err       error
 	}
 
-	ConnectRequested struct{}
-	ConnectionEnded  struct {
+	ConnectRequested    struct{}
+	ConnectionCancelled struct{}
+	ConnectionEnded     struct {
 		Name string
 		Err  error
 	}
@@ -70,25 +71,26 @@ type (
 	NoticeSet struct{ Text string }
 )
 
-func (Started) isEvent()          {}
-func (Ticked) isEvent()           {}
-func (Selected) isEvent()         {}
-func (ModeCycled) isEvent()       {}
-func (PowerRequested) isEvent()   {}
-func (PowerDone) isEvent()        {}
-func (ConnectRequested) isEvent() {}
-func (ConnectionEnded) isEvent()  {}
-func (LogsOpened) isEvent()       {}
-func (LogsClosed) isEvent()       {}
-func (LogTicked) isEvent()        {}
-func (LogsPeeked) isEvent()       {}
-func (LogsViewed) isEvent()       {}
-func (Checked) isEvent()          {}
-func (ReloadRequested) isEvent()  {}
-func (Inspected) isEvent()        {}
-func (ConfigRead) isEvent()       {}
-func (DiscoveryDone) isEvent()    {}
-func (NoticeSet) isEvent()        {}
+func (Started) isEvent()             {}
+func (Ticked) isEvent()              {}
+func (Selected) isEvent()            {}
+func (ModeCycled) isEvent()          {}
+func (PowerRequested) isEvent()      {}
+func (PowerDone) isEvent()           {}
+func (ConnectRequested) isEvent()    {}
+func (ConnectionCancelled) isEvent() {}
+func (ConnectionEnded) isEvent()     {}
+func (LogsOpened) isEvent()          {}
+func (LogsClosed) isEvent()          {}
+func (LogTicked) isEvent()           {}
+func (LogsPeeked) isEvent()          {}
+func (LogsViewed) isEvent()          {}
+func (Checked) isEvent()             {}
+func (ReloadRequested) isEvent()     {}
+func (Inspected) isEvent()           {}
+func (ConfigRead) isEvent()          {}
+func (DiscoveryDone) isEvent()       {}
+func (NoticeSet) isEvent()           {}
 
 type Effect interface{ isEffect() }
 
